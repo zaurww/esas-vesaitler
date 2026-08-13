@@ -743,7 +743,7 @@ function openCard(id){
         <span class="num">${pct(r6.applied)}</span></div>
     </div>
     ${r6.below_ceiling ? `<div class="note" style="margin:8px 0">Hədddən aşağı dərəcə
-      seçilib — qanunidir, lakin şüurlu qərar olmalıdır.</div>` : ''}`;
+      seçilib — qanunidir, lakin məntiqli qərar olmalıdır.</div>` : ''}`;
   h += step('Amortizasiya', card.depreciation);
   if (parseFloat(card.writeoff)) h += step('Silinmə', card.writeoff);
   h += step('7 · Qalıq (il sonu)', card.closing, 'res');

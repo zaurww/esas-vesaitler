@@ -524,7 +524,7 @@ def compute_year(data: ClientData, year: int,
             result.warnings.append(
                 f"{cat.name_az}: tətbiq olunan dərəcə {cat.rate.applied:.0%} "
                 f"m.114.3 normasından ({cat.rate.statutory_max:.0%}) aşağıdır — "
-                f"bu qanunidir, lakin şüurlu qərar olmalıdır."
+                f"bu qanunidir, lakin məntiqli qərar olmalıdır."
             )
         # (the unused-coefficient notice is raised once below, not per category)
         for c in cat.cards:
