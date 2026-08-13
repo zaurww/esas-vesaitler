@@ -140,7 +140,12 @@ class ClientData:
         return rows[-1] if rows else None
 
     def closed_years(self) -> set[int]:
-        """Year N is closed once an opening balance for N+1 exists with source=year_close."""
+        """Locked years: their facts are frozen because the return was filed.
+
+        Locking is a deliberate act and is now independent of how balances
+        move between years -- those carry forward on their own (§6). A lock
+        also stores a snapshot, which is what `ev.py verify` checks against.
+        """
         return {
             ob.year - 1
             for ob in self.opening_balances

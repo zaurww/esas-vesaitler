@@ -60,6 +60,7 @@ class CardResult:
     writeoff: Decimal = ZERO
     closing: Decimal = ZERO
 
+    opening_source: str = "none"      # explicit | carried | none
     threshold_hit: bool = False       # opening residual trips it -> this year
     threshold_reason: str = ""
     threshold_next: bool = False      # closing residual trips it -> next year
@@ -173,6 +174,7 @@ class YearResult:
     use_coefficient: bool
     engine_version: str
     format_version: int
+    carried_from_prev: bool = False   # opening balances chained from year-1
     categories: list[CategoryResult] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     open_questions: list[str] = field(default_factory=list)
@@ -236,7 +238,27 @@ def threshold_test(card: "CardResult", residual: Decimal,
     return bool(reasons), "; ".join(reasons)
 
 
-def compute_year(data: ClientData, year: int) -> YearResult:
+def compute_year(data: ClientData, year: int,
+                 _cache: dict | None = None, _depth: int = 0) -> YearResult:
+    """Compute one year.
+
+    Opening balances resolve PER ASSET, most specific first:
+
+        1. an explicit row in opening_balances.tsv for (year, asset)
+           -- onboarding, a correction, or a snapshot written by a lock;
+        2. otherwise the asset's closing balance from the previous year,
+           computed by running that year too;
+        3. otherwise zero.
+
+    Rule 2 is why a client whose data starts in 2024 can be entered as 2024,
+    then 2025, then 2026 without any ceremony in between. Carrying balances
+    forward is arithmetic, not an act -- §2 says results are computed. What
+    IS an act is locking a year, and that is now a separate thing (§6).
+    """
+    if _cache is None:
+        _cache = {}
+    if year in _cache:
+        return _cache[year]
     status_row = data.status_for(year)
     if status_row is None:
         raise CalcError(
@@ -264,7 +286,20 @@ def compute_year(data: ClientData, year: int) -> YearResult:
     )
 
     assets = {a.asset_id: a for a in data.assets}
-    opening = {ob.asset_id: ob for ob in data.opening_balances if ob.year == year}
+    explicit = {ob.asset_id: ob.residual
+                for ob in data.opening_balances if ob.year == year}
+
+    # Chain back to the previous year for anything not stated explicitly.
+    # _depth guards against a corrupt start_year sending this into a loop.
+    carried: dict[str, Decimal] = {}
+    prev_ok = False
+    if (year > data.start_year and _depth < 40
+            and data.status_for(year - 1) is not None):
+        prev = compute_year(data, year - 1, _cache, _depth + 1)
+        prev_ok = True
+        for c in prev.cards:
+            if c.closing > ZERO:
+                carried[c.asset_id] = c.closing
     disposals = {d.asset_id: d for d in data.disposals
                  if d.date is not None and d.date.year == year}
     writeoffs = {w.asset_id for w in data.writeoffs if w.year == year}
@@ -324,17 +359,23 @@ def compute_year(data: ClientData, year: int) -> YearResult:
     for aid, asset in assets.items():
         if CATEGORY_BY_CODE[asset.category].kind != "ev":
             continue
-        ob = opening.get(aid)
+        if aid in explicit:
+            open_val, open_src = explicit[aid], "explicit"
+        elif aid in carried:
+            open_val, open_src = carried[aid], "carried"
+        else:
+            open_val, open_src = ZERO, "none"
         acq = ZERO
         if asset.in_date is not None and asset.in_date.year == year:
             acq = asset.cost
-        if ob is None and acq == ZERO:
+        if open_val == ZERO and acq == ZERO:
             continue  # the asset does not exist in this year yet, or any more
         cards[aid] = CardResult(
             asset_id=aid, inv_no=asset.inv_no, name=asset.name,
             category=asset.category, in_date=asset.in_date, cost=asset.cost,
             is_legacy_pool=asset.is_legacy_pool,
-            opening=ob.residual if ob else ZERO,
+            opening=open_val,
+            opening_source=open_src,
             acquisition=acq,
             addition=additions.get(aid, ZERO),
             cost_prior=asset.cost + additions_prior.get(aid, ZERO),
@@ -530,6 +571,9 @@ def compute_year(data: ClientData, year: int) -> YearResult:
                 f"{abs(c.gain_loss):.2f} AZN (satış {c.proceeds:.2f} − qalıq {c.disposed:.2f}). "
                 f"Bəyannamədə əks etdirilməsi həll olunmayıb — CLAUDE.md §12.1."
             )
+    result.carried_from_prev = any(
+        c.opening_source == "carried" for c in result.cards)
+    _cache[year] = result
     if result.is_closed:
         result.warnings.append(
             f"{year} ili BAĞLIDIR — hesabat arxivdir, dəyişiklik qəbul edilmir (§6)."
