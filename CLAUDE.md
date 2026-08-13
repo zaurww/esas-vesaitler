@@ -83,6 +83,7 @@ clients/<client-slug>/
    opening_balances.tsv     входное сальдо года (append-only)   ← факт-отсечка
    disposals.tsv            выбытия
    repairs.tsv              фактические расходы на ремонт (ст. 115)
+   additions.tsv            дооборудование — капитальное увеличение стоимости
    taxpayer_status.tsv      статус предпринимателя по годам
    rate_elections.tsv       выбранная ставка по годам и категориям
    writeoffs.tsv            решения о списании по порогу 500/5%
