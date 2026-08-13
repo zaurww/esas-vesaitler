@@ -38,7 +38,7 @@ HEADERS: dict[str, list[str]] = {
     "disposals.tsv": ["asset_id", "date", "type", "proceeds"],
     "repairs.tsv": ["year", "asset_id", "date", "amount", "note"],
     "additions.tsv": ["year", "asset_id", "date", "amount", "note"],
-    "taxpayer_status.tsv": ["year", "status", "basis"],
+    "taxpayer_status.tsv": ["year", "status", "basis", "use_coefficient"],
     "rate_elections.tsv": ["year", "category", "applied_rate", "asset_id"],
     "writeoffs.tsv": ["year", "asset_id", "reason"],
     "changelog.tsv": ["timestamp", "user", "action", "asset_id", "field",
@@ -466,14 +466,22 @@ def set_status(root: Path, slug: str, p: dict) -> str:
     with transaction(root, slug, "status.set") as tx:
         guard_open_year(root, slug, year)
         rows = rows_of(root, slug, "taxpayer_status.tsv")
+        use = "" if p.get("use_coefficient") else "0"
         old = next((r for r in rows if r["year"] == str(year)), None)
         if old:
-            tx.log("", f"status {year}", old["status"], status)
+            if old["status"] != status:
+                tx.log("", f"status {year}", old["status"], status)
+            if old.get("use_coefficient", "") != use:
+                tx.log("", f"əmsal {year}",
+                       "istifadə" if old.get("use_coefficient", "") != "0" else "imtina",
+                       "istifadə" if use != "0" else "imtina")
             old["status"] = status
             old["basis"] = str(p.get("basis", old.get("basis", ""))).strip()
+            old["use_coefficient"] = use
         else:
             rows.append({"year": str(year), "status": status,
-                         "basis": str(p.get("basis", "")).strip()})
+                         "basis": str(p.get("basis", "")).strip(),
+                         "use_coefficient": use})
             tx.log("", f"status {year}", "", status)
         save_rows(root, slug, "taxpayer_status.tsv", rows)
     return status

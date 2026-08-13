@@ -1128,10 +1128,16 @@ function formStatus(year){
       [['mikro','Mikro sahibkar (×2)'],['kicik','Kiçik sahibkar (×1.5)'],
        ['orta','Orta sahibkar (×1)'],['iri','İri sahibkar (×1)']]
       .map(([v,t]) => `<option value="${v}" ${v===cur?'selected':''}>${t}</option>`).join('')}) +
-    fld('basis','Əsas',{placeholder:'İllik dövriyyə, işçi sayı…',
-        hint:'Əmsal hüquqdur, məcburiyyət deyil: status onu yalnız yuxarı həddi '
-           + 'qaldırır, tətbiq etmək üçün dərəcəni ayrıca seçmək lazımdır.'}),
-    d => post('status.set', d));
+    fld('basis','Əsas',{placeholder:'İllik dövriyyə, işçi sayı…'}) +
+    `<div class="fld"><label style="display:flex;gap:8px;align-items:flex-start">
+       <input type="checkbox" name="no_coefficient" style="width:auto;margin-top:3px"
+         ${REPORT && REPORT.use_coefficient === false ? 'checked' : ''}>
+       <span><strong>Əmsalsız hesabla</strong>
+         <div class="h" style="margin:2px 0 0">Sahibkarlıq əmsalından imtina:
+           yuxarı hədd m.114.3 normasında qalır və hesabat əmsalı təklif etmir.
+           Status faktdır, əmsaldan istifadə isə qərardır — ayrıca saxlanılır.</div>
+       </span></label></div>`,
+    d => post('status.set', {...d, use_coefficient: !d.no_coefficient}));
 }
 
 /* ---- write-off decision & delete ---- */

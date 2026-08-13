@@ -11,3 +11,8 @@
 2026-08-13T10:15:06+00:00	Zaur	asset.create	AV-010	asset		[carried] YT-0001 Notbuk Dell Latitude
 2026-08-13T10:15:06+00:00	Zaur	asset.create	AV-010	opening_balance 2025		1800
 2026-08-13T10:16:06+00:00	Zaur	addition.add	AV-010	addition 2025-06-11		600.00
+2026-08-13T10:30:00+00:00	Zaur	asset.create	AV-011	asset		[new]  Toyota corolla
+2026-08-13T10:30:25+00:00	Zaur	status.set		status 2026		iri
+2026-08-13T10:30:40+00:00	Zaur	asset.delete	AV-009	asset	 toyota corolla	silindi
+2026-08-13T10:30:45+00:00	Zaur	status.set		əmsal 2025	istifadə	imtina
+2026-08-13T10:30:45+00:00	Zaur	status.set		əmsal 2025	imtina	istifadə

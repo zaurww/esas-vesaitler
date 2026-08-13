@@ -226,8 +226,13 @@ def load_client(root: Path, slug: str) -> ClientData:
         st = r.get("status", "").strip()
         if st not in ("mikro", "kicik", "orta", "iri"):
             raise DataError(f"{w}: naməlum status {st!r}")
+        use = r.get("use_coefficient", "").strip().lower()
         data.statuses.append(TaxpayerStatus(
-            year=_int(r.get("year", ""), w), status=st, basis=r.get("basis", "").strip(),
+            year=_int(r.get("year", ""), w), status=st,
+            basis=r.get("basis", "").strip(),
+            # absent column means "take it": that was the behaviour before the
+            # waiver existed, and old files must keep computing the same way
+            use_coefficient=use not in ("0", "false", "no", "yox"),
         ))
 
     for r in read_tsv(folder / "rate_elections.tsv"):

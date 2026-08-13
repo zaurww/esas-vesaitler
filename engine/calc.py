@@ -170,6 +170,7 @@ class YearResult:
     is_closed: bool
     status: str
     status_name: str
+    use_coefficient: bool
     engine_version: str
     format_version: int
     categories: list[CategoryResult] = field(default_factory=list)
@@ -244,6 +245,10 @@ def compute_year(data: ClientData, year: int) -> YearResult:
         )
 
     mult = multiplier(year, status_row.status)
+    if not status_row.use_coefficient:
+        # The right is waived for the year: the ceiling drops to the plain
+        # article 114.3 norm and the report stops suggesting the coefficient.
+        mult = mult._replace(coefficient=D("1"))
     result = YearResult(
         client_name=data.client_name,
         voen=data.voen,
@@ -251,7 +256,9 @@ def compute_year(data: ClientData, year: int) -> YearResult:
         year=year,
         is_closed=year in data.closed_years(),
         status=status_row.status,
-        status_name=STATUS_NAMES[status_row.status],
+        status_name=STATUS_NAMES[status_row.status]
+        + ("" if status_row.use_coefficient else " · əmsalsız"),
+        use_coefficient=status_row.use_coefficient,
         engine_version=ENGINE_VERSION,
         format_version=data.format_version,
     )

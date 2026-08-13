@@ -64,6 +64,7 @@ def serialize(r) -> dict:
         "is_closed": r.is_closed,
         "status": r.status,
         "status_name": r.status_name,
+        "use_coefficient": r.use_coefficient,
         "engine_version": r.engine_version,
         "format_version": r.format_version,
         "months": MONTHS_AZ,

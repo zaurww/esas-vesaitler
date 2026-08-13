@@ -72,9 +72,18 @@ class Repair:
 
 @dataclass(frozen=True)
 class TaxpayerStatus:
+    """What the taxpayer IS in a given year, plus whether they take the
+    coefficient that status entitles them to.
+
+    Two different things, kept apart on purpose: the status is a fact (set by
+    turnover and headcount), while waiving the coefficient is a decision.
+    Folding "micro without the coefficient" into a single status value would
+    throw the fact away -- the client would stop being micro in the records.
+    """
     year: int
     status: str                              # mikro | kicik | orta | iri
     basis: str = ""
+    use_coefficient: bool = True
 
 
 @dataclass(frozen=True)
