@@ -196,6 +196,7 @@
   <select id="year"></select>
   <div class="spacer"></div>
   <span class="ver" id="ver"></span>
+  <button class="btn" onclick="formClient()">+ Müştəri</button>
   <button class="btn" onclick="formAsset()">+ Yeni ƏV</button>
   <button class="btn" onclick="formImport()">⇪ İdxal</button>
   <a class="btn" id="export" href="#">⬇ Excel-ə ixrac</a>
@@ -255,6 +256,46 @@ const esc = s => String(s??'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;',
 
 let CTX = null, REPORT = null, TAB = 'annual', FILTER = '', CATFILTER = '';
 
+/* A fresh install has no clients at all. Say so and offer the one action
+   that makes sense, instead of an empty screen. */
+let NEWCLIENT = null;
+
+function welcome(){
+  const box = document.getElementById('error');
+  box.style.display = 'block';
+  box.style.background = '#eef3f9';
+  box.style.borderColor = '#8fa8c8';
+  box.style.color = '#2c4a70';
+  box.innerHTML = `<strong>Hələ heç bir müştəri yoxdur</strong><br>
+    Başlamaq üçün müştəri yaradın — proqram bütün lazımi faylları özü
+    yaradacaq. Sonra ƏV-ləri əl ilə və ya Excel-dən idxal edərək əlavə edin.
+    <div class="acts" style="margin:10px 0 0">
+      <button onclick="formClient()">Yeni müştəri yarat</button>
+    </div>`;
+  document.getElementById('view').innerHTML = '';
+  document.getElementById('side').innerHTML = '';
+  document.getElementById('kpis').innerHTML = '';
+  document.getElementById('carry').innerHTML = '';
+  document.getElementById('sub').textContent = '';
+}
+
+function formClient(){
+  const y = new Date().getFullYear();
+  openModal('Yeni müştəri',
+    fld('client_name','Müştərinin adı',{req:true,placeholder:'«Demo» MMC'}) +
+    `<div class="row2">
+      ${fld('voen','VÖEN',{placeholder:'1400123456'})}
+      ${fld('start_year','Uçotun başlanğıc ili',{type:'number',value:y,req:true,
+            hint:'Ən erkən il, hansı üçün məlumat var'})}</div>` +
+    fld('status','Sahibkarlıq statusu',{type:'select',req:true,options:
+      [['mikro','Mikro sahibkar (×2)'],['kicik','Kiçik sahibkar (×1.5)'],
+       ['orta','Orta sahibkar (×1)'],['iri','İri sahibkar (×1)']]
+      .map(([v,t]) => `<option value="${v}" ${v==='orta'?'selected':''}>${t}</option>`).join('')}) +
+    `<div class="h">Bütün fayllar <code>clients/&lt;ad&gt;/</code> qovluğunda
+      yaradılacaq. Sonradan hər şeyi dəyişmək olar.</div>`,
+    async d => { NEWCLIENT = (await post('client.create', d)).result; }, 'Yarat');
+}
+
 function needStatus(year){
   const box = document.getElementById('error');
   box.style.display = 'block';
@@ -302,6 +343,7 @@ async function boot(){
 function fillYears(){
   const c = CTX.clients.find(x => x.slug === document.getElementById('client').value);
   const ys = document.getElementById('year');
+  if (!c){ ys.innerHTML = ''; return; }
   ys.innerHTML = (c.years || []).map(y =>
     `<option value="${y}">${y}${c.closed_years.includes(y) ? ' · bağlı' : ''}</option>`).join('');
   // Open on a year that computes, not merely the newest one present.
@@ -310,6 +352,7 @@ function fillYears(){
 
 async function load(){
   const slug = document.getElementById('client').value;
+  if (!slug) return welcome();
   const year = document.getElementById('year').value;
   const cinfo = CTX.clients.find(x => x.slug === slug);
   if (cinfo && cinfo.error) return fail(cinfo.error);
@@ -831,6 +874,11 @@ async function submitModal(e){
     await MSUBMIT(data);
     closeModal();
     CTX = await (await fetch('/api/context')).json();
+    // A newly created client is not in the picker yet; rebuild and select it.
+    const cs = document.getElementById('client');
+    cs.innerHTML = CTX.clients.map(c =>
+      `<option value="${c.slug}">${esc(c.name)} · ${esc(c.slug)}</option>`).join('');
+    if (NEWCLIENT){ cs.value = NEWCLIENT; NEWCLIENT = null; fillYears(); }
     await load();
   } catch (err) {
     // A wizard step transition is not a failure -- keep the modal open.

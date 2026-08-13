@@ -27,7 +27,7 @@ from typing import Any, Iterator
 
 from .calc import compute_year
 from . import rates
-from .rates import CATEGORY_BY_CODE, ENGINE_VERSION
+from .rates import CATEGORY_BY_CODE, ENGINE_VERSION, FORMAT_VERSION
 from .storage import DataError, load_client, read_tsv, write_tsv
 
 D = Decimal
@@ -453,6 +453,81 @@ def remove_addition(root: Path, slug: str, p: dict) -> str:
     return aid
 
 
+SLUG_MAP = str.maketrans({
+    "ə": "e", "ç": "c", "ş": "s", "ğ": "g", "ı": "i", "ö": "o", "ü": "u",
+    "Ə": "e", "Ç": "c", "Ş": "s", "Ğ": "g", "İ": "i", "Ö": "o", "Ü": "u",
+    "а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e", "ж": "j",
+    "з": "z", "и": "i", "й": "y", "к": "k", "л": "l", "м": "m", "н": "n",
+    "о": "o", "п": "p", "р": "r", "с": "s", "т": "t", "у": "u", "ф": "f",
+    "х": "h", "ц": "c", "ч": "c", "ш": "s", "щ": "s", "ы": "i", "э": "e",
+    "ю": "u", "я": "a", "ъ": "", "ь": "",
+})
+
+
+def slugify(name: str) -> str:
+    """Folder name from a company name. ASCII only: the folder is a path on
+    someone else's Windows machine, and it is also the client's id in URLs."""
+    s = str(name or "").strip().lower().translate(SLUG_MAP)
+    s = re.sub(r"[^a-z0-9]+", "-", s).strip("-")
+    return s or "musteri"
+
+
+def create_client(root: Path, _slug: str, p: dict) -> str:
+    """Create a client folder with every file the engine expects.
+
+    A fresh install has no clients and no way to make one, which left the
+    worker looking at an empty screen on day one. The files are created here,
+    with headers only, so the store is valid from the first second rather
+    than materialising piece by piece as features get used.
+    """
+    name = str(p.get("client_name", "")).strip()
+    if not name:
+        raise DataError("Müştərinin adı boş ola bilməz")
+    voen = str(p.get("voen", "")).strip()
+    try:
+        year = int(p.get("start_year") or 0)
+    except ValueError:
+        raise DataError("İl düzgün deyil") from None
+    if not (1990 < year < 2100):
+        raise DataError(f"Başlanğıc il düzgün deyil: {p.get('start_year')!r}")
+    status = str(p.get("status", "orta")).strip()
+    if status not in ("mikro", "kicik", "orta", "iri"):
+        raise DataError("Status: mikro | kicik | orta | iri")
+
+    slug = slugify(p.get("slug") or name)
+    folder = root / "clients" / slug
+    if folder.exists():
+        raise DataError(f"«{slug}» qovluğu artıq mövcuddur")
+    folder.mkdir(parents=True)
+
+    try:
+        (folder / "config.toml").write_text(
+            f'client_name = "{name}"\n'
+            f'voen = "{voen}"\n'
+            f'start_year = {year}\n'
+            f'format_version = {FORMAT_VERSION}\n',
+            encoding="utf-8-sig", newline="\n",
+        )
+        for fname, header in HEADERS.items():
+            write_tsv(folder / fname, header, [])
+        # A year with no taxpayer status cannot be computed, so seed the one
+        # the client starts in -- otherwise the first screen is an error.
+        save_rows(root, slug, "taxpayer_status.tsv",
+                  [{"year": str(year), "status": status, "basis": "",
+                    "use_coefficient": ""}])
+        save_rows(root, slug, "changelog.tsv", [{
+            "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "user": getpass.getuser(), "action": "client.create",
+            "asset_id": "", "field": "client", "old_value": "",
+            "new_value": f"{name} ({slug})",
+        }])
+        load_client(root, slug)          # must parse before we hand it back
+    except BaseException:
+        shutil.rmtree(folder, ignore_errors=True)
+        raise
+    return slug
+
+
 def close_year(root: Path, slug: str, p: dict) -> str:
     """Close a year: write its closing balances as next year's opening ones.
 
@@ -857,6 +932,7 @@ ACTIONS = {
     "writeoff.set": set_writeoff,
     "election.set": set_election,
     "status.set": set_status,
+    "client.create": create_client,
     "year.close": close_year,
     "year.reopen": reopen_year,
 }
