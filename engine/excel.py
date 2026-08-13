@@ -22,7 +22,8 @@ HEAD_FILL = PatternFill("solid", fgColor="1F3A5F")
 HEAD_FONT = Font(bold=True, color="FFFFFF", size=10)
 SUB_FILL = PatternFill("solid", fgColor="E8EDF3")
 TOTAL_FILL = PatternFill("solid", fgColor="D6DEE8")
-WARN_FILL = PatternFill("solid", fgColor="FFF3CD")
+WARN_FILL = PatternFill("solid", fgColor="FFF3CD")   # trips the threshold now
+NEXT_FILL = PatternFill("solid", fgColor="EAF2FB")   # will trip it next year
 THIN = Side(style="thin", color="B8C4D4")
 BORDER = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
 
@@ -53,11 +54,13 @@ def _sheet_summary(wb: Workbook, r: YearResult) -> None:
     ws["A2"].font = Font(size=9, color="5A6B80")
 
     _header(ws, 4, ["Kateqoriya", "Dərəcə", "Qalıq (il əvvəli)", "Daxilolma",
-                    "Xaricetmə", "Amortizasiya", "Silinmə (500/5%)", "Qalıq (il sonu)"])
+                    "Kapital. təmir", "Xaricetmə", "Amortizasiya",
+                    "Silinmə (500/5%)", "Qalıq (il sonu)"])
     row = 5
     for cat in r.categories:
         vals = [cat.name_az, _f(cat.rate.applied), _f(cat.opening), _f(cat.acquisition),
-                _f(cat.disposed), _f(cat.depreciation), _f(cat.writeoff), _f(cat.closing)]
+                _f(cat.repair_capitalized), _f(cat.disposed), _f(cat.depreciation),
+                _f(cat.writeoff), _f(cat.closing)]
         for i, v in enumerate(vals, start=1):
             c = ws.cell(row, i, v)
             c.border = BORDER
@@ -68,15 +71,16 @@ def _sheet_summary(wb: Workbook, r: YearResult) -> None:
         row += 1
 
     t = r.totals
-    vals = ["C Ə M İ", None, _f(t["opening"]), _f(t["acquisition"]), _f(t["disposed"]),
-            _f(t["depreciation"]), _f(t["writeoff"]), _f(t["closing"])]
+    vals = ["C Ə M İ", None, _f(t["opening"]), _f(t["acquisition"]),
+            _f(t["repair_capitalized"]), _f(t["disposed"]), _f(t["depreciation"]),
+            _f(t["writeoff"]), _f(t["closing"])]
     for i, v in enumerate(vals, start=1):
         c = ws.cell(row, i, v)
         c.fill, c.font, c.border = TOTAL_FILL, Font(bold=True), BORDER
         if i > 2:
             c.number_format = MONEY
     ws.freeze_panes = "A5"
-    _widths(ws, [34, 10, 18, 16, 16, 16, 18, 18])
+    _widths(ws, [34, 10, 18, 16, 16, 16, 16, 18, 18])
 
     row += 3
     ws.cell(row, 1, "Dərəcənin hesablanması").font = Font(bold=True, size=11)
@@ -100,34 +104,38 @@ def _sheet_summary(wb: Workbook, r: YearResult) -> None:
 def _sheet_cards(wb: Workbook, r: YearResult) -> None:
     ws = wb.create_sheet("Kartlar")
     _header(ws, 1, ["⚠", "Kod", "İnv.№", "Adı", "Alış tarixi", "İlkin dəyər",
-                    "Qalıq (il əvvəli)", "Daxilolma", "Xaricetmə", "Dərəcə",
-                    "Amortizasiya", "Silinmə", "Qalıq (il sonu)"])
+                    "Qalıq (il əvvəli)", "Daxilolma", "Kapital. təmir",
+                    "Xaricetmə", "Dərəcə", "Amortizasiya", "Silinmə",
+                    "Qalıq (il sonu)"])
     row = 2
     for cat in r.categories:
         c = ws.cell(row, 1, cat.name_az)
-        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=13)
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=14)
         c.fill, c.font = SUB_FILL, Font(bold=True)
         row += 1
         for card in cat.cards:
-            flag = "⚠" if card.threshold_hit else ("→" if card.disposal_type else "")
+            flag = ("⚠" if card.threshold_hit else "◐" if card.threshold_next
+                    else "→" if card.disposal_type else "")
             vals = [flag, card.category, card.inv_no,
                     card.name + (" (legacy pool)" if card.is_legacy_pool else ""),
                     card.in_date.isoformat() if card.in_date else "",
                     _f(card.cost), _f(card.opening), _f(card.acquisition),
-                    _f(card.disposed), _f(card.rate), _f(card.depreciation),
-                    _f(card.writeoff), _f(card.closing)]
+                    _f(card.repair_capitalized), _f(card.disposed), _f(card.rate),
+                    _f(card.depreciation), _f(card.writeoff), _f(card.closing)]
             for i, v in enumerate(vals, start=1):
                 cell = ws.cell(row, i, v)
                 cell.border = BORDER
-                if i == 10:
+                if i == 11:
                     cell.number_format = PCT
                 elif i >= 6:
                     cell.number_format = MONEY
                 if card.threshold_hit:
                     cell.fill = WARN_FILL
+                elif card.threshold_next:
+                    cell.fill = NEXT_FILL
             row += 1
     ws.freeze_panes = "A2"
-    _widths(ws, [4, 7, 12, 32, 13, 15, 17, 14, 14, 9, 15, 13, 17])
+    _widths(ws, [4, 7, 12, 32, 13, 15, 17, 14, 14, 14, 9, 15, 13, 17])
 
 
 def _sheet_monthly(wb: Workbook, r: YearResult) -> None:

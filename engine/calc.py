@@ -58,8 +58,10 @@ class CardResult:
     writeoff: Decimal = ZERO
     closing: Decimal = ZERO
 
-    threshold_hit: bool = False
+    threshold_hit: bool = False       # opening residual trips it -> this year
     threshold_reason: str = ""
+    threshold_next: bool = False      # closing residual trips it -> next year
+    threshold_next_reason: str = ""
     written_off: bool = False
     disposal_type: str = ""
     disposal_date: Optional[date] = None
@@ -138,6 +140,10 @@ class YearResult:
     def threshold_cards(self) -> list[CardResult]:
         return [c for c in self.cards if c.threshold_hit]
 
+    @property
+    def threshold_next_cards(self) -> list[CardResult]:
+        return [c for c in self.cards if c.threshold_next]
+
 
 MONTHS_AZ = ["Yanvar", "Fevral", "Mart", "Aprel", "May", "İyun",
              "İyul", "Avqust", "Sentyabr", "Oktyabr", "Noyabr", "Dekabr"]
@@ -156,6 +162,26 @@ def split_monthly(annual: Decimal) -> list[Decimal]:
     out = [per] * 11
     out.append(money(annual - per * 11))
     return out
+
+
+def threshold_test(card: "CardResult", residual: Decimal) -> tuple[bool, str]:
+    """The 500 AZN / 5%-of-initial-cost test (art. 114).
+
+    A legacy pool row carries no initial cost of its own, so only the flat
+    500 AZN half of the test applies to it (§6.1).
+    """
+    if residual <= ZERO:
+        return False, ""
+    reasons = []
+    if residual < THRESHOLD_ABS:
+        reasons.append(f"qalıq {residual:.2f} < {THRESHOLD_ABS} AZN")
+    if not card.is_legacy_pool and card.cost > ZERO \
+            and residual < card.cost * THRESHOLD_PCT:
+        reasons.append(
+            f"qalıq {residual:.2f} < ilkin dəyərin 5%-i "
+            f"({money(card.cost * THRESHOLD_PCT)} AZN)"
+        )
+    return bool(reasons), "; ".join(reasons)
 
 
 def compute_year(data: ClientData, year: int) -> YearResult:
@@ -291,18 +317,7 @@ def compute_year(data: ClientData, year: int) -> YearResult:
 
         # step 5: the 500/5% test runs on the pre-depreciation residual,
         # measured against the asset's initial cost
-        if c.opening > ZERO:
-            reasons = []
-            if c.opening < THRESHOLD_ABS:
-                reasons.append(f"qalıq {c.opening:.2f} < {THRESHOLD_ABS} AZN")
-            if not c.is_legacy_pool and c.cost > ZERO and c.opening < c.cost * THRESHOLD_PCT:
-                reasons.append(
-                    f"qalıq {c.opening:.2f} < ilkin dəyərin 5%-i "
-                    f"({money(c.cost * THRESHOLD_PCT)} AZN)"
-                )
-            if reasons:
-                c.threshold_hit = True
-                c.threshold_reason = "; ".join(reasons)
+        c.threshold_hit, c.threshold_reason = threshold_test(c, c.opening)
 
         if c.threshold_hit and c.asset_id in writeoffs:
             c.written_off = True
@@ -317,6 +332,13 @@ def compute_year(data: ClientData, year: int) -> YearResult:
                 c.depreciation = money(c.base)
             c.closing = money(c.base - c.depreciation)
         c.monthly = split_monthly(c.depreciation)
+
+        # Same test against the closing residual. That residual becomes next
+        # year's opening balance, so this is a reliable forecast of which
+        # assets will fall under the threshold in the year ahead. It does NOT
+        # write anything off now -- see CLAUDE.md §12.6.
+        if not c.written_off:
+            c.threshold_next, c.threshold_next_reason = threshold_test(c, c.closing)
 
     # -- roll the cards up into categories ----------------------------------
     for code in EV_CODES:
@@ -384,6 +406,11 @@ def compute_year(data: ClientData, year: int) -> YearResult:
                     f"{c.rate_info.applied:.0%} (kateqoriya üzrə "
                     f"{cat.rate.applied:.0%}, hədd {c.rate_info.ceiling:.0%})."
                 )
+    for c in result.threshold_next_cards:
+        result.warnings.append(
+            f"{c.inv_no or c.name}: il sonuna qalıq {c.closing:.2f} AZN — "
+            f"{year + 1}-ci ildə 500/5% həddinə düşəcək ({c.threshold_next_reason})."
+        )
     for c in result.threshold_cards:
         if not c.written_off:
             result.warnings.append(

@@ -63,6 +63,20 @@
   .filter:focus{outline:2px solid var(--accent); outline-offset:-1px}
   .hint{font-size:12px;color:var(--muted)}
 
+  /* ---------- category sidebar ---------- */
+  .layout{display:grid; grid-template-columns:212px minmax(0,1fr); gap:14px; align-items:start}
+  @media (max-width:900px){ .layout{grid-template-columns:1fr} }
+  .side{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius);
+        padding:6px; position:sticky; top:70px}
+  .side button{
+    display:block; width:100%; text-align:left; background:none; border:0;
+    border-radius:7px; padding:8px 10px; cursor:pointer; color:var(--ink);
+  }
+  .side button:hover{background:var(--accent-soft)}
+  .side button[aria-current=true]{background:var(--accent); color:#fff}
+  .side .n{display:block; font-size:11px; opacity:.7; font-variant-numeric:tabular-nums}
+  .side hr{border:0; border-top:1px solid var(--line); margin:6px 4px}
+
   /* ---------- tables ---------- */
   .card{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); overflow:hidden; margin-bottom:14px}
   /* Own scroll context so the header pins predictably and the page body
@@ -70,6 +84,7 @@
   .scroll{overflow:auto; max-height:calc(100vh - 250px)}
   table{border-collapse:collapse; width:100%; font-size:13px}
   th,td{padding:8px 10px; border-bottom:1px solid var(--line); text-align:left}
+  td.d{white-space:nowrap}          /* dates must never wrap onto two lines */
   thead th{
     position:sticky; top:0; background:var(--accent-soft); color:var(--accent);
     font-size:11px; text-transform:uppercase; letter-spacing:.4px; z-index:5;
@@ -80,7 +95,8 @@
   tr.cat td{background:#f7f9fc; font-weight:600; border-top:2px solid var(--line)}
   tr.cat .rate{font-weight:400; color:var(--muted); font-size:12px; margin-left:10px}
   tr.total td{background:#eceff4; font-weight:700}
-  tr.warn td{background:var(--warn-bg)}
+  tr.warn td{background:var(--warn-bg)}          /* trips 500/5% this year */
+  tr.next td{background:#eaf2fb}                 /* will trip it next year */
   .tag{
     display:inline-block; font-size:11px; padding:1px 7px; border-radius:99px;
     background:var(--accent-soft); color:var(--accent); margin-left:6px;
@@ -144,7 +160,10 @@
     <span class="hint" id="hint"></span>
   </div>
 
-  <div id="view"></div>
+  <div class="layout">
+    <nav class="side" id="side"></nav>
+    <div id="view"></div>
+  </div>
 </main>
 
 <aside class="drawer" id="drawer">
@@ -160,10 +179,24 @@ const money = s => { const n = parseFloat(s); return n === 0
 const pct = s => (parseFloat(s)*100).toFixed(0) + '%';
 const esc = s => String(s??'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
-let CTX = null, REPORT = null, TAB = 'annual', FILTER = '';
+let CTX = null, REPORT = null, TAB = 'annual', FILTER = '', CATFILTER = '';
+
+function fail(msg){
+  const box = document.getElementById('error');
+  box.style.display = 'block';
+  box.innerHTML = `<strong>Hesablama dayandırıldı</strong><br>${esc(msg)}`;
+  document.getElementById('view').innerHTML = '';
+  document.getElementById('side').innerHTML = '';
+  document.getElementById('kpis').innerHTML = '';
+}
 
 async function boot(){
-  CTX = await (await fetch('/api/context')).json();
+  // §2.1 — never leave a blank screen: any failure here must be visible.
+  try {
+    const r = await fetch('/api/context');
+    CTX = await r.json();
+    if (!r.ok || !CTX.clients) return fail(CTX.error || 'context alınmadı');
+  } catch (e) { return fail(e.message); }
   const cs = document.getElementById('client');
   cs.innerHTML = CTX.clients.map(c => `<option value="${c.slug}">${esc(c.name)}</option>`).join('');
   document.getElementById('ver').textContent = 'engine ' + CTX.engine_version;
@@ -175,27 +208,22 @@ async function boot(){
 function fillYears(){
   const c = CTX.clients.find(x => x.slug === document.getElementById('client').value);
   const ys = document.getElementById('year');
-  ys.innerHTML = c.years.map(y =>
+  ys.innerHTML = (c.years || []).map(y =>
     `<option value="${y}">${y}${c.closed_years.includes(y) ? ' · bağlı' : ''}</option>`).join('');
-  ys.value = c.years[c.years.length-1];
+  if (c.years && c.years.length) ys.value = c.years[c.years.length-1];
 }
 
 async function load(){
   const slug = document.getElementById('client').value;
   const year = document.getElementById('year').value;
+  const cinfo = CTX.clients.find(x => x.slug === slug);
+  if (cinfo && cinfo.error) return fail(cinfo.error);
   document.getElementById('export').href = `/api/export?client=${slug}&year=${year}`;
   const r = await fetch(`/api/report?client=${slug}&year=${year}`);
   const data = await r.json();
-  const errBox = document.getElementById('error');
-  if (!r.ok){
-    // §2.1 — a failed calculation is shown, never replaced by zeros.
-    errBox.style.display = 'block';
-    errBox.innerHTML = `<strong>Hesablama dayandırıldı</strong><br>${esc(data.error)}`;
-    document.getElementById('view').innerHTML = '';
-    document.getElementById('kpis').innerHTML = '';
-    return;
-  }
-  errBox.style.display = 'none';
+  // §2.1 — a failed calculation is shown, never replaced by zeros.
+  if (!r.ok) return fail(data.error);
+  document.getElementById('error').style.display = 'none';
   REPORT = data;
   document.getElementById('sub').textContent =
     `VÖEN ${data.voen} · ${data.status_name}${data.is_closed ? ' · İL BAĞLIDIR' : ''}`;
@@ -220,21 +248,39 @@ function render(){
     TAB === 'monthly' ? 'İllik məbləğ / 12 · yuvarlaqlaşdırma qalığı dekabrda'
     : TAB === 'annual' ? 'Sətrə klikləyin — hesablamanın gedişi' : '';
 
+  renderSide(d);
   document.getElementById('view').innerHTML =
     TAB === 'annual' ? viewAnnual(d) : TAB === 'monthly' ? viewMonthly(d)
     : TAB === 'repair' ? viewRepair(d) : viewNotes(d);
 }
 
+function renderSide(d){
+  const btn = (code, label, sub, on) =>
+    `<button aria-current="${on}" onclick="pickCat('${code}')">${esc(label)}
+       <span class="n">${sub}</span></button>`;
+  let h = btn('', 'Bütün kateqoriyalar',
+              `${cardCount(d)} ƏV · ${fmt.format(parseFloat(d.totals.depreciation))}`,
+              CATFILTER === '') + '<hr>';
+  for (const cat of d.categories){
+    h += btn(cat.code, cat.name_az,
+             `${cat.cards.length} ƏV · ${fmt.format(parseFloat(cat.depreciation))}`,
+             CATFILTER === cat.code);
+  }
+  document.getElementById('side').innerHTML = h;
+}
+
+function pickCat(code){ CATFILTER = (CATFILTER === code) ? '' : code; render(); }
+
 // Article 115: the deductible limit is a percentage of the GROUP's opening
 // residual, while the spend itself is recorded per asset. Anything over the
 // limit is capitalised into that asset's depreciation base (step 3).
 function viewRepair(d){
-  const cats = d.categories.filter(c => parseFloat(c.repair_actual) !== 0);
-  if (!cats.length) return `<div class="card" style="padding:16px">
+  const rc = cats(d).filter(c => parseFloat(c.repair_actual) !== 0);
+  if (!rc.length) return `<div class="card" style="padding:16px">
     ${d.year}-ci il üçün təmir xərci qeyd olunmayıb.
     <div class="hint" style="margin-top:6px">repairs.tsv boşdur.</div></div>`;
   let rows = '';
-  for (const cat of cats){
+  for (const cat of rc){
     rows += `<tr class="cat"><td colspan="6">${esc(cat.name_az)}</td></tr>`;
     for (const c of cat.cards){
       if (parseFloat(c.repair_actual) === 0) continue;
@@ -268,32 +314,41 @@ function viewRepair(d){
 
 const match = c => !FILTER ||
   (c.name + ' ' + c.inv_no + ' ' + c.category).toLowerCase().includes(FILTER);
+// The sidebar narrows the whole report to one category; the text box narrows
+// it further to matching cards. Both are view state, never engine state.
+const cats = d => d.categories.filter(c => !CATFILTER || c.code === CATFILTER);
+const cardCount = d => d.categories.reduce((n, c) => n + c.cards.length, 0);
 
 function viewAnnual(d){
   const head = ['','İnv.№','Adı','Alış tarixi','İlkin dəyər','Qalıq (il əvvəli)',
-                'Daxilolma','Xaricetmə','Dərəcə','Amortizasiya','Silinmə','Qalıq (il sonu)'];
+                'Daxilolma','Kapital. təmir','Xaricetmə','Dərəcə','Amortizasiya',
+                'Silinmə','Qalıq (il sonu)'];
   let rows = '';
-  for (const cat of d.categories){
+  for (const cat of cats(d)){
     const cards = cat.cards.filter(match);
     if (!cards.length) continue;
     const r = cat.rate;
-    rows += `<tr class="cat"><td colspan="12">${esc(cat.name_az)}
+    rows += `<tr class="cat"><td colspan="13">${esc(cat.name_az)}
       <span class="rate">${pct(r.statutory_max)} × ${r.coefficient} (${esc(d.status)})
       = ${pct(r.ceiling)} hədd · tətbiq <strong>${pct(r.applied)}</strong>
       ${cat.mixed_rates ? '<span class="tag">fərdi dərəcələr var</span>'
         : r.below_ceiling ? '<span class="tag w">həddən aşağı</span>' : ''}</span></td></tr>`;
     for (const c of cards){
-      const cls = c.threshold_hit ? 'asset warn' : 'asset';
-      rows += `<tr class="${cls}" onclick="openCard('${c.asset_id}')">
-        <td>${c.threshold_hit ? '⚠' : (c.disposal_type ? '→' : '')}</td>
+      const cls = c.threshold_hit ? 'asset warn'
+                : c.threshold_next ? 'asset next' : 'asset';
+      rows += `<tr class="${cls}" onclick="openCard('${c.asset_id}')"
+        title="${c.threshold_next ? esc(c.threshold_next_reason) : ''}">
+        <td>${c.threshold_hit ? '⚠' : c.threshold_next ? '◐'
+             : (c.disposal_type ? '→' : '')}</td>
         <td>${esc(c.inv_no)}</td>
         <td>${esc(c.name)}${c.is_legacy_pool ? '<span class="tag">qrup qalığı</span>' : ''}
             ${c.written_off ? '<span class="tag w">silindi</span>' : ''}
             ${c.disposal_type ? `<span class="tag d">${esc(c.disposal_type)}</span>` : ''}</td>
-        <td>${esc(c.in_date)}</td>
+        <td class="d">${esc(c.in_date)}</td>
         <td class="num">${money(c.cost)}</td>
         <td class="num">${money(c.opening)}</td>
         <td class="num">${money(c.acquisition)}</td>
+        <td class="num">${money(c.repair_capitalized)}</td>
         <td class="num">${money(c.disposed)}</td>
         <td class="num">${parseFloat(c.rate) ? pct(c.rate) : '<span class="zero">—</span>'}${
           c.rate_info && c.rate_info.source === 'asset'
@@ -304,13 +359,23 @@ function viewAnnual(d){
     }
     rows += `<tr class="total"><td colspan="4">${esc(cat.name_az)} — yekun</td>
       <td class="num"></td><td class="num">${money(cat.opening)}</td>
-      <td class="num">${money(cat.acquisition)}</td><td class="num">${money(cat.disposed)}</td>
+      <td class="num">${money(cat.acquisition)}</td>
+      <td class="num">${money(cat.repair_capitalized)}</td>
+      <td class="num">${money(cat.disposed)}</td>
       <td></td><td class="num">${money(cat.depreciation)}</td>
       <td class="num">${money(cat.writeoff)}</td><td class="num">${money(cat.closing)}</td></tr>`;
   }
-  const t = d.totals;
-  rows += `<tr class="total"><td colspan="4">C Ə M İ</td><td></td>
+  // With a category picked, the grand total must cover only what is shown.
+  const shown = cats(d);
+  const t = CATFILTER
+    ? Object.fromEntries(['opening','acquisition','repair_capitalized','disposed',
+        'depreciation','writeoff','closing'].map(k =>
+        [k, shown.reduce((s,c) => s + parseFloat(c[k]), 0).toFixed(2)]))
+    : d.totals;
+  rows += `<tr class="total"><td colspan="4">C Ə M İ${
+    CATFILTER ? ' (seçilmiş kateqoriya)' : ''}</td><td></td>
     <td class="num">${money(t.opening)}</td><td class="num">${money(t.acquisition)}</td>
+    <td class="num">${money(t.repair_capitalized)}</td>
     <td class="num">${money(t.disposed)}</td><td></td>
     <td class="num">${money(t.depreciation)}</td><td class="num">${money(t.writeoff)}</td>
     <td class="num">${money(t.closing)}</td></tr>`;
@@ -321,7 +386,7 @@ function viewAnnual(d){
 
 function viewMonthly(d){
   let rows = '';
-  for (const cat of d.categories){
+  for (const cat of cats(d)){
     const cards = cat.cards.filter(c => match(c) && parseFloat(c.depreciation) !== 0);
     if (!cards.length) continue;
     rows += `<tr class="cat"><td colspan="15">${esc(cat.name_az)}</td></tr>`;
@@ -352,14 +417,13 @@ function viewNotes(d){
     h += '<h3>Həll olunmamış suallar (CLAUDE.md §12)</h3>' +
       d.open_questions.map(w => `<div class="note q">${esc(w)}</div>`).join('');
   }
+  const n = k => fmt.format(parseFloat(d.totals[k]));
   h += `<h3>Yoxlama</h3><div class="card" style="padding:14px">
-    Balans eyniliyi: qalıq(əvvəl) + daxilolma − xaricetmə − amortizasiya − silinmə = qalıq(son)
-    <br><strong>${fmt.format(parseFloat(d.totals.opening))} +
-    ${fmt.format(parseFloat(d.totals.acquisition))} −
-    ${fmt.format(parseFloat(d.totals.disposed))} −
-    ${fmt.format(parseFloat(d.totals.depreciation))} −
-    ${fmt.format(parseFloat(d.totals.writeoff))} =
-    ${fmt.format(parseFloat(d.totals.closing))}</strong> ✔
+    Balans eyniliyi: qalıq(əvvəl) + daxilolma + kapitallaşan təmir − xaricetmə
+    − amortizasiya − silinmə = qalıq(son)
+    <br><strong>${n('opening')} + ${n('acquisition')} + ${n('repair_capitalized')}
+    − ${n('disposed')} − ${n('depreciation')} − ${n('writeoff')}
+    = ${n('closing')}</strong> ✔
     <div class="hint" style="margin-top:8px">Hər kateqoriya üzrə də yoxlanılır;
       uyğunsuzluq halında hesablama dayanır (§2.1).</div></div>
     <h3>Versiya</h3><div class="card" style="padding:14px">

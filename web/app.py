@@ -117,6 +117,8 @@ def serialize(r) -> dict:
                         } if k.rate_info else None,
                         "threshold_hit": k.threshold_hit,
                         "threshold_reason": k.threshold_reason,
+                        "threshold_next": k.threshold_next,
+                        "threshold_next_reason": k.threshold_next_reason,
                         "written_off": k.written_off,
                         "disposal_type": k.disposal_type,
                         "disposal_date": k.disposal_date.isoformat() if k.disposal_date else "",
@@ -161,10 +163,16 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if url.path == "/api/context":
-                slugs = list_clients(ROOT)
+                # One unreadable client must not blank the whole app: report it
+                # per client so the picker still works and the message is seen.
                 out = []
-                for s in slugs:
-                    d = load_client(ROOT, s)
+                for s in list_clients(ROOT):
+                    try:
+                        d = load_client(ROOT, s)
+                    except DataError as e:
+                        out.append({"slug": s, "name": s, "voen": "", "years": [],
+                                    "closed_years": [], "error": str(e)})
+                        continue
                     out.append({
                         "slug": s, "name": d.client_name, "voen": d.voen,
                         "years": available_years(d),
