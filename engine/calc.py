@@ -402,14 +402,7 @@ def compute_year(data: ClientData, year: int) -> YearResult:
                 f"m.114.3 normasından ({cat.rate.statutory_max:.0%}) aşağıdır — "
                 f"bu qanunidir, lakin şüurlu qərar olmalıdır."
             )
-        if mult.coefficient > D("1") and not cat.mixed_rates \
-                and not cat.rate.coefficient_used:
-            result.warnings.append(
-                f"{cat.name_az}: {STATUS_NAMES[status_row.status]} əmsalı "
-                f"(×{mult.coefficient}) tətbiq olunmayıb — bu haqdır, məcburiyyət "
-                f"deyil. İstifadə etmək üçün rate_elections.tsv-də dərəcəni "
-                f"{cat.rate.ceiling:.0%}-ə qədər qaldıra bilərsiniz."
-            )
+        # (the unused-coefficient notice is raised once below, not per category)
         for c in cat.cards:
             if c.rate_info.source == "asset":
                 result.warnings.append(
@@ -417,6 +410,19 @@ def compute_year(data: ClientData, year: int) -> YearResult:
                     f"{c.rate_info.applied:.0%} (kateqoriya üzrə "
                     f"{cat.rate.applied:.0%}, hədd {c.rate_info.ceiling:.0%})."
                 )
+    # One notice for the whole report, not one per category: the same sentence
+    # repeated five times is noise, and noise is how a real warning gets missed.
+    if mult.coefficient > D("1"):
+        unused = [cat for cat in result.categories
+                  if not cat.mixed_rates and not cat.rate.coefficient_used]
+        if unused:
+            result.warnings.append(
+                f"{STATUS_NAMES[status_row.status]} əmsalı (×{mult.coefficient}) "
+                f"tətbiq olunmayıb — bu haqdır, məcburiyyət deyil. Kateqoriyalar: "
+                + ", ".join(f"{cat.name_az} ({cat.rate.applied:.0%} → "
+                            f"{cat.rate.ceiling:.0%} mümkündür)" for cat in unused)
+            )
+
     for c in result.cards:
         if not c.is_legacy_pool and c.cost == ZERO and c.opening > ZERO:
             result.warnings.append(
