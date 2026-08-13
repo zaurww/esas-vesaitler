@@ -220,6 +220,7 @@ def load_client(root: Path, slug: str) -> ClientData:
             year=_int(r.get("year", ""), w),
             category=_category(r.get("category", ""), w),
             applied_rate=_dec(r.get("applied_rate", ""), w),
+            asset_id=r.get("asset_id", "").strip(),
         ))
 
     for r in read_tsv(folder / "writeoffs.tsv"):
@@ -238,6 +239,16 @@ def load_client(root: Path, slug: str) -> ClientData:
         for row in coll:
             if row.asset_id not in known:
                 raise DataError(f"{label}: ссылка на несуществующий asset_id {row.asset_id!r}")
+    for e in data.elections:
+        if e.asset_id and e.asset_id not in known:
+            raise DataError(
+                f"rate_elections: ссылка на несуществующий asset_id {e.asset_id!r}")
+        if e.asset_id:
+            asset = next(a for a in data.assets if a.asset_id == e.asset_id)
+            if asset.category != e.category:
+                raise DataError(
+                    f"rate_elections: {e.asset_id} относится к категории "
+                    f"{asset.category!r}, а в строке указана {e.category!r}")
 
     return data
 

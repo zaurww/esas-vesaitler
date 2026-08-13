@@ -111,6 +111,9 @@
   .step{display:flex; justify-content:space-between; gap:12px; padding:7px 0; border-bottom:1px dashed var(--line)}
   .step .l{color:var(--muted)}
   .step.res{border-bottom:0; border-top:2px solid var(--accent); font-weight:700; margin-top:4px; padding-top:9px}
+  /* Indented breakdown of how a rate was derived. */
+  .sub{margin:0 0 4px 14px; padding-left:12px; border-left:2px solid var(--line)}
+  .sub .step{padding:5px 0; font-size:12.5px; border-bottom:0}
   .closebtn{background:rgba(255,255,255,.15); border:0; color:#fff; border-radius:6px; padding:5px 11px; cursor:pointer}
   .err{background:#fdecea; border:1px solid #f3b7b1; color:#8b1a12; padding:14px; border-radius:var(--radius)}
 </style>
@@ -234,7 +237,8 @@ function viewAnnual(d){
     rows += `<tr class="cat"><td colspan="12">${esc(cat.name_az)}
       <span class="rate">${pct(r.statutory_max)} × ${r.coefficient} (${esc(d.status)})
       = ${pct(r.ceiling)} hədd · tətbiq <strong>${pct(r.applied)}</strong>
-      ${r.below_ceiling ? '<span class="tag w">həddən aşağı</span>' : ''}</span></td></tr>`;
+      ${cat.mixed_rates ? '<span class="tag">fərdi dərəcələr var</span>'
+        : r.below_ceiling ? '<span class="tag w">həddən aşağı</span>' : ''}</span></td></tr>`;
     for (const c of cards){
       const cls = c.threshold_hit ? 'asset warn' : 'asset';
       rows += `<tr class="${cls}" onclick="openCard('${c.asset_id}')">
@@ -248,7 +252,9 @@ function viewAnnual(d){
         <td class="num">${money(c.opening)}</td>
         <td class="num">${money(c.acquisition)}</td>
         <td class="num">${money(c.disposed)}</td>
-        <td class="num">${parseFloat(c.rate) ? pct(c.rate) : '<span class="zero">—</span>'}</td>
+        <td class="num">${parseFloat(c.rate) ? pct(c.rate) : '<span class="zero">—</span>'}${
+          c.rate_info && c.rate_info.source === 'asset'
+            ? '<span class="tag" title="bu ƏV üçün fərdi dərəcə">f</span>' : ''}</td>
         <td class="num"><strong>${money(c.depreciation)}</strong></td>
         <td class="num">${money(c.writeoff)}</td>
         <td class="num">${money(c.closing)}</td></tr>`;
@@ -332,18 +338,36 @@ function openCard(id){
   h += step('İlkin dəyər', card.cost);
   h += step('1 · Qalıq (il əvvəli)', card.opening);
   h += step('2 · Daxilolma', card.acquisition);
+  h += step('3 · Kapitallaşan təmir (m.115)', card.repair_capitalized);
   h += step('4 · Xaricetmə', card.disposed);
-  const base = (parseFloat(card.opening) + parseFloat(card.acquisition) - parseFloat(card.disposed));
-  h += step('= Amortizasiya bazası', base.toFixed(2));
+  h += step('= Amortizasiya bazası', card.base);
   h += `<div class="step"><span class="l">5 · 500/5% həddi</span><span>${
     card.threshold_hit ? '⚠ düşür' : 'düşmür'}</span></div>`;
   if (card.threshold_hit)
     h += `<div class="note" style="margin:8px 0">${esc(card.threshold_reason)}<br>
       ${card.written_off ? 'writeoffs.tsv-də qərar var → tam silinmə'
                          : 'qərar yoxdur → silinmə tətbiq edilmədi'}</div>`;
-  h += `<div class="step"><span class="l">6 · Dərəcə</span><span>${
-    pct(cat.rate.statutory_max)} × ${cat.rate.coefficient} = ${pct(cat.rate.ceiling)}
-    → tətbiq ${pct(card.rate)}</span></div>`;
+
+  // Step 6 is the audit trail for the single most questionable number in the
+  // whole return: a rate above the one printed in the tax code. Spelled out
+  // factor by factor so it answers "why 50% when article 114.3 says 25%".
+  const r6 = card.rate_info || cat.rate;
+  const SRC = {asset: 'bu ƏV üçün fərdi seçim', category: 'kateqoriya üzrə seçim',
+               ceiling: 'seçim yoxdur — hədd tətbiq olunur'};
+  h += `<div class="step"><span class="l"><strong>6 · Amortizasiya dərəcəsi</strong></span>
+        <span><strong>${pct(r6.applied)}</strong></span></div>
+    <div class="sub">
+      <div class="step"><span class="l">VM m.114.3 norması (maksimum)</span>
+        <span class="num">${pct(r6.statutory_max)}</span></div>
+      <div class="step"><span class="l">Sahibkar əmsalı — ${esc(REPORT.status_name)}</span>
+        <span class="num">× ${r6.coefficient}</span></div>
+      <div class="step"><span class="l">Yuxarı hədd</span>
+        <span class="num">= ${pct(r6.ceiling)}</span></div>
+      <div class="step"><span class="l">Tətbiq olunan — ${SRC[r6.source]}</span>
+        <span class="num">${pct(r6.applied)}</span></div>
+    </div>
+    ${r6.below_ceiling ? `<div class="note" style="margin:8px 0">Hədddən aşağı dərəcə
+      seçilib — qanunidir, lakin şüurlu qərar olmalıdır.</div>` : ''}`;
   h += step('Amortizasiya', card.depreciation);
   if (parseFloat(card.writeoff)) h += step('Silinmə', card.writeoff);
   h += step('7 · Qalıq (il sonu)', card.closing, 'res');

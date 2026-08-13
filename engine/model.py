@@ -61,10 +61,15 @@ class TaxpayerStatus:
 
 @dataclass(frozen=True)
 class RateElection:
-    """The 114.3 rate is a ceiling; the client may accrue less (§5.2)."""
+    """The 114.3 rate is a ceiling; the client may accrue less (§5.2).
+
+    An empty asset_id sets the rate for the whole category; a filled one
+    overrides that single asset. Both stay capped by the same ceiling.
+    """
     year: int
     category: str
     applied_rate: Decimal
+    asset_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -94,8 +99,16 @@ class ClientData:
         rows = [s for s in self.statuses if s.year == year]
         return rows[-1] if rows else None
 
-    def election_for(self, year: int, category: str) -> Optional[RateElection]:
-        rows = [e for e in self.elections if e.year == year and e.category == category]
+    def election_for(self, year: int, category: str,
+                     asset_id: str = "") -> Optional[RateElection]:
+        """Most specific election wins: the asset's own, then the category's."""
+        if asset_id:
+            rows = [e for e in self.elections
+                    if e.year == year and e.asset_id == asset_id]
+            if rows:
+                return rows[-1]
+        rows = [e for e in self.elections
+                if e.year == year and e.category == category and not e.asset_id]
         return rows[-1] if rows else None
 
     def closed_years(self) -> set[int]:

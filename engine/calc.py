@@ -19,8 +19,8 @@ from typing import Optional
 
 from .model import ClientData
 from .rates import (
-    CATEGORY_BY_CODE, ENGINE_VERSION, EV_CODES, FORMAT_VERSION, STATUS_NAMES,
-    THRESHOLD_ABS, THRESHOLD_PCT, multiplier, statutory,
+    CATEGORIES, CATEGORY_BY_CODE, ENGINE_VERSION, EV_CODES, FORMAT_VERSION,
+    STATUS_NAMES, THRESHOLD_ABS, THRESHOLD_PCT, multiplier, statutory,
 )
 
 D = Decimal
@@ -65,6 +65,7 @@ class CardResult:
     disposal_date: Optional[date] = None
     proceeds: Decimal = ZERO
     gain_loss: Decimal = ZERO
+    rate_info: Optional["RateInfo"] = None
 
     monthly: list[Decimal] = field(default_factory=list)
 
@@ -84,6 +85,7 @@ class RateInfo:
     applied: Decimal
     elected: bool
     below_ceiling: bool
+    source: str = "ceiling"           # asset | category | ceiling
 
 
 @dataclass
@@ -91,8 +93,9 @@ class CategoryResult:
     code: str
     name_az: str
     name_ru: str
-    rate: RateInfo
+    rate: RateInfo                    # the category default
     cards: list[CardResult] = field(default_factory=list)
+    mixed_rates: bool = False         # at least one asset overrides it
 
     opening: Decimal = ZERO
     acquisition: Decimal = ZERO
@@ -184,31 +187,39 @@ def compute_year(data: ClientData, year: int) -> YearResult:
         if r.year == year:
             repairs[r.asset_id] = repairs.get(r.asset_id, ZERO) + r.amount
 
-    # -- rate per category --------------------------------------------------
-    rate_info: dict[str, RateInfo] = {}
-    for code in EV_CODES:
+    # -- rate resolution ----------------------------------------------------
+    # The ceiling is always statutory x entrepreneur coefficient. Within it the
+    # client elects a rate, and the most specific election wins: the asset's own
+    # first, the category's next, the ceiling itself if neither exists.
+    def resolve_rate(code: str, asset_id: str = "") -> RateInfo:
         st = statutory(year, code)
         if st.max_rate is None:
-            continue  # category `it`: rate comes from useful life, stage 1b
-        ceiling = st.max_rate * mult.coefficient
-        if ceiling > D("1"):
-            ceiling = D("1")
-        election = data.election_for(year, code)
+            raise CalcError(
+                f"{code}: ставка выводится из срока использования (FİM) — этап 1b"
+            )
+        ceiling = min(st.max_rate * mult.coefficient, D("1"))
+        election = data.election_for(year, code, asset_id)
         applied = election.applied_rate if election else ceiling
         if applied > ceiling:
+            where = f"{election.asset_id}: " if election and election.asset_id else ""
             raise CalcError(
-                f"{code}: выбранная ставка {applied:%} превышает потолок {ceiling:%} "
-                f"({st.max_rate:%} × {mult.coefficient} за {year} год). "
+                f"{code}: {where}выбранная ставка {applied:%} превышает потолок "
+                f"{ceiling:%} ({st.max_rate:%} × {mult.coefficient} за {year} год). "
                 f"Расчёт остановлен — это привело бы к незаконной декларации."
             )
         if applied < ZERO:
             raise CalcError(f"{code}: отрицательная ставка {applied}")
-        rate_info[code] = RateInfo(
+        return RateInfo(
             category=code, statutory_max=st.max_rate, statutory_year=st.effective_year,
             status=status_row.status, coefficient=mult.coefficient, ceiling=ceiling,
             applied=applied, elected=election is not None,
             below_ceiling=applied < ceiling,
+            source=("asset" if election and election.asset_id
+                    else "category" if election else "ceiling"),
         )
+
+    priceable = {c.code for c in CATEGORIES
+                 if c.kind == "ev" and statutory(year, c.code).max_rate is not None}
 
     # -- step 1: opening balances and acquisitions --------------------------
     cards: dict[str, CardResult] = {}
@@ -252,6 +263,12 @@ def compute_year(data: ClientData, year: int) -> YearResult:
 
     # -- steps 4-7, per card ------------------------------------------------
     for c in cards.values():
+        if c.category not in priceable:
+            raise CalcError(
+                f"{c.inv_no or c.asset_id}: категория {c.category} пока не "
+                f"поддерживается (ставка из срока использования, этап 1b)"
+            )
+        c.rate_info = resolve_rate(c.category, c.asset_id)
         disp = disposals.get(c.asset_id)
         if disp is not None:
             c.disposal_type = disp.type
@@ -287,12 +304,7 @@ def compute_year(data: ClientData, year: int) -> YearResult:
             c.depreciation = ZERO
             c.closing = ZERO
         else:
-            info = rate_info.get(c.category)
-            if info is None:
-                raise CalcError(
-                    f"{c.inv_no or c.asset_id}: для категории {c.category} "
-                    f"ставка не определена (этап 1b)"
-                )
+            info = c.rate_info
             c.rate = info.applied
             c.depreciation = money(c.base * info.applied)
             if c.depreciation > c.base:
@@ -306,17 +318,15 @@ def compute_year(data: ClientData, year: int) -> YearResult:
             (c for c in cards.values() if c.category == code),
             key=lambda c: (not c.is_legacy_pool, c.inv_no, c.name),
         )
-        info = rate_info.get(code)
-        if info is None:
-            continue
-        if not group:
+        if not group or code not in priceable:
             continue
         cat = CategoryResult(
             code=code,
             name_az=CATEGORY_BY_CODE[code].name_az,
             name_ru=CATEGORY_BY_CODE[code].name_ru,
-            rate=info,
+            rate=resolve_rate(code),          # the category default
             cards=group,
+            mixed_rates=len({c.rate_info.applied for c in group}) > 1,
         )
         for f in ("opening", "acquisition", "repair_actual", "repair_deductible",
                   "repair_capitalized", "disposed", "depreciation", "writeoff", "closing"):
@@ -347,15 +357,19 @@ def compute_year(data: ClientData, year: int) -> YearResult:
 
     # -- warnings -------------------------------------------------------------
     for cat in result.categories:
-        if cat.rate.below_ceiling:
+        if cat.rate.below_ceiling and not cat.mixed_rates:
             result.warnings.append(
                 f"{cat.name_az}: tətbiq olunan dərəcə {cat.rate.applied:.0%} "
                 f"həddən ({cat.rate.ceiling:.0%}) aşağıdır — bu qanunidir, "
                 f"lakin şüurlu qərar olmalıdır."
             )
-        if status_row.status == "mikro" and not cat.rate.below_ceiling \
-                and cat.rate.coefficient == D("2.0") and cat.rate.applied == cat.rate.ceiling:
-            pass
+        for c in cat.cards:
+            if c.rate_info.source == "asset":
+                result.warnings.append(
+                    f"{c.inv_no or c.name}: fərdi dərəcə "
+                    f"{c.rate_info.applied:.0%} (kateqoriya üzrə "
+                    f"{cat.rate.applied:.0%}, hədd {c.rate_info.ceiling:.0%})."
+                )
     for c in result.threshold_cards:
         if not c.written_off:
             result.warnings.append(
