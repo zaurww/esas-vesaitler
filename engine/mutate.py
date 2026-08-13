@@ -37,6 +37,7 @@ HEADERS: dict[str, list[str]] = {
                              "engine_version", "closed_at"],
     "disposals.tsv": ["asset_id", "date", "type", "proceeds"],
     "repairs.tsv": ["year", "asset_id", "date", "amount", "note"],
+    "additions.tsv": ["year", "asset_id", "date", "amount", "note"],
     "taxpayer_status.tsv": ["year", "status", "basis"],
     "rate_elections.tsv": ["year", "category", "applied_rate", "asset_id"],
     "writeoffs.tsv": ["year", "asset_id", "reason"],
@@ -48,7 +49,7 @@ HEADERS: dict[str, list[str]] = {
 def folder(root: Path, slug: str) -> Path:
     f = root / "clients" / slug
     if not f.is_dir():
-        raise DataError(f"клиент не найден: {slug}")
+        raise DataError(f"müştəri tapılmadı: {slug}")
     return f
 
 
@@ -289,7 +290,7 @@ def delete_asset(root: Path, slug: str, p: dict) -> str:
     aid = str(p["asset_id"])
     with transaction(root, slug, "asset.delete") as tx:
         for name in ("opening_balances.tsv", "disposals.tsv", "repairs.tsv",
-                     "writeoffs.tsv", "rate_elections.tsv"):
+                     "additions.tsv", "writeoffs.tsv", "rate_elections.tsv"):
             rows = rows_of(root, slug, name)
             kept = [r for r in rows if r.get("asset_id") != aid]
             if len(kept) != len(rows):
@@ -379,6 +380,34 @@ def remove_repair(root: Path, slug: str, p: dict) -> str:
         kept = [r for r in rows if not (r["asset_id"] == aid and r["date"] == when)]
         tx.log(aid, f"repair {when}", "var", "silindi")
         save_rows(root, slug, "repairs.tsv", kept)
+    return aid
+
+
+def add_addition(root: Path, slug: str, p: dict) -> str:
+    """Capitalise a component or upgrade onto an existing asset."""
+    aid = str(p["asset_id"])
+    with transaction(root, slug, "addition.add") as tx:
+        when = iso_date(p.get("date"), "Tarix")
+        year = int(when[:4])
+        guard_open_year(root, slug, year)
+        amount = dec(p.get("amount"), "Məbləğ", allow_zero=False)
+        rows = rows_of(root, slug, "additions.tsv")
+        rows.append({"year": str(year), "asset_id": aid, "date": when,
+                     "amount": amount, "note": str(p.get("note", "")).strip()})
+        save_rows(root, slug, "additions.tsv", rows)
+        tx.log(aid, f"addition {when}", "", amount)
+    return aid
+
+
+def remove_addition(root: Path, slug: str, p: dict) -> str:
+    aid, when = str(p["asset_id"]), str(p["date"])
+    with transaction(root, slug, "addition.remove") as tx:
+        guard_open_year(root, slug, int(when[:4]))
+        rows = rows_of(root, slug, "additions.tsv")
+        kept = [r for r in rows
+                if not (r["asset_id"] == aid and r["date"] == when)]
+        tx.log(aid, f"addition {when}", "var", "silindi")
+        save_rows(root, slug, "additions.tsv", kept)
     return aid
 
 
@@ -679,6 +708,8 @@ ACTIONS = {
     "opening.set": set_opening,
     "disposal.set": set_disposal,
     "repair.add": add_repair,
+    "addition.add": add_addition,
+    "addition.remove": remove_addition,
     "repair.remove": remove_repair,
     "writeoff.set": set_writeoff,
     "election.set": set_election,

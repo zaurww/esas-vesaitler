@@ -15,8 +15,8 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .model import (
-    Asset, ClientData, Disposal, OpeningBalance, RateElection, Repair,
-    TaxpayerStatus, WriteOff,
+    Addition, Asset, ClientData, Disposal, OpeningBalance, RateElection,
+    Repair, TaxpayerStatus, WriteOff,
 )
 from .rates import CATEGORY_BY_CODE
 
@@ -36,7 +36,7 @@ def _dec(value: str, where: str) -> Decimal:
     try:
         return D(v.replace(",", "."))
     except InvalidOperation:
-        raise DataError(f"{where}: не число: {value!r}") from None
+        raise DataError(f"{where}: rəqəm deyil — {value!r}") from None
 
 
 def _date(value: str, where: str) -> date | None:
@@ -46,25 +46,25 @@ def _date(value: str, where: str) -> date | None:
     try:
         return datetime.strptime(v, "%Y-%m-%d").date()
     except ValueError:
-        raise DataError(f"{where}: дата не в формате YYYY-MM-DD: {value!r}") from None
+        raise DataError(f"{where}: tarix YYYY-MM-DD formatında olmalıdır — {value!r}") from None
 
 
 def _int(value: str, where: str) -> int:
     v = (value or "").strip()
     if v == "":
-        raise DataError(f"{where}: пустое целое")
+        raise DataError(f"{where}: tam ədəd boşdur")
     try:
         return int(v)
     except ValueError:
-        raise DataError(f"{where}: не целое: {value!r}") from None
+        raise DataError(f"{where}: tam ədəd deyil — {value!r}") from None
 
 
 def _category(value: str, where: str) -> str:
     v = (value or "").strip()
     if v not in CATEGORY_BY_CODE:
         raise DataError(
-            f"{where}: неизвестная категория {value!r}; "
-            f"допустимы: {', '.join(CATEGORY_BY_CODE)}"
+            f"{where}: naməlum kateqoriya {value!r}; "
+            f"mümkün olanlar: {', '.join(CATEGORY_BY_CODE)}"
         )
     return v
 
@@ -127,11 +127,11 @@ def _where(r: dict[str, str]) -> str:
 def load_client(root: Path, slug: str) -> ClientData:
     folder = root / "clients" / slug
     if not folder.is_dir():
-        raise DataError(f"клиент не найден: {folder}")
+        raise DataError(f"müştəri tapılmadı: {folder}")
 
     cfg_path = folder / "config.toml"
     if not cfg_path.exists():
-        raise DataError(f"нет config.toml в {folder}")
+        raise DataError(f"{folder} qovluğunda config.toml yoxdur")
     cfg = tomllib.loads(cfg_path.read_text(encoding="utf-8-sig"))
 
     data = ClientData(
@@ -148,21 +148,21 @@ def load_client(root: Path, slug: str) -> ClientData:
         w = _where(r)
         aid = r["asset_id"].strip()
         if not aid:
-            raise DataError(f"{w}: пустой asset_id")
+            raise DataError(f"{w}: asset_id boşdur")
         if aid in seen_ids:
-            raise DataError(f"{w}: дубликат asset_id {aid!r}")
+            raise DataError(f"{w}: asset_id təkrarlanır — {aid!r}")
         seen_ids.add(aid)
         inv = r.get("inv_no", "").strip()
         if inv:
             if inv in seen_inv:
-                raise DataError(f"{w}: дубликат inv_no {inv!r}")
+                raise DataError(f"{w}: inv_no təkrarlanır — {inv!r}")
             seen_inv.add(inv)
         cost = _dec(r.get("cost", ""), w)
         if cost < 0:
-            raise DataError(f"{w}: отрицательная стоимость {cost}")
+            raise DataError(f"{w}: ilkin dəyər mənfidir — {cost}")
         in_date = _date(r.get("in_date", ""), w)
         if in_date and in_date > date.today():
-            raise DataError(f"{w}: дата поступления в будущем: {in_date}")
+            raise DataError(f"{w}: alış tarixi gələcəkdədir — {in_date}")
         life = r.get("useful_life", "").strip()
         data.assets.append(Asset(
             asset_id=aid,
@@ -193,7 +193,7 @@ def load_client(root: Path, slug: str) -> ClientData:
         w = _where(r)
         typ = r.get("type", "").strip()
         if typ not in ("realizasiya", "leqv"):
-            raise DataError(f"{w}: тип выбытия должен быть realizasiya|leqv, а не {typ!r}")
+            raise DataError(f"{w}: xaricetmə növü realizasiya|leqv olmalıdır, {typ!r} deyil")
         data.disposals.append(Disposal(
             asset_id=r["asset_id"].strip(),
             date=_date(r.get("date", ""), w),
@@ -211,11 +211,21 @@ def load_client(root: Path, slug: str) -> ClientData:
             note=r.get("note", "").strip(),
         ))
 
+    for r in read_tsv(folder / "additions.tsv"):
+        w = _where(r)
+        data.additions.append(Addition(
+            year=_int(r.get("year", ""), w),
+            asset_id=r["asset_id"].strip(),
+            date=_date(r.get("date", ""), w),
+            amount=_dec(r.get("amount", ""), w),
+            note=r.get("note", "").strip(),
+        ))
+
     for r in read_tsv(folder / "taxpayer_status.tsv"):
         w = _where(r)
         st = r.get("status", "").strip()
         if st not in ("mikro", "kicik", "orta", "iri"):
-            raise DataError(f"{w}: неизвестный статус {st!r}")
+            raise DataError(f"{w}: naməlum status {st!r}")
         data.statuses.append(TaxpayerStatus(
             year=_int(r.get("year", ""), w), status=st, basis=r.get("basis", "").strip(),
         ))
@@ -241,20 +251,21 @@ def load_client(root: Path, slug: str) -> ClientData:
     for coll, label in ((data.opening_balances, "opening_balances"),
                         (data.disposals, "disposals"),
                         (data.repairs, "repairs"),
+                        (data.additions, "additions"),
                         (data.writeoffs, "writeoffs")):
         for row in coll:
             if row.asset_id not in known:
-                raise DataError(f"{label}: ссылка на несуществующий asset_id {row.asset_id!r}")
+                raise DataError(f"{label}: mövcud olmayan asset_id-yə istinad — {row.asset_id!r}")
     for e in data.elections:
         if e.asset_id and e.asset_id not in known:
             raise DataError(
-                f"rate_elections: ссылка на несуществующий asset_id {e.asset_id!r}")
+                f"rate_elections: mövcud olmayan asset_id-yə istinad — {e.asset_id!r}")
         if e.asset_id:
             asset = next(a for a in data.assets if a.asset_id == e.asset_id)
             if asset.category != e.category:
                 raise DataError(
-                    f"rate_elections: {e.asset_id} относится к категории "
-                    f"{asset.category!r}, а в строке указана {e.category!r}")
+                    f"rate_elections: {e.asset_id} {asset.category!r} kateqoriyasına "
+                    f"aiddir, sətirdə isə {e.category!r} göstərilib")
 
     return data
 

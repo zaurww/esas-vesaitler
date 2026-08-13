@@ -23,7 +23,7 @@ from engine.calc import MONTHS_AZ, CalcError, compute_year  # noqa: E402
 from engine.excel import build_workbook  # noqa: E402
 from engine.mutate import ACTIONS, IMPORT_FIELDS, guess_columns  # noqa: E402
 from engine import rates  # noqa: E402
-from engine.rates import CATEGORIES, ENGINE_VERSION  # noqa: E402
+from engine.rates import CATEGORIES, CATEGORY_BY_CODE, ENGINE_VERSION  # noqa: E402
 from engine.storage import DataError, list_clients, load_client  # noqa: E402
 
 INDEX = Path(__file__).resolve().parent / "index.html"
@@ -78,6 +78,7 @@ def serialize(r) -> dict:
                 },
                 "opening": m(c.opening),
                 "acquisition": m(c.acquisition),
+                "addition": m(c.addition),
                 "disposed": m(c.disposed),
                 "depreciation": m(c.depreciation),
                 "writeoff": m(c.writeoff),
@@ -99,6 +100,8 @@ def serialize(r) -> dict:
                         "is_legacy_pool": k.is_legacy_pool,
                         "opening": m(k.opening),
                         "acquisition": m(k.acquisition),
+                        "addition": m(k.addition),
+                        "cost_effective": m(k.cost_effective),
                         "repair_actual": m(k.repair_actual),
                         "repair_deductible": m(k.repair_deductible),
                         "repair_capitalized": m(k.repair_capitalized),
@@ -186,6 +189,117 @@ def parse_upload(body: dict) -> dict:
             "sheets": body.get("sheets", [])}
 
 
+def asset_history(root: Path, slug: str, asset_id: str) -> dict:
+    """Every year of one asset's life, recomputed from the events.
+
+    The "лицевой счёт" an accountant expects: acquisition, then each year's
+    opening -> additions -> repairs -> depreciation -> closing, ending in
+    disposal or the current residual. Nothing here is stored -- it is the same
+    per-year pipeline run repeatedly, so the history can never drift from the
+    reports (§2).
+    """
+    rates.refresh(ROOT)
+    data = load_client(root, slug)
+    asset = next((a for a in data.assets if a.asset_id == asset_id), None)
+    if asset is None:
+        raise DataError(f"ƏV tapılmadı: {asset_id}")
+
+    years = {s.year for s in data.statuses}
+    years |= {ob.year for ob in data.opening_balances if ob.asset_id == asset_id}
+    if asset.in_date:
+        years.add(asset.in_date.year)
+    years = sorted(y for y in years if y >= data.start_year)
+
+    closed = data.closed_years()
+    rows, seen = [], False
+    for y in years:
+        try:
+            res = compute_year(data, y)
+        except CalcError:
+            continue
+        card = next((c for c in res.cards if c.asset_id == asset_id), None)
+        if card is None:
+            if seen:
+                break                       # already left the books
+            continue
+        seen = True
+        ri = card.rate_info
+        rows.append({
+            "year": y,
+            "closed": y in closed,
+            "opening": m(card.opening),
+            "acquisition": m(card.acquisition),
+            "addition": m(card.addition),
+            "repair_actual": m(card.repair_actual),
+            "repair_deductible": m(card.repair_deductible),
+            "repair_capitalized": m(card.repair_capitalized),
+            "disposed": m(card.disposed),
+            "base": m(card.base),
+            "rate": m(card.rate),
+            "rate_ceiling": m(ri.ceiling) if ri else "0.00",
+            "rate_statutory": m(ri.statutory_max) if ri else "0.00",
+            "coefficient": str(ri.coefficient) if ri else "1",
+            "depreciation": m(card.depreciation),
+            "writeoff": m(card.writeoff),
+            "closing": m(card.closing),
+            "cost_effective": m(card.cost_effective),
+            "gross_end": m(card.gross_end),
+            "accumulated_end": m(card.accumulated_end),
+            "threshold_hit": card.threshold_hit,
+            "threshold_reason": card.threshold_reason,
+            "written_off": card.written_off,
+            "disposal_type": card.disposal_type,
+            "disposal_date": card.disposal_date.isoformat() if card.disposal_date else "",
+            "proceeds": m(card.proceeds),
+            "gain_loss": m(card.gain_loss),
+            "monthly": [m(v) for v in card.monthly],
+        })
+
+    events = []
+    if asset.in_date:
+        events.append({"date": asset.in_date.isoformat(), "kind": "Daxilolma",
+                       "amount": m(asset.cost), "note": asset.counterparty})
+    for ob in data.opening_balances:
+        if ob.asset_id == asset_id:
+            events.append({"date": f"{ob.year}-01-01", "kind":
+                           "Açılış qalığı" if ob.source == "onboarding"
+                           else "İl bağlanışı", "amount": m(ob.residual),
+                           "note": ob.source})
+    for a in data.additions:
+        if a.asset_id == asset_id:
+            events.append({"date": a.date.isoformat() if a.date else str(a.year),
+                           "kind": "Dəyər artımı", "amount": m(a.amount),
+                           "note": a.note})
+    for rp in data.repairs:
+        if rp.asset_id == asset_id:
+            events.append({"date": rp.date.isoformat() if rp.date else str(rp.year),
+                           "kind": "Təmir", "amount": m(rp.amount), "note": rp.note})
+    for d in data.disposals:
+        if d.asset_id == asset_id:
+            events.append({"date": d.date.isoformat() if d.date else "",
+                           "kind": "Xaricetmə", "amount": m(d.proceeds),
+                           "note": d.type})
+    for w in data.writeoffs:
+        if w.asset_id == asset_id:
+            events.append({"date": f"{w.year}-12-31", "kind": "Silinmə 500/5%",
+                           "amount": "", "note": w.reason})
+    events.sort(key=lambda e: e["date"])
+
+    return {
+        "asset": {
+            "asset_id": asset.asset_id, "inv_no": asset.inv_no, "name": asset.name,
+            "category": asset.category,
+            "category_name": CATEGORY_BY_CODE[asset.category].name_az,
+            "in_date": asset.in_date.isoformat() if asset.in_date else "",
+            "cost": m(asset.cost), "counterparty": asset.counterparty,
+            "is_legacy_pool": asset.is_legacy_pool, "note": asset.note,
+        },
+        "years": rows,
+        "events": events,
+        "months": MONTHS_AZ,
+    }
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "EsasVesaitler/" + ENGINE_VERSION
 
@@ -246,6 +360,11 @@ class Handler(BaseHTTPRequestHandler):
                 rates.refresh(ROOT)      # pick up edits without a restart
                 data = load_client(ROOT, slug)
                 self._json(serialize(compute_year(data, year)))
+                return
+
+            if url.path == "/api/asset-history":
+                self._json(asset_history(ROOT, q.get("client", [""])[0],
+                                         q.get("asset_id", [""])[0]))
                 return
 
             if url.path == "/api/rates":

@@ -48,6 +48,8 @@ class CardResult:
 
     opening: Decimal = ZERO
     acquisition: Decimal = ZERO
+    addition: Decimal = ZERO          # capitalised component bought this year
+    cost_prior: Decimal = ZERO        # original cost + additions of past years
     repair_actual: Decimal = ZERO
     repair_deductible: Decimal = ZERO
     repair_capitalized: Decimal = ZERO
@@ -82,15 +84,20 @@ class CardResult:
     # inventing history.
 
     @property
+    def cost_effective(self) -> Decimal:
+        """Original cost plus everything capitalised onto it so far."""
+        return self.cost_prior + self.addition + self.repair_capitalized
+
+    @property
     def gross_start(self) -> Decimal:
         if self.acquisition > ZERO and self.opening == ZERO:
             return ZERO                       # acquired during the year
-        return self.cost if self.cost > ZERO else self.opening
+        return self.cost_prior if self.cost_prior > ZERO else self.opening
 
     @property
     def gross_in(self) -> Decimal:
         acq = self.acquisition if self.opening == ZERO else ZERO
-        return acq + self.repair_capitalized
+        return acq + self.addition + self.repair_capitalized
 
     @property
     def gross_out(self) -> Decimal:
@@ -141,6 +148,7 @@ class CategoryResult:
 
     opening: Decimal = ZERO
     acquisition: Decimal = ZERO
+    addition: Decimal = ZERO
     repair_actual: Decimal = ZERO
     repair_limit: Decimal = ZERO
     repair_limit_pct: Decimal = ZERO
@@ -203,7 +211,8 @@ def split_monthly(annual: Decimal) -> list[Decimal]:
     return out
 
 
-def threshold_test(card: "CardResult", residual: Decimal) -> tuple[bool, str]:
+def threshold_test(card: "CardResult", residual: Decimal,
+                   cost_at: Decimal | None = None) -> tuple[bool, str]:
     """The 500 AZN / 5%-of-initial-cost test (art. 114).
 
     A legacy pool row carries no initial cost of its own, so only the flat
@@ -214,11 +223,14 @@ def threshold_test(card: "CardResult", residual: Decimal) -> tuple[bool, str]:
     reasons = []
     if residual < THRESHOLD_ABS:
         reasons.append(f"qalıq {residual:.2f} < {THRESHOLD_ABS} AZN")
-    if not card.is_legacy_pool and card.cost > ZERO \
-            and residual < card.cost * THRESHOLD_PCT:
+    # Measured against the cost INCLUDING capitalised additions: a laptop
+    # that got a component is a more expensive asset than it was.
+    base_cost = cost_at if cost_at is not None else card.cost_effective
+    if not card.is_legacy_pool and base_cost > ZERO \
+            and residual < base_cost * THRESHOLD_PCT:
         reasons.append(
             f"qalıq {residual:.2f} < ilkin dəyərin 5%-i "
-            f"({money(card.cost * THRESHOLD_PCT)} AZN)"
+            f"({money(base_cost * THRESHOLD_PCT)} AZN)"
         )
     return bool(reasons), "; ".join(reasons)
 
@@ -227,8 +239,8 @@ def compute_year(data: ClientData, year: int) -> YearResult:
     status_row = data.status_for(year)
     if status_row is None:
         raise CalcError(
-            f"нет строки в taxpayer_status.tsv за {year} год — "
-            f"без статуса предпринимателя коэффициент к норме неизвестен"
+            f"taxpayer_status.tsv-də {year} ili üçün sətir yoxdur — "
+            f"sahibkarlıq statusu olmadan normaya tətbiq olunan əmsal məlum deyil"
         )
 
     mult = multiplier(year, status_row.status)
@@ -253,6 +265,14 @@ def compute_year(data: ClientData, year: int) -> YearResult:
     for r in data.repairs:
         if r.year == year:
             repairs[r.asset_id] = repairs.get(r.asset_id, ZERO) + r.amount
+    additions: dict[str, Decimal] = {}
+    additions_prior: dict[str, Decimal] = {}
+    for a in data.additions:
+        if a.year == year:
+            additions[a.asset_id] = additions.get(a.asset_id, ZERO) + a.amount
+        elif a.year < year:
+            additions_prior[a.asset_id] = \
+                additions_prior.get(a.asset_id, ZERO) + a.amount
 
     # -- rate resolution ----------------------------------------------------
     # The entrepreneur coefficient raises the CEILING; it is a right, not a
@@ -264,7 +284,7 @@ def compute_year(data: ClientData, year: int) -> YearResult:
         st = statutory(year, code)
         if st.max_rate is None:
             raise CalcError(
-                f"{code}: ставка выводится из срока использования (FİM) — этап 1b"
+                f"{code}: dərəcə istifadə müddətindən (FİM) çıxarılır — mərhələ 1b"
             )
         ceiling = min(st.max_rate * mult.coefficient, D("1"))
         election = data.election_for(year, code, asset_id)
@@ -272,12 +292,12 @@ def compute_year(data: ClientData, year: int) -> YearResult:
         if applied > ceiling:
             where = f"{election.asset_id}: " if election and election.asset_id else ""
             raise CalcError(
-                f"{code}: {where}выбранная ставка {applied:%} превышает потолок "
-                f"{ceiling:%} ({st.max_rate:%} × {mult.coefficient} за {year} год). "
-                f"Расчёт остановлен — это привело бы к незаконной декларации."
+                f"{code}: {where}seçilmiş dərəcə {applied:%} yuxarı həddi "
+                f"{ceiling:%} aşır ({st.max_rate:%} × {mult.coefficient}, {year} il). "
+                f"Hesablama dayandırıldı — bu, qanunsuz bəyannaməyə gətirib çıxarardı."
             )
         if applied < ZERO:
-            raise CalcError(f"{code}: отрицательная ставка {applied}")
+            raise CalcError(f"{code}: dərəcə mənfidir — {applied}")
         return RateInfo(
             category=code, statutory_max=st.max_rate, statutory_year=st.effective_year,
             status=status_row.status, coefficient=mult.coefficient, ceiling=ceiling,
@@ -309,6 +329,8 @@ def compute_year(data: ClientData, year: int) -> YearResult:
             is_legacy_pool=asset.is_legacy_pool,
             opening=ob.residual if ob else ZERO,
             acquisition=acq,
+            addition=additions.get(aid, ZERO),
+            cost_prior=asset.cost + additions_prior.get(aid, ZERO),
         )
 
     # -- step 3: art. 115 repairs (limit per group, spend recorded per asset)
@@ -345,8 +367,8 @@ def compute_year(data: ClientData, year: int) -> YearResult:
     for c in cards.values():
         if c.category not in priceable:
             raise CalcError(
-                f"{c.inv_no or c.asset_id}: категория {c.category} пока не "
-                f"поддерживается (ставка из срока использования, этап 1b)"
+                f"{c.inv_no or c.asset_id}: {c.category} kateqoriyası hələ "
+                f"dəstəklənmir (dərəcə istifadə müddətindən, mərhələ 1b)"
             )
         c.rate_info = resolve_rate(c.category, c.asset_id)
         disp = disposals.get(c.asset_id)
@@ -354,18 +376,22 @@ def compute_year(data: ClientData, year: int) -> YearResult:
             c.disposal_type = disp.type
             c.disposal_date = disp.date
             c.proceeds = disp.proceeds
-            c.disposed = c.opening + c.acquisition + c.repair_capitalized
+            c.disposed = (c.opening + c.acquisition + c.addition
+                          + c.repair_capitalized)
             c.gain_loss = disp.proceeds - c.disposed
             c.base = ZERO
             c.closing = ZERO
             c.monthly = [ZERO] * 12
             continue
 
-        c.base = c.opening + c.acquisition + c.repair_capitalized
+        c.base = (c.opening + c.acquisition + c.addition
+                  + c.repair_capitalized)
 
         # step 5: the 500/5% test runs on the pre-depreciation residual,
         # measured against the asset's initial cost
-        c.threshold_hit, c.threshold_reason = threshold_test(c, c.opening)
+        c.threshold_hit, c.threshold_reason = threshold_test(
+            c, c.opening, c.cost_prior)     # start of year: before this year's
+                                            # additions existed
 
         if c.threshold_hit and c.asset_id in writeoffs:
             c.written_off = True
@@ -404,8 +430,9 @@ def compute_year(data: ClientData, year: int) -> YearResult:
             cards=group,
             mixed_rates=len({c.rate_info.applied for c in group}) > 1,
         )
-        for f in ("opening", "acquisition", "repair_actual", "repair_deductible",
-                  "repair_capitalized", "disposed", "depreciation", "writeoff", "closing"):
+        for f in ("opening", "acquisition", "addition", "repair_actual",
+                  "repair_deductible", "repair_capitalized", "disposed",
+                  "depreciation", "writeoff", "closing"):
             setattr(cat, f, sum((getattr(c, f) for c in group), ZERO))
         st = statutory(year, code)
         if st.repair_limit is not None:
@@ -414,13 +441,14 @@ def compute_year(data: ClientData, year: int) -> YearResult:
         cat.monthly = [sum((c.monthly[m] for c in group), ZERO) for m in range(12)]
 
         # -- control §5.4.1: the balance identity, checked per category -----
-        lhs = (cat.opening + cat.acquisition + cat.repair_capitalized
+        lhs = (cat.opening + cat.acquisition + cat.addition
+               + cat.repair_capitalized
                - cat.disposed - cat.depreciation - cat.writeoff)
         if money(lhs) != money(cat.closing):
             raise CalcError(
-                f"баланс не сошёлся по категории {code}: "
+                f"{code} kateqoriyası üzrə balans uyğun gəlmir: "
                 f"{money(lhs)} != {money(cat.closing)}. "
-                f"Это ошибка движка, а не данных."
+                f"Bu, məlumat deyil, mühərrik xətasıdır."
             )
 
         # -- control §5.4.1b: the movement statement must meet the residual --
@@ -428,15 +456,15 @@ def compute_year(data: ClientData, year: int) -> YearResult:
         acc_end = sum((c.accumulated_end for c in group), ZERO)
         if money(gross_end - acc_end) != money(cat.closing):
             raise CalcError(
-                f"движение не сошлось по категории {code}: первоначальная "
-                f"{money(gross_end)} − накопленная {money(acc_end)} = "
-                f"{money(gross_end - acc_end)}, а остаток {money(cat.closing)}."
+                f"{code} kateqoriyası üzrə hərəkət uyğun gəlmir: ilkin dəyər "
+                f"{money(gross_end)} − yığılmış {money(acc_end)} = "
+                f"{money(gross_end - acc_end)}, qalıq isə {money(cat.closing)}."
             )
         result.categories.append(cat)
 
-    for f in ("opening", "acquisition", "repair_actual", "repair_limit",
-              "repair_deductible", "repair_capitalized", "disposed",
-              "depreciation", "writeoff", "closing"):
+    for f in ("opening", "acquisition", "addition", "repair_actual",
+              "repair_limit", "repair_deductible", "repair_capitalized",
+              "disposed", "depreciation", "writeoff", "closing"):
         result.totals[f] = sum((getattr(cat, f) for cat in result.categories), ZERO)
     result.monthly = [
         sum((cat.monthly[m] for cat in result.categories), ZERO) for m in range(12)

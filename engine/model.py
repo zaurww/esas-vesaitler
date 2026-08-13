@@ -44,6 +44,24 @@ class Disposal:
 
 
 @dataclass(frozen=True)
+class Addition:
+    """A capital addition to an asset already on the books.
+
+    A component bought for an existing laptop, an extra unit bolted onto a
+    machine. Unlike a repair (art. 115) it is NOT limited: it does not restore
+    the asset, it enlarges it, so the whole amount joins the cost.
+
+    The acquisition cost in assets.tsv stays the immutable original fact; the
+    effective cost is derived as original + additions up to that year (§2).
+    """
+    year: int
+    asset_id: str
+    date: Optional[date]
+    amount: Decimal
+    note: str = ""
+
+
+@dataclass(frozen=True)
 class Repair:
     year: int
     asset_id: str
@@ -91,6 +109,7 @@ class ClientData:
     opening_balances: list[OpeningBalance] = field(default_factory=list)
     disposals: list[Disposal] = field(default_factory=list)
     repairs: list[Repair] = field(default_factory=list)
+    additions: list[Addition] = field(default_factory=list)
     statuses: list[TaxpayerStatus] = field(default_factory=list)
     elections: list[RateElection] = field(default_factory=list)
     writeoffs: list[WriteOff] = field(default_factory=list)

@@ -266,7 +266,8 @@ async function boot(){
     if (!r.ok || !CTX.clients) return fail(CTX.error || 'context alınmadı');
   } catch (e) { return fail(e.message); }
   const cs = document.getElementById('client');
-  cs.innerHTML = CTX.clients.map(c => `<option value="${c.slug}">${esc(c.name)}</option>`).join('');
+  cs.innerHTML = CTX.clients.map(c =>
+    `<option value="${c.slug}">${esc(c.name)} · ${esc(c.slug)}</option>`).join('');
   document.getElementById('ver').textContent = 'engine ' + CTX.engine_version;
   cs.onchange = () => { fillYears(); load(); };
   document.getElementById('year').onchange = load;
@@ -475,14 +476,14 @@ const cardCount = d => d.categories.reduce((n, c) => n + c.cards.length, 0);
 
 function viewAnnual(d){
   const head = ['','İnv.№','Adı','Alış tarixi','İlkin dəyər','Qalıq (il əvvəli)',
-                'Daxilolma','Kapital. təmir','Xaricetmə','Dərəcə','Amortizasiya',
-                'Silinmə','Qalıq (il sonu)'];
+                'Daxilolma','Dəyər artımı','Kapital. təmir','Xaricetmə','Dərəcə',
+                'Amortizasiya','Silinmə','Qalıq (il sonu)'];
   let rows = '';
   for (const cat of cats(d)){
     const cards = cat.cards.filter(match);
     if (!cards.length) continue;
     const r = cat.rate;
-    rows += `<tr class="cat"><td colspan="13">${esc(cat.name_az)}
+    rows += `<tr class="cat"><td colspan="14">${esc(cat.name_az)}
       <span class="rate">${pct(r.statutory_max)} × ${r.coefficient} (${esc(d.status)})
       = ${pct(r.ceiling)} hədd · tətbiq <strong>${pct(r.applied)}</strong>
       ${cat.mixed_rates ? '<span class="tag">fərdi dərəcələr var</span>'
@@ -505,6 +506,7 @@ function viewAnnual(d){
         <td class="num">${money(c.cost)}</td>
         <td class="num">${money(c.opening)}</td>
         <td class="num">${money(c.acquisition)}</td>
+        <td class="num">${money(c.addition)}</td>
         <td class="num">${money(c.repair_capitalized)}</td>
         <td class="num">${money(c.disposed)}</td>
         <td class="num">${parseFloat(c.rate) ? pct(c.rate) : '<span class="zero">—</span>'}${
@@ -517,6 +519,7 @@ function viewAnnual(d){
     rows += `<tr class="total"><td colspan="4">${esc(cat.name_az)} — yekun</td>
       <td class="num"></td><td class="num">${money(cat.opening)}</td>
       <td class="num">${money(cat.acquisition)}</td>
+      <td class="num">${money(cat.addition)}</td>
       <td class="num">${money(cat.repair_capitalized)}</td>
       <td class="num">${money(cat.disposed)}</td>
       <td></td><td class="num">${money(cat.depreciation)}</td>
@@ -525,13 +528,14 @@ function viewAnnual(d){
   // With a category picked, the grand total must cover only what is shown.
   const shown = cats(d);
   const t = CATFILTER
-    ? Object.fromEntries(['opening','acquisition','repair_capitalized','disposed',
-        'depreciation','writeoff','closing'].map(k =>
+    ? Object.fromEntries(['opening','acquisition','addition','repair_capitalized',
+        'disposed','depreciation','writeoff','closing'].map(k =>
         [k, shown.reduce((s,c) => s + parseFloat(c[k]), 0).toFixed(2)]))
     : d.totals;
   rows += `<tr class="total"><td colspan="4">C Ə M İ${
     CATFILTER ? ' (seçilmiş kateqoriya)' : ''}</td><td></td>
     <td class="num">${money(t.opening)}</td><td class="num">${money(t.acquisition)}</td>
+    <td class="num">${money(t.addition)}</td>
     <td class="num">${money(t.repair_capitalized)}</td>
     <td class="num">${money(t.disposed)}</td><td></td>
     <td class="num">${money(t.depreciation)}</td><td class="num">${money(t.writeoff)}</td>
@@ -576,11 +580,11 @@ function viewNotes(d){
   }
   const n = k => fmt.format(parseFloat(d.totals[k]));
   h += `<h3>Yoxlama</h3><div class="card" style="padding:14px">
-    Balans eyniliyi: qalıq(əvvəl) + daxilolma + kapitallaşan təmir − xaricetmə
-    − amortizasiya − silinmə = qalıq(son)
-    <br><strong>${n('opening')} + ${n('acquisition')} + ${n('repair_capitalized')}
-    − ${n('disposed')} − ${n('depreciation')} − ${n('writeoff')}
-    = ${n('closing')}</strong> ✔
+    Balans eyniliyi: qalıq(əvvəl) + daxilolma + dəyər artımı + kapitallaşan təmir
+    − xaricetmə − amortizasiya − silinmə = qalıq(son)
+    <br><strong>${n('opening')} + ${n('acquisition')} + ${n('addition')}
+    + ${n('repair_capitalized')} − ${n('disposed')} − ${n('depreciation')}
+    − ${n('writeoff')} = ${n('closing')}</strong> ✔
     <div class="hint" style="margin-top:8px">Hər kateqoriya üzrə də yoxlanılır;
       uyğunsuzluq halında hesablama dayanır (§2.1).</div></div>
     <h3>Versiya</h3><div class="card" style="padding:14px">
@@ -602,21 +606,29 @@ function openCard(id){
   let h = '';
   if (!REPORT.is_closed){
     h += `<div class="acts">
+      <button onclick="showHistory('${card.asset_id}')"><strong>Tam tarixçə</strong></button>
       <button onclick="formAsset(CARD)">Redaktə</button>
       <button onclick="formOpening(CARD)">Açılış qalığı</button>
       <button onclick="formDisposal(CARD)">Xaricetmə</button>
       <button onclick="formRepair(CARD)">Təmir xərci</button>
+      <button onclick="formAddition(CARD)">Dəyər artımı</button>
       <button onclick="formElection(CAT, CARD)">Fərdi dərəcə</button>
       ${card.threshold_hit ? `<button onclick="toggleWriteoff(CARD, ${!card.written_off})">
         ${card.written_off ? 'Silinməni ləğv et' : '500/5% silinməsi'}</button>` : ''}
       <button class="danger" onclick="confirmDelete(CARD)">Sil</button>
     </div>`;
   } else {
-    h += `<div class="note">${REPORT.year} ili bağlıdır — dəyişiklik qəbul edilmir (§6).</div>`;
+    h += `<div class="acts">
+      <button onclick="showHistory('${card.asset_id}')"><strong>Tam tarixçə</strong></button>
+    </div>
+    <div class="note">${REPORT.year} ili bağlıdır — dəyişiklik qəbul edilmir (§6).</div>`;
   }
-  h += step('İlkin dəyər', card.cost);
+  h += step('İlkin dəyər (alış)', card.cost);
+  if (parseFloat(card.cost_effective) !== parseFloat(card.cost))
+    h += step('İlkin dəyər (artımlarla)', card.cost_effective);
   h += step('1 · Qalıq (il əvvəli)', card.opening);
   h += step('2 · Daxilolma', card.acquisition);
+  h += step('2a · Dəyər artımı (komponent)', card.addition);
   h += step('3 · Kapitallaşan təmir (m.115)', card.repair_capitalized);
   h += step('4 · Xaricetmə', card.disposed);
   h += step('= Amortizasiya bazası', card.base);
@@ -828,6 +840,25 @@ function formRepair(card){
     d => post('repair.add', d), 'Əlavə et');
 }
 
+/* ---- capital addition ----
+   A component bought for an asset already on the books. Not a repair: it is
+   not limited by article 115, it joins the cost in full. */
+function formAddition(card){
+  openModal(`Dəyər artımı — ${card.inv_no || card.name}`,
+    `<input type="hidden" name="asset_id" value="${card.asset_id}">` +
+    `<div class="row2">
+      ${fld('date','Tarix',{type:'date',req:true,value:REPORT.year+'-01-01'})}
+      ${fld('amount','Məbləğ (AZN)',{type:'number',step:'0.01',req:true})}</div>` +
+    fld('note','Nə alınıb',{placeholder:'Əlavə yaddaş, komponent…'}) +
+    `<div class="note q" style="margin-top:6px">Təmirdən fərqi: təmir aktivi
+      bərpa edir və m.115 limitinə tabedir, dəyər artımı isə aktivi
+      <strong>böyüdür</strong> — tam məbləğ ilkin dəyərə və amortizasiya
+      bazasına əlavə olunur, limit tətbiq edilmir.<br>
+      Vergi baxımından hansı halın hansına aid olması —
+      <strong>CLAUDE.md §12.8, həll olunmayıb</strong>.</div>`,
+    d => post('addition.add', d), 'Əlavə et');
+}
+
 /* ---- rate election ---- */
 function formElection(cat, card){
   const ri = card ? card.rate_info : cat.rate;
@@ -844,6 +875,80 @@ function formElection(cat, card){
                Faizlə yazın (məs. 25 və ya 50). Boş buraxsanız seçim silinir və
                norma (${pct(ri.statutory_max)}) tətbiq olunur.`}),
     d => post('election.set', d));
+}
+
+/* ---- asset history ("лицевой счёт") ----
+   Every year of one asset recomputed from the events, so it can never drift
+   from the yearly reports. */
+async function showHistory(id){
+  closeDrawer();
+  const slug = document.getElementById('client').value;
+  const h = await (await fetch(`/api/asset-history?client=${slug}&asset_id=${id}`)).json();
+  if (h.error) return fail(h.error);
+  const a = h.asset;
+  const last = h.years[h.years.length - 1];
+
+  const ev = h.events.map(e => `<tr><td class="d">${esc(e.date)}</td>
+    <td>${esc(e.kind)}</td><td class="num">${e.amount ? money(e.amount) : ''}</td>
+    <td>${esc(e.note||'')}</td></tr>`).join('');
+
+  const yr = h.years.map(y => `<tr class="${y.written_off ? 'warn'
+      : y.disposal_type ? 'next' : ''}">
+    <td><strong>${y.year}</strong>${y.closed ? '<span class="tag d">bağlı</span>' : ''}</td>
+    <td class="num">${money(y.opening)}</td>
+    <td class="num">${money(y.acquisition)}</td>
+    <td class="num">${money(y.addition)}</td>
+    <td class="num">${money(y.repair_capitalized)}</td>
+    <td class="num">${money(y.disposed)}</td>
+    <td class="num">${money(y.base)}</td>
+    <td class="num">${parseFloat(y.rate) ? pct(y.rate) : '<span class="zero">—</span>'}</td>
+    <td class="num"><strong>${money(y.depreciation)}</strong></td>
+    <td class="num">${money(y.writeoff)}</td>
+    <td class="num">${money(y.closing)}</td>
+    <td class="num">${money(y.accumulated_end)}</td></tr>`).join('');
+
+  const totDep = h.years.reduce((s,y) => s + parseFloat(y.depreciation), 0);
+  const totAdd = h.years.reduce((s,y) => s + parseFloat(y.addition), 0);
+
+  document.getElementById('view').innerHTML = `
+    <div class="card" style="padding:16px 18px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
+        <div><h2 style="margin:0;font-size:17px;background:none;color:inherit;padding:0">
+            ${esc(a.inv_no ? a.inv_no + ' · ' : '')}${esc(a.name)}</h2>
+          <div class="hint">${esc(a.category_name)}
+            ${a.in_date ? '· alınıb ' + esc(a.in_date) : ''}
+            ${a.counterparty ? '· ' + esc(a.counterparty) : ''}</div></div>
+        <button class="ghost" onclick="TAB='annual';render()">← hesabata qayıt</button>
+      </div>
+      <div class="kpis" style="margin:14px 0 0">
+        <div class="kpi"><div class="k">İlkin dəyər</div>
+          <div class="v">${money(a.cost)}</div></div>
+        <div class="kpi"><div class="k">Dəyər artımı (cəmi)</div>
+          <div class="v">${fmt.format(totAdd)}</div></div>
+        <div class="kpi"><div class="k">Yığılmış amortizasiya</div>
+          <div class="v">${fmt.format(totDep)}</div></div>
+        <div class="kpi hi"><div class="k">Qalıq dəyər</div>
+          <div class="v">${last ? fmt.format(parseFloat(last.closing)) : '—'}</div></div>
+      </div>
+    </div>
+
+    <h3>İllər üzrə hərəkət</h3>
+    <div class="card"><div class="scroll"><table><thead><tr>
+      <th>İl</th><th class="num">Qalıq (əvvəl)</th><th class="num">Daxilolma</th>
+      <th class="num">Dəyər artımı</th><th class="num">Kapital. təmir</th>
+      <th class="num">Xaricetmə</th><th class="num">Baza</th><th class="num">Dərəcə</th>
+      <th class="num">Amortizasiya</th><th class="num">Silinmə</th>
+      <th class="num">Qalıq (son)</th><th class="num">Yığılmış</th>
+    </tr></thead><tbody>${yr}</tbody></table></div></div>
+
+    <h3>Əməliyyatlar</h3>
+    <div class="card"><div class="scroll"><table><thead><tr>
+      <th>Tarix</th><th>Əməliyyat</th><th class="num">Məbləğ</th><th>Qeyd</th>
+    </tr></thead><tbody>${ev}</tbody></table></div></div>
+
+    <div class="note q">Bu hesabat saxlanmır — hər dəfə hadisələrdən yenidən
+      hesablanır, ona görə illik hesabatlarla heç vaxt ayrıla bilməz (§2).</div>`;
+  document.getElementById('side').innerHTML = '';
 }
 
 /* ---- bulk import ----------------------------------------------------

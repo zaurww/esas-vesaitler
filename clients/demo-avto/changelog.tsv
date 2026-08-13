@@ -7,3 +7,7 @@
 2026-08-13T09:45:30+00:00	Zaur	asset.create	AV-008	opening_balance 2025		3400
 2026-08-13T09:57:26+00:00	Zaur	election.set		rate nv 2025		20.00%
 2026-08-13T09:57:58+00:00	Zaur	election.set		rate ym 2025		20.00%
+2026-08-13T10:12:51+00:00	Zaur	asset.create	AV-009	asset		[new]  toyota corolla
+2026-08-13T10:15:06+00:00	Zaur	asset.create	AV-010	asset		[carried] YT-0001 Notbuk Dell Latitude
+2026-08-13T10:15:06+00:00	Zaur	asset.create	AV-010	opening_balance 2025		1800
+2026-08-13T10:16:06+00:00	Zaur	addition.add	AV-010	addition 2025-06-11		600.00
