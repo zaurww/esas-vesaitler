@@ -18,6 +18,7 @@ from __future__ import annotations
 import getpass
 import re
 import shutil
+import unicodedata
 from contextlib import contextmanager
 from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
@@ -695,16 +696,34 @@ IMPORT_ALIASES = {
 }
 
 
+def _fold(text: object) -> str:
+    """Casefold a header for comparison, Azerbaijani-safe.
+
+    `"İnv.№".lower()` is NOT `"inv.№"`: the dotted capital İ lowercases to an
+    `i` followed by a combining dot above, so a plain comparison misses every
+    header that starts with it. The dotted/dotless pair İ i I ı is folded to a
+    single `i` and combining marks are dropped. `ə ç ş ğ ö ü` are letters in
+    their own right and survive untouched.
+    """
+    s = str(text or "")
+    for ch in "İIı":
+        s = s.replace(ch, "i")
+    s = unicodedata.normalize("NFKD", s)
+    s = "".join(c for c in s if not unicodedata.combining(c))
+    return " ".join(s.lower().split())
+
+
 def guess_columns(header: list[str]) -> dict[str, int]:
     """Best-effort mapping of source columns to our fields. The user corrects
     it in the UI; guessing only removes the boring part."""
-    norm = [" ".join(str(h or "").split()).lower() for h in header]
+    norm = [_fold(h) for h in header]
     out: dict[str, int] = {}
     for field, aliases in IMPORT_ALIASES.items():
+        folded = [_fold(a) for a in aliases]
         for i, h in enumerate(norm):
             if i in out.values() or not h:
                 continue
-            if h in aliases or any(a and (h.startswith(a) or a in h) for a in aliases):
+            if h in folded or any(a and (h.startswith(a) or a in h) for a in folded):
                 out[field] = i
                 break
     return out

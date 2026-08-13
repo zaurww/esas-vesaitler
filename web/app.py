@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from engine.calc import MONTHS_AZ, CalcError, compute_year  # noqa: E402
-from engine.excel import build_workbook  # noqa: E402
+from engine.excel import build_import_template, build_workbook  # noqa: E402
 from engine.mutate import (  # noqa: E402
     ACTIONS, IMPORT_FIELDS, guess_columns, rows_of, suggest_inv_no,
 )
@@ -407,6 +407,16 @@ class Handler(BaseHTTPRequestHandler):
             if url.path == "/api/asset-history":
                 self._json(asset_history(ROOT, q.get("client", [""])[0],
                                          q.get("asset_id", [""])[0]))
+                return
+
+            if url.path == "/api/import-template":
+                blob = build_import_template(list(IMPORT_FIELDS))
+                self._send(
+                    200, blob,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    {"Content-Disposition":
+                     'attachment; filename="EV-idxal-sablonu.xlsx"'},
+                )
                 return
 
             if url.path == "/api/next-inv":

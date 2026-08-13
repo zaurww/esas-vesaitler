@@ -1083,7 +1083,13 @@ function impRender(){
           placeholder="Excel-də sahəni seçin → Ctrl+C → burada Ctrl+V"></textarea>
         <div class="h">Birinci sətir başlıq olmalıdır.</div></div>
       <div class="fld"><label>…və ya fayl seçin (.xlsx, .csv, .tsv)</label>
-        <input type="file" id="impfile" accept=".xlsx,.csv,.tsv,.txt"></div>`,
+        <input type="file" id="impfile" accept=".xlsx,.csv,.tsv,.txt"></div>
+      <div class="note q">Müştəridə hazır cədvəl yoxdursa, şablonu yükləyib
+        ona göndərin: sütunlar hazırdır, kateqoriya siyahıdan seçilir.
+        <div class="acts" style="margin:8px 0 0">
+          <a class="btn" style="border:1px solid var(--line)"
+             href="/api/import-template">⬇ İdxal şablonunu yüklə</a>
+        </div></div>`,
       'Davam et');
     MSUBMIT = async () => {
       const f = document.getElementById('impfile').files[0];

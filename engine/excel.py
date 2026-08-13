@@ -13,7 +13,10 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
+from datetime import date
+
 from .calc import MONTHS_AZ, YearResult
+from .rates import CATEGORIES, statutory
 
 MONEY = "#,##0.00"
 PCT = "0%"
@@ -327,6 +330,89 @@ def build_workbook(r: YearResult, counterparty: dict | None = None) -> bytes:
     _sheet_monthly(wb, r)
     _sheet_repair(wb, r)
     _sheet_notes(wb, r)
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+# --- import template -------------------------------------------------------
+# Built FROM the importer's own field list, so the template and the parser
+# cannot drift apart: a column that stops being recognised stops being
+# offered. The first sheet is left empty on purpose -- examples live on their
+# own sheet, so nothing sample-shaped can be imported by accident.
+
+TEMPLATE_LABELS = {
+    "inv_no": ("İnv.№", "Boş buraxsanız avtomatik verilir"),
+    "name": ("Adı", "MƏCBURİ"),
+    "category": ("Kateqoriya", "MƏCBURİ — siyahıdan seçin"),
+    "in_date": ("Alış tarixi", "YYYY-MM-DD. Bu il alınıbsa məcburi"),
+    "cost": ("İlkin dəyər", "Alış qiyməti, AZN"),
+    "opening_residual": ("Qalıq dəyər", "İlin əvvəlinə. Doldurulubsa — "
+                                        "ƏV əvvəlki illərdən gəlir"),
+    "counterparty": ("Kontragent", "Satıcı / təchizatçı"),
+    "note": ("Qeyd", "İxtiyari"),
+}
+
+TEMPLATE_EXAMPLES = [
+    ["NV-0001", "Toyota Camry 2.5", "nv", "2026-02-14", "45000", "",
+     "Toyota Center Baku", "bu il alınıb"],
+    ["MA-0007", "Kompressor", "ma", "2023-05-10", "12000", "4800",
+     "Aqro Texnika", "əvvəlki illərdən — qalıq dəyər son bəyannamədən"],
+    ["", "Ofis mebeli", "dg", "2024-11-02", "3200", "1900", "Embawood",
+     "inv.№ boşdur — proqram özü verəcək"],
+]
+
+
+def build_import_template(fields: list[str]) -> bytes:
+    from openpyxl.worksheet.datavalidation import DataValidation
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "ƏV"
+    _header(ws, 1, [TEMPLATE_LABELS[f][0] for f in fields])
+    ws.freeze_panes = "A2"
+    _widths(ws, [14, 34, 16, 14, 15, 16, 26, 30])
+
+    cats = [c for c in CATEGORIES if not c.code.startswith("qma")]
+
+    ref = wb.create_sheet("Kateqoriyalar")
+    _header(ref, 1, ["Kod", "Kateqoriya", "Amortizasiya norması (maks)"])
+    for i, c in enumerate(cats, start=2):
+        ref.cell(i, 1, c.code).border = BORDER
+        ref.cell(i, 2, c.name_az).border = BORDER
+        st = statutory(date.today().year, c.code)
+        cell = ref.cell(i, 3, None if st.max_rate is None else float(st.max_rate))
+        cell.number_format, cell.border = PCT, BORDER
+    _widths(ref, [10, 34, 26])
+
+    # a dropdown on the category column, so the code is picked, not guessed
+    col = chr(ord("A") + fields.index("category"))
+    dv = DataValidation(
+        type="list",
+        formula1=f"=Kateqoriyalar!$A$2:$A${len(cats) + 1}",
+        allow_blank=False, showDropDown=False,
+    )
+    dv.error = "Kateqoriya siyahıdan seçilməlidir"
+    dv.errorTitle = "Naməlum kateqoriya"
+    ws.add_data_validation(dv)
+    dv.add(f"{col}2:{col}1000")
+
+    ex = wb.create_sheet("Nümunə")
+    _header(ex, 1, [TEMPLATE_LABELS[f][0] for f in fields])
+    for i, row in enumerate(TEMPLATE_EXAMPLES, start=2):
+        for j, v in enumerate(row[:len(fields)], start=1):
+            ex.cell(i, j, v).border = BORDER
+    r = len(TEMPLATE_EXAMPLES) + 3
+    ex.cell(r, 1, "Sütunlar haqqında").font = Font(bold=True, size=11)
+    for k, f in enumerate(fields, start=r + 1):
+        label, hint = TEMPLATE_LABELS[f]
+        ex.cell(k, 1, label).font = Font(bold=True)
+        ex.cell(k, 2, hint)
+    ex.cell(k + 2, 1,
+            "Bu vərəq yalnız nümunədir — idxal birinci vərəqdən («ƏV») oxunur.")
+    ex.cell(k + 2, 1).font = Font(italic=True, color="8A5B00")
+    _widths(ex, [16, 46, 16, 14, 15, 16, 26, 30])
+
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
