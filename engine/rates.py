@@ -62,7 +62,13 @@ STATUTORY_RATES: List[RateRow] = [
     RateRow(2001, "bt", D("0.07"), D("0.02")),
     RateRow(2001, "ma", D("0.20"), D("0.05")),
     RateRow(2001, "nv", D("0.25"), D("0.05")),  # corrected from 3%
-    RateRow(2001, "ym", D("0.25"), D("0.08")),  # TODO §12.3 -- verify this 8%
+    # Art. 115.1 sets the repair limit by referring to article 114.3.x, and
+    # trucks are not a category of their own there -- they are 114.3.3
+    # nəqliyyat vasitələri, so 5%, not the 8% carried over from the source
+    # workbook. The code is kept because client data already uses it.
+    RateRow(2001, "ym", D("0.25"), D("0.05")),
+    # 114.3.2-1 (high-tech computing) is NOT named in 115.1, so its repair
+    # limit is unresolved -- see §12.3. 3% is the source workbook's figure.
     RateRow(2001, "yt", D("0.25"), D("0.03")),
     RateRow(2001, "dg", D("0.20"), D("0.03")),
     RateRow(2001, "it", None, D("0.03")),       # 1/MAX(FİM;5)

@@ -85,6 +85,34 @@ def _sheet_summary(wb: Workbook, r: YearResult) -> None:
     ws.freeze_panes = "A5"
     _widths(ws, [34, 10, 18, 16, 16, 16, 16, 18, 18])
 
+    if r.disposed_cards:
+        row += 3
+        ws.cell(row, 1, "Təqdim edilmədən gəlir / zərər — m.114.7, m.114.9")             .font = Font(bold=True, size=11)
+        row += 1
+        _header(ws, row, ["İnv.№", "Adı", "Tarix", "Növ", "Satış məbləği",
+                          "Qalıq dəyər", "Fərq"])
+        row += 1
+        for c in r.disposed_cards:
+            vals = [c.inv_no, c.name,
+                    c.disposal_date.isoformat() if c.disposal_date else "",
+                    c.disposal_type, _f(c.proceeds), _f(c.disposed),
+                    _f(c.gain_loss)]
+            for i, v in enumerate(vals, start=1):
+                cell = ws.cell(row, i, v)
+                cell.border = BORDER
+                if i >= 5:
+                    cell.number_format = MONEY
+            row += 1
+        for label, value in (("m.114.7 — gəlirə əlavə edilir", r.disposal_gain),
+                             ("m.114.9 — gəlirdən çıxılır", r.disposal_loss)):
+            ws.cell(row, 1, label).font = Font(bold=True)
+            cell = ws.cell(row, 7, _f(value))
+            cell.number_format, cell.fill, cell.font = MONEY, TOTAL_FILL, Font(bold=True)
+            row += 1
+        ws.cell(row + 1, 1,
+                "Bu məbləğlər amortizasiyaya daxil deyil — bəyannamədə ayrıca "
+                "sətirlərdir.").font = Font(italic=True, size=9, color="5A6B80")
+
     row += 3
     ws.cell(row, 1, "Dərəcənin hesablanması").font = Font(bold=True, size=11)
     row += 1

@@ -654,6 +654,31 @@ function viewNotes(d){
     h += '<h3>Həll olunmamış suallar (CLAUDE.md §12)</h3>' +
       d.open_questions.map(w => `<div class="note q">${esc(w)}</div>`).join('');
   }
+  if (d.disposals.length){
+    h += `<h3>Təqdim edilmədən gəlir / zərər — m.114.7, m.114.9</h3>
+      <div class="card"><div class="scroll"><table><thead><tr>
+        <th>İnv.№</th><th>Adı</th><th>Tarix</th><th>Növ</th>
+        <th class="num">Satış məbləği</th><th class="num">Qalıq dəyər</th>
+        <th class="num">Fərq</th></tr></thead><tbody>${
+        d.disposals.map(c => {
+          const g = parseFloat(c.gain_loss);
+          return `<tr><td>${esc(c.inv_no)}</td><td>${esc(c.name)}</td>
+            <td class="d">${esc(c.date)}</td><td>${esc(c.type)}</td>
+            <td class="num">${money(c.proceeds)}</td>
+            <td class="num">${money(c.residual)}</td>
+            <td class="num" style="color:${g>0?'var(--pos)':g<0?'var(--neg)':'inherit'}">
+              ${g>0?'+':''}${money(c.gain_loss)}</td></tr>`;
+        }).join('')}</tbody></table></div></div>
+      <div class="kpis" style="margin-top:12px">
+        <div class="kpi"><div class="k">m.114.7 — gəlirə əlavə</div>
+          <div class="v">${fmt.format(parseFloat(d.disposal_gain))}</div></div>
+        <div class="kpi"><div class="k">m.114.9 — gəlirdən çıxılır</div>
+          <div class="v">${fmt.format(parseFloat(d.disposal_loss))}</div></div>
+      </div>
+      <div class="note q">Bu məbləğlər amortizasiyaya <strong>daxil deyil</strong> —
+        bəyannamədə ayrıca sətirlərdir. Qalıq dəyər m.114.6-ya görə onsuz da
+        kateqoriyanın bazasından çıxılıb.</div>`;
+  }
   const n = k => fmt.format(parseFloat(d.totals[k]));
   h += `<h3>Yoxlama</h3><div class="card" style="padding:14px">
     Balans eyniliyi: qalıq(əvvəl) + daxilolma + dəyər artımı + kapitallaşan təmir

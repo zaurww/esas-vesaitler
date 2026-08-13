@@ -79,6 +79,15 @@ def serialize(r) -> dict:
         "format_version": r.format_version,
         "months": MONTHS_AZ,
         "totals": {k: m(v) for k, v in r.totals.items()},
+        "disposal_gain": m(r.disposal_gain),
+        "disposal_loss": m(r.disposal_loss),
+        "disposals": [
+            {"inv_no": c.inv_no, "name": c.name, "category": c.category,
+             "date": c.disposal_date.isoformat() if c.disposal_date else "",
+             "type": c.disposal_type, "proceeds": m(c.proceeds),
+             "residual": m(c.disposed), "gain_loss": m(c.gain_loss)}
+            for c in r.disposed_cards
+        ],
         "monthly": [m(v) for v in r.monthly],
         "warnings": r.warnings,
         "open_questions": r.open_questions,

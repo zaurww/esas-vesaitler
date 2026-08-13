@@ -182,6 +182,17 @@ class YearResult:
     totals: dict[str, Decimal] = field(default_factory=dict)
     monthly: list[Decimal] = field(default_factory=list)
 
+    # Art. 114.7 / 114.9: the difference between what an asset sold for and
+    # what it was still worth on the books. NOT part of depreciation -- these
+    # are their own lines in the profit return, one adding to income, the
+    # other deducting from it, so they are kept apart from the totals above.
+    disposal_gain: Decimal = ZERO     # 114.7 -- added to income
+    disposal_loss: Decimal = ZERO     # 114.9 -- deducted from income
+
+    @property
+    def disposed_cards(self) -> list[CardResult]:
+        return [c for c in self.cards if c.disposal_type]
+
     @property
     def cards(self) -> list[CardResult]:
         return [c for cat in self.categories for c in cat.cards]
@@ -572,11 +583,22 @@ def compute_year(data: ClientData, year: int,
                 f"lakin writeoffs.tsv-də qərar yoxdur — silinmə tətbiq edilmədi."
             )
     for c in result.cards:
-        if c.disposal_type and c.gain_loss != ZERO:
-            result.open_questions.append(
-                f"{c.inv_no or c.name}: satışdan {'gəlir' if c.gain_loss > 0 else 'zərər'} "
-                f"{abs(c.gain_loss):.2f} AZN (satış {c.proceeds:.2f} − qalıq {c.disposed:.2f}). "
-                f"Bəyannamədə əks etdirilməsi həll olunmayıb — CLAUDE.md §12.1."
+        if not c.disposal_type:
+            continue
+        if c.gain_loss > ZERO:
+            result.disposal_gain += c.gain_loss
+        elif c.gain_loss < ZERO:
+            result.disposal_loss += -c.gain_loss
+        if c.disposal_type == "leqv" and c.gain_loss != ZERO:
+            # 144.1.3 sets the gain aside when an asset was destroyed or taken
+            # against the owner's will AND the proceeds are reinvested in a
+            # like asset by the end of the following year. Too conditional for
+            # the engine to decide, so it is raised rather than applied.
+            result.warnings.append(
+                f"{c.inv_no or c.name}: ləğv edilib. Aktiv sahibinin iradəsindən "
+                f"asılı olmayaraq məhv olubsa və daxilolmalar növbəti ilin "
+                f"sonunadək analoji aktivə yenidən investisiya edilirsə, "
+                f"m.144.1.3-ə görə fərq nəzərə alınmaya bilər — yoxlayın."
             )
     result.carried_from_prev = any(
         c.opening_source == "carried" for c in result.cards)
