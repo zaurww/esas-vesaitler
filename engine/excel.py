@@ -161,6 +161,46 @@ def _sheet_monthly(wb: Workbook, r: YearResult) -> None:
     _widths(ws, [12, 30] + [12] * 12 + [14])
 
 
+def _sheet_repair(wb: Workbook, r: YearResult) -> None:
+    cats = [c for c in r.categories if c.repair_actual != 0]
+    if not cats:
+        return
+    ws = wb.create_sheet("Təmir m.115")
+    ws["A1"] = f"Təmir xərclərinin vergi fondu — {r.year}"
+    ws["A1"].font = Font(bold=True, size=12)
+    _header(ws, 3, ["İnv.№", "Adı", "Faktiki təmir", "Gəlirdən çıxılan",
+                    "Kapitallaşan", "Amortizasiya bazası"])
+    row = 4
+    for cat in cats:
+        c = ws.cell(row, 1, f"{cat.name_az} — qrup limiti {cat.repair_limit:,.2f} "
+                            f"(qalıq {cat.opening:,.2f})")
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=6)
+        c.fill, c.font = SUB_FILL, Font(bold=True)
+        row += 1
+        for card in cat.cards:
+            if card.repair_actual == 0:
+                continue
+            vals = [card.inv_no, card.name, _f(card.repair_actual),
+                    _f(card.repair_deductible), _f(card.repair_capitalized),
+                    _f(card.base)]
+            for i, v in enumerate(vals, start=1):
+                cell = ws.cell(row, i, v)
+                cell.border = BORDER
+                if i >= 3:
+                    cell.number_format = MONEY
+            row += 1
+    t = r.totals
+    vals = ["C Ə M İ", None, _f(t["repair_actual"]), _f(t["repair_deductible"]),
+            _f(t["repair_capitalized"]), None]
+    for i, v in enumerate(vals, start=1):
+        cell = ws.cell(row, i, v)
+        cell.fill, cell.font, cell.border = TOTAL_FILL, Font(bold=True), BORDER
+        if i >= 3:
+            cell.number_format = MONEY
+    ws.freeze_panes = "A4"
+    _widths(ws, [12, 32, 16, 18, 16, 20])
+
+
 def _sheet_notes(wb: Workbook, r: YearResult) -> None:
     if not (r.warnings or r.open_questions or r.threshold_cards):
         return
@@ -186,6 +226,7 @@ def build_workbook(r: YearResult) -> bytes:
     _sheet_summary(wb, r)
     _sheet_cards(wb, r)
     _sheet_monthly(wb, r)
+    _sheet_repair(wb, r)
     _sheet_notes(wb, r)
     buf = io.BytesIO()
     wb.save(buf)

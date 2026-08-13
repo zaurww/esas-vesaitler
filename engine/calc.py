@@ -85,7 +85,9 @@ class RateInfo:
     applied: Decimal
     elected: bool
     below_ceiling: bool
-    source: str = "ceiling"           # asset | category | ceiling
+    below_statutory: bool = False     # deliberately under the plain 114.3 norm
+    coefficient_used: bool = False    # the entrepreneur right is being exercised
+    source: str = "norm"              # asset | category | norm
 
 
 @dataclass
@@ -188,9 +190,11 @@ def compute_year(data: ClientData, year: int) -> YearResult:
             repairs[r.asset_id] = repairs.get(r.asset_id, ZERO) + r.amount
 
     # -- rate resolution ----------------------------------------------------
-    # The ceiling is always statutory x entrepreneur coefficient. Within it the
-    # client elects a rate, and the most specific election wins: the asset's own
-    # first, the category's next, the ceiling itself if neither exists.
+    # The entrepreneur coefficient raises the CEILING; it is a right, not a
+    # duty, so it is never applied on its own. With no election the plain
+    # article 114.3 norm applies -- the engine must not decide to double a
+    # client's depreciation for them.
+    # The most specific election wins: the asset's own, then the category's.
     def resolve_rate(code: str, asset_id: str = "") -> RateInfo:
         st = statutory(year, code)
         if st.max_rate is None:
@@ -199,7 +203,7 @@ def compute_year(data: ClientData, year: int) -> YearResult:
             )
         ceiling = min(st.max_rate * mult.coefficient, D("1"))
         election = data.election_for(year, code, asset_id)
-        applied = election.applied_rate if election else ceiling
+        applied = election.applied_rate if election else st.max_rate
         if applied > ceiling:
             where = f"{election.asset_id}: " if election and election.asset_id else ""
             raise CalcError(
@@ -214,8 +218,10 @@ def compute_year(data: ClientData, year: int) -> YearResult:
             status=status_row.status, coefficient=mult.coefficient, ceiling=ceiling,
             applied=applied, elected=election is not None,
             below_ceiling=applied < ceiling,
+            below_statutory=applied < st.max_rate,
+            coefficient_used=applied > st.max_rate,
             source=("asset" if election and election.asset_id
-                    else "category" if election else "ceiling"),
+                    else "category" if election else "norm"),
         )
 
     priceable = {c.code for c in CATEGORIES
@@ -357,11 +363,19 @@ def compute_year(data: ClientData, year: int) -> YearResult:
 
     # -- warnings -------------------------------------------------------------
     for cat in result.categories:
-        if cat.rate.below_ceiling and not cat.mixed_rates:
+        if cat.rate.below_statutory and not cat.mixed_rates:
             result.warnings.append(
                 f"{cat.name_az}: tətbiq olunan dərəcə {cat.rate.applied:.0%} "
-                f"həddən ({cat.rate.ceiling:.0%}) aşağıdır — bu qanunidir, "
-                f"lakin şüurlu qərar olmalıdır."
+                f"m.114.3 normasından ({cat.rate.statutory_max:.0%}) aşağıdır — "
+                f"bu qanunidir, lakin şüurlu qərar olmalıdır."
+            )
+        if mult.coefficient > D("1") and not cat.mixed_rates \
+                and not cat.rate.coefficient_used:
+            result.warnings.append(
+                f"{cat.name_az}: {STATUS_NAMES[status_row.status]} əmsalı "
+                f"(×{mult.coefficient}) tətbiq olunmayıb — bu haqdır, məcburiyyət "
+                f"deyil. İstifadə etmək üçün rate_elections.tsv-də dərəcəni "
+                f"{cat.rate.ceiling:.0%}-ə qədər qaldıra bilərsiniz."
             )
         for c in cat.cards:
             if c.rate_info.source == "asset":

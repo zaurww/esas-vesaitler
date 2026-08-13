@@ -35,7 +35,8 @@ def cmd_calc(slug: str, year: int) -> None:
         ri = cat.rate
         print(f"  {cat.name_az}  —  {ri.statutory_max:.0%} × {ri.coefficient} "
               f"= {ri.ceiling:.0%} hədd, tətbiq {ri.applied:.0%}"
-              f"{'  (həddən aşağı)' if ri.below_ceiling else ''}")
+              f"{'  (fərdi dərəcələr var)' if cat.mixed_rates else
+                 '  (həddən aşağı)' if ri.below_ceiling else ''}")
         print(f"    {'İnv.№':<10}{'Adı':<26}{'Qalıq(əvv)':>{w}}{'Daxil':>{w}}"
               f"{'Xaric':>{w}}{'Amort.':>{w}}{'Silinmə':>{w}}{'Qalıq(son)':>{w}}")
         for c in cat.cards:

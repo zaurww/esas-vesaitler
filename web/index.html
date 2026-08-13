@@ -137,6 +137,7 @@
     <div class="tabs" role="tablist">
       <button role="tab" data-tab="annual" aria-selected="true">İllik hesabat</button>
       <button role="tab" data-tab="monthly" aria-selected="false">Aylıq</button>
+      <button role="tab" data-tab="repair" aria-selected="false">Təmir (m.115)</button>
       <button role="tab" data-tab="notes" aria-selected="false">Qeydlər <span id="notecount"></span></button>
     </div>
     <input class="filter" id="filter" placeholder="Axtar:  ad, inv.№…   ( / )">
@@ -220,7 +221,49 @@ function render(){
     : TAB === 'annual' ? 'Sətrə klikləyin — hesablamanın gedişi' : '';
 
   document.getElementById('view').innerHTML =
-    TAB === 'annual' ? viewAnnual(d) : TAB === 'monthly' ? viewMonthly(d) : viewNotes(d);
+    TAB === 'annual' ? viewAnnual(d) : TAB === 'monthly' ? viewMonthly(d)
+    : TAB === 'repair' ? viewRepair(d) : viewNotes(d);
+}
+
+// Article 115: the deductible limit is a percentage of the GROUP's opening
+// residual, while the spend itself is recorded per asset. Anything over the
+// limit is capitalised into that asset's depreciation base (step 3).
+function viewRepair(d){
+  const cats = d.categories.filter(c => parseFloat(c.repair_actual) !== 0);
+  if (!cats.length) return `<div class="card" style="padding:16px">
+    ${d.year}-ci il üçün təmir xərci qeyd olunmayıb.
+    <div class="hint" style="margin-top:6px">repairs.tsv boşdur.</div></div>`;
+  let rows = '';
+  for (const cat of cats){
+    rows += `<tr class="cat"><td colspan="6">${esc(cat.name_az)}</td></tr>`;
+    for (const c of cat.cards){
+      if (parseFloat(c.repair_actual) === 0) continue;
+      rows += `<tr><td>${esc(c.inv_no)}</td><td>${esc(c.name)}</td>
+        <td class="num">${money(c.repair_actual)}</td>
+        <td class="num">${money(c.repair_deductible)}</td>
+        <td class="num">${money(c.repair_capitalized)}</td>
+        <td class="num">${money(c.base)}</td></tr>`;
+    }
+    rows += `<tr class="total"><td colspan="2">${esc(cat.name_az)} — qrup limiti
+      ${money(cat.repair_limit)} (qalıq ${money(cat.opening)})</td>
+      <td class="num">${money(cat.repair_actual)}</td>
+      <td class="num">${money(cat.repair_deductible)}</td>
+      <td class="num">${money(cat.repair_capitalized)}</td><td></td></tr>`;
+  }
+  const t = d.totals;
+  return `<div class="card"><div class="scroll"><table><thead><tr>
+      <th>İnv.№</th><th>Adı</th><th class="num">Faktiki təmir</th>
+      <th class="num">Gəlirdən çıxılan</th><th class="num">Kapitallaşan</th>
+      <th class="num">Amortizasiya bazası</th></tr></thead>
+    <tbody>${rows}<tr class="total"><td colspan="2">C Ə M İ</td>
+      <td class="num">${money(t.repair_actual)}</td>
+      <td class="num">${money(t.repair_deductible)}</td>
+      <td class="num">${money(t.repair_capitalized)}</td><td></td></tr>
+    </tbody></table></div></div>
+    <div class="note q">Limit = qrupun il əvvəlinə qalıq dəyəri × kateqoriya faizi.
+      Faktiki xərc limitdən çox olduqda, çıxılan hissə qrup daxilində təmir
+      məbləğlərinə mütənasib bölünür, qalığı isə həmin ƏV-in amortizasiya
+      bazasına əlavə olunur (CLAUDE.md §5.5).</div>`;
 }
 
 const match = c => !FILTER ||
@@ -353,13 +396,16 @@ function openCard(id){
   // factor by factor so it answers "why 50% when article 114.3 says 25%".
   const r6 = card.rate_info || cat.rate;
   const SRC = {asset: 'bu ƏV üçün fərdi seçim', category: 'kateqoriya üzrə seçim',
-               ceiling: 'seçim yoxdur — hədd tətbiq olunur'};
+               norm: 'seçim yoxdur — m.114.3 norması'};
   h += `<div class="step"><span class="l"><strong>6 · Amortizasiya dərəcəsi</strong></span>
         <span><strong>${pct(r6.applied)}</strong></span></div>
     <div class="sub">
       <div class="step"><span class="l">VM m.114.3 norması (maksimum)</span>
         <span class="num">${pct(r6.statutory_max)}</span></div>
-      <div class="step"><span class="l">Sahibkar əmsalı — ${esc(REPORT.status_name)}</span>
+      <div class="step"><span class="l">Sahibkar əmsalı — ${esc(REPORT.status_name)}
+        <em style="opacity:.75">${parseFloat(r6.coefficient) > 1
+          ? (r6.coefficient_used ? '(istifadə olunur)' : '(haqdır, istifadə olunmayıb)')
+          : ''}</em></span>
         <span class="num">× ${r6.coefficient}</span></div>
       <div class="step"><span class="l">Yuxarı hədd</span>
         <span class="num">= ${pct(r6.ceiling)}</span></div>
