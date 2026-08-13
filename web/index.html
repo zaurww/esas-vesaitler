@@ -249,8 +249,27 @@ const esc = s => String(s??'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;',
 
 let CTX = null, REPORT = null, TAB = 'annual', FILTER = '', CATFILTER = '';
 
+function needStatus(year){
+  const box = document.getElementById('error');
+  box.style.display = 'block';
+  box.style.background = '#eef3f9';
+  box.style.borderColor = '#8fa8c8';
+  box.style.color = '#2c4a70';
+  box.innerHTML = `<strong>${year} ili hələ qurulmayıb</strong><br>
+    Sahibkarlıq statusu olmadan normaya tətbiq olunan əmsal məlum deyil, ona
+    görə hesablama başlamır.
+    <div class="acts" style="margin:10px 0 0">
+      <button onclick="formStatus(${year})">${year} üçün statusu təyin et</button>
+    </div>`;
+  document.getElementById('view').innerHTML = '';
+  document.getElementById('side').innerHTML = '';
+  document.getElementById('kpis').innerHTML = '';
+}
+
 function fail(msg){
   const box = document.getElementById('error');
+  // needStatus() tints the same box blue; reset it back to the error look.
+  box.style.background = ''; box.style.borderColor = ''; box.style.color = '';
   box.style.display = 'block';
   box.innerHTML = `<strong>Hesablama dayandırıldı</strong><br>${esc(msg)}`;
   document.getElementById('view').innerHTML = '';
@@ -279,7 +298,8 @@ function fillYears(){
   const ys = document.getElementById('year');
   ys.innerHTML = (c.years || []).map(y =>
     `<option value="${y}">${y}${c.closed_years.includes(y) ? ' · bağlı' : ''}</option>`).join('');
-  if (c.years && c.years.length) ys.value = c.years[c.years.length-1];
+  // Open on a year that computes, not merely the newest one present.
+  if (c.years && c.years.length) ys.value = c.default_year || c.years[c.years.length-1];
 }
 
 async function load(){
@@ -291,6 +311,8 @@ async function load(){
   const r = await fetch(`/api/report?client=${slug}&year=${year}`);
   const data = await r.json();
   // §2.1 — a failed calculation is shown, never replaced by zeros.
+  // A missing setup step is not an error to stare at: offer the fix.
+  if (!r.ok && data.need === 'status') return needStatus(data.year);
   if (!r.ok) return fail(data.error);
   document.getElementById('error').style.display = 'none';
   REPORT = data;
@@ -1096,10 +1118,12 @@ async function impPreview(){
 }
 
 /* ---- taxpayer status ---- */
-function formStatus(){
-  const cur = REPORT.status;
-  openModal(`Sahibkarlıq statusu — ${REPORT.year}`,
-    `<input type="hidden" name="year" value="${REPORT.year}">` +
+function formStatus(year){
+  // Reachable before any report exists, so it cannot read REPORT.
+  const y = year || REPORT.year;
+  const cur = REPORT ? REPORT.status : 'mikro';
+  openModal(`Sahibkarlıq statusu — ${y}`,
+    `<input type="hidden" name="year" value="${y}">` +
     fld('status','Status',{type:'select',req:true,options:
       [['mikro','Mikro sahibkar (×2)'],['kicik','Kiçik sahibkar (×1.5)'],
        ['orta','Orta sahibkar (×1)'],['iri','İri sahibkar (×1)']]

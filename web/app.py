@@ -42,6 +42,19 @@ def available_years(data) -> list[int]:
     return sorted(years) or [data.start_year]
 
 
+def default_year(data, years: list[int]) -> int:
+    """Open on a year that actually computes.
+
+    The newest year present in the data is often a year nothing has been set
+    up for yet -- buy an asset in January and that year exists before anyone
+    has recorded the taxpayer status for it. Landing there greets the user
+    with a red error on a working installation, so prefer the newest year
+    that has a status row.
+    """
+    ready = [s.year for s in data.statuses if s.year in years]
+    return max(ready) if ready else (years[-1] if years else data.start_year)
+
+
 def serialize(r) -> dict:
     return {
         "client_name": r.client_name,
@@ -339,9 +352,11 @@ class Handler(BaseHTTPRequestHandler):
                         out.append({"slug": s, "name": s, "voen": "", "years": [],
                                     "closed_years": [], "error": str(e)})
                         continue
+                    ys = available_years(d)
                     out.append({
                         "slug": s, "name": d.client_name, "voen": d.voen,
-                        "years": available_years(d),
+                        "years": ys,
+                        "default_year": default_year(d, ys),
                         "closed_years": sorted(d.closed_years()),
                     })
                 self._json({
@@ -359,6 +374,15 @@ class Handler(BaseHTTPRequestHandler):
                 year = int(q.get("year", ["0"])[0])
                 rates.refresh(ROOT)      # pick up edits without a restart
                 data = load_client(ROOT, slug)
+                if data.status_for(year) is None:
+                    # Not a failure of the data -- a year nobody has set up
+                    # yet. Say what is missing and let the UI offer the form.
+                    self._json({
+                        "error": f"{year} ili üçün sahibkarlıq statusu "
+                                 f"göstərilməyib.",
+                        "need": "status", "year": year, "kind": "setup",
+                    }, 400)
+                    return
                 self._json(serialize(compute_year(data, year)))
                 return
 
