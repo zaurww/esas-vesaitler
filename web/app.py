@@ -423,17 +423,48 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"error": f"{type(e).__name__}: {e}", "kind": "internal"}, 500)
 
 
-def serve(port: int = 8777, open_browser: bool = True) -> None:
-    httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+class LocalServer(ThreadingHTTPServer):
+    """Loopback only -- this is a local tool, it must never be reachable from
+    the network. allow_reuse_address avoids the "port still in TIME_WAIT"
+    failure after a restart."""
+    allow_reuse_address = True
+    daemon_threads = True
+
+
+def serve(port: int = 8777, open_browser: bool = True,
+          tries: int = 12) -> None:
+    """Start the local UI.
+
+    If the port is taken -- an older copy still running, or another program --
+    step up until a free one is found rather than dying with a stack trace.
+    The accountant should not have to know what a port is.
+    """
+    httpd = None
+    for candidate in range(port, port + tries):
+        try:
+            httpd = LocalServer(("127.0.0.1", candidate), Handler)
+            port = candidate
+            break
+        except OSError:
+            continue
+    if httpd is None:
+        raise SystemExit(
+            f"portlar {port}-{port + tries - 1} məşğuldur — "
+            f"başqa bir nüsxə işləyir?"
+        )
+
     url = f"http://127.0.0.1:{port}/"
     print(f"Əsas Vəsaitlər · engine {ENGINE_VERSION}")
-    print(f"  {url}   (Ctrl+C to stop)")
+    print(f"  {url}")
+    print("  dayandırmaq üçün: Ctrl+C")
     if open_browser:
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
-        print("\nstopped")
+        print("\ndayandırıldı")
+    finally:
+        httpd.server_close()
 
 
 if __name__ == "__main__":
