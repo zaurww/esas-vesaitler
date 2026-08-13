@@ -1,0 +1,16 @@
+# Byte-compiled
+__pycache__/
+*.py[cod]
+
+# Generated reports — always recomputable from the events (CLAUDE.md §2)
+*.xlsx
+!EV_Cedveli_v4.xlsx
+
+# Real client data. git is the owner's private tool (§8); client folders
+# must never reach a shared remote. The demo client is committed on purpose.
+/clients/*
+!/clients/demo-avto/
+
+# Backups
+*.bak
+backups/

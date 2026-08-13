@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="az">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Əsas Vəsaitlər — Amortizasiya</title>
+<style>
+  :root{
+    --bg:#f5f7fa; --panel:#fff; --ink:#15202e; --muted:#6a7a90; --line:#e3e8ef;
+    --accent:#1f3a5f; --accent-soft:#eef2f7; --warn-bg:#fff6e0; --warn-ink:#8a5b00;
+    --warn-line:#e8c977; --neg:#b3261e; --pos:#1a7a4c; --radius:10px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--ink);
+    font:14px/1.45 "Segoe UI",system-ui,-apple-system,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .num{font-variant-numeric:tabular-nums; text-align:right; white-space:nowrap}
+  button,select,input{font:inherit;color:inherit}
+
+  /* ---------- top bar ---------- */
+  header{
+    position:sticky; top:0; z-index:20; background:var(--accent); color:#fff;
+    display:flex; align-items:center; gap:14px; padding:10px 18px; flex-wrap:wrap;
+  }
+  header .brand{font-weight:600; letter-spacing:.2px; margin-right:4px}
+  header .brand small{display:block;font-weight:400;font-size:11px;opacity:.7}
+  header select{
+    background:rgba(255,255,255,.12); border:1px solid rgba(255,255,255,.25);
+    color:#fff; border-radius:6px; padding:6px 10px; cursor:pointer;
+  }
+  header select option{color:#15202e}
+  header .spacer{flex:1}
+  .btn{
+    background:#fff; color:var(--accent); border:0; border-radius:6px;
+    padding:7px 14px; font-weight:600; cursor:pointer; text-decoration:none;
+    display:inline-flex; align-items:center; gap:7px;
+  }
+  .btn:hover{background:#e9eef5}
+  .ver{font-size:11px; opacity:.65}
+
+  main{padding:18px; max-width:1500px; margin:0 auto}
+
+  /* ---------- kpi ---------- */
+  .kpis{display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin-bottom:16px}
+  .kpi{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:12px 14px}
+  .kpi .k{font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:var(--muted)}
+  .kpi .v{font-size:20px; font-weight:600; margin-top:4px; font-variant-numeric:tabular-nums}
+  .kpi.hi{background:var(--accent); color:#fff; border-color:var(--accent)}
+  .kpi.hi .k{color:rgba(255,255,255,.75)}
+
+  /* ---------- tabs / toolbar ---------- */
+  .toolbar{display:flex; gap:10px; align-items:center; margin-bottom:12px; flex-wrap:wrap}
+  .tabs{display:flex; background:var(--panel); border:1px solid var(--line); border-radius:8px; overflow:hidden}
+  .tabs button{background:none;border:0;padding:8px 16px;cursor:pointer;color:var(--muted);font-weight:500}
+  .tabs button[aria-selected=true]{background:var(--accent); color:#fff}
+  .filter{
+    flex:1; min-width:180px; max-width:340px; background:var(--panel);
+    border:1px solid var(--line); border-radius:8px; padding:8px 12px;
+  }
+  .filter:focus{outline:2px solid var(--accent); outline-offset:-1px}
+  .hint{font-size:12px;color:var(--muted)}
+
+  /* ---------- tables ---------- */
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); overflow:hidden; margin-bottom:14px}
+  /* Own scroll context so the header pins predictably and the page body
+     never scrolls sideways. */
+  .scroll{overflow:auto; max-height:calc(100vh - 250px)}
+  table{border-collapse:collapse; width:100%; font-size:13px}
+  th,td{padding:8px 10px; border-bottom:1px solid var(--line); text-align:left}
+  thead th{
+    position:sticky; top:0; background:var(--accent-soft); color:var(--accent);
+    font-size:11px; text-transform:uppercase; letter-spacing:.4px; z-index:5;
+    box-shadow:inset 0 -1px 0 var(--line);
+  }
+  tbody tr.asset{cursor:pointer}
+  tbody tr.asset:hover{background:#f0f4f9}
+  tr.cat td{background:#f7f9fc; font-weight:600; border-top:2px solid var(--line)}
+  tr.cat .rate{font-weight:400; color:var(--muted); font-size:12px; margin-left:10px}
+  tr.total td{background:#eceff4; font-weight:700}
+  tr.warn td{background:var(--warn-bg)}
+  .tag{
+    display:inline-block; font-size:11px; padding:1px 7px; border-radius:99px;
+    background:var(--accent-soft); color:var(--accent); margin-left:6px;
+  }
+  .tag.w{background:var(--warn-bg); color:var(--warn-ink); border:1px solid var(--warn-line)}
+  .tag.d{background:#eee; color:#555}
+  .zero{color:#b6bfcb}
+
+  /* ---------- notes ---------- */
+  .note{padding:11px 14px; border-left:3px solid var(--warn-line); background:var(--warn-bg);
+        color:var(--warn-ink); border-radius:0 8px 8px 0; margin-bottom:9px}
+  .note.q{border-color:#8fa8c8; background:#eef3f9; color:#2c4straight}
+  .note.q{color:#2c4a70}
+  h3{margin:18px 0 8px; font-size:13px; text-transform:uppercase; letter-spacing:.5px; color:var(--muted)}
+
+  /* ---------- drawer ---------- */
+  .drawer{
+    position:fixed; top:0; right:0; height:100%; width:min(420px,92vw); background:var(--panel);
+    border-left:1px solid var(--line); box-shadow:-12px 0 34px rgba(20,35,60,.14);
+    transform:translateX(102%); z-index:40; display:flex; flex-direction:column;
+    /* visibility keeps the closed drawer out of layout entirely, so it can
+       never nudge the page sideways */
+    visibility:hidden; transition:transform .18s ease, visibility 0s .18s;
+  }
+  .drawer.open{transform:none; visibility:visible; transition:transform .18s ease}
+  .drawer header{background:var(--accent); position:static}
+  .drawer .body{padding:16px; overflow:auto}
+  .step{display:flex; justify-content:space-between; gap:12px; padding:7px 0; border-bottom:1px dashed var(--line)}
+  .step .l{color:var(--muted)}
+  .step.res{border-bottom:0; border-top:2px solid var(--accent); font-weight:700; margin-top:4px; padding-top:9px}
+  .closebtn{background:rgba(255,255,255,.15); border:0; color:#fff; border-radius:6px; padding:5px 11px; cursor:pointer}
+  .err{background:#fdecea; border:1px solid #f3b7b1; color:#8b1a12; padding:14px; border-radius:var(--radius)}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">Əsas Vəsaitlər<small id="sub">yüklənir…</small></div>
+  <select id="client"></select>
+  <select id="year"></select>
+  <div class="spacer"></div>
+  <span class="ver" id="ver"></span>
+  <a class="btn" id="export" href="#">⬇ Excel-ə ixrac</a>
+</header>
+
+<main>
+  <div id="error" style="display:none" class="err"></div>
+  <div class="kpis" id="kpis"></div>
+
+  <div class="toolbar">
+    <div class="tabs" role="tablist">
+      <button role="tab" data-tab="annual" aria-selected="true">İllik hesabat</button>
+      <button role="tab" data-tab="monthly" aria-selected="false">Aylıq</button>
+      <button role="tab" data-tab="notes" aria-selected="false">Qeydlər <span id="notecount"></span></button>
+    </div>
+    <input class="filter" id="filter" placeholder="Axtar:  ad, inv.№…   ( / )">
+    <span class="hint" id="hint"></span>
+  </div>
+
+  <div id="view"></div>
+</main>
+
+<aside class="drawer" id="drawer">
+  <header><strong id="dtitle">—</strong><div class="spacer"></div>
+    <button class="closebtn" onclick="closeDrawer()">Bağla</button></header>
+  <div class="body" id="dbody"></div>
+</aside>
+
+<script>
+const fmt = new Intl.NumberFormat('az-AZ',{minimumFractionDigits:2,maximumFractionDigits:2});
+const money = s => { const n = parseFloat(s); return n === 0
+  ? '<span class="zero">—</span>' : fmt.format(n); };
+const pct = s => (parseFloat(s)*100).toFixed(0) + '%';
+const esc = s => String(s??'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+let CTX = null, REPORT = null, TAB = 'annual', FILTER = '';
+
+async function boot(){
+  CTX = await (await fetch('/api/context')).json();
+  const cs = document.getElementById('client');
+  cs.innerHTML = CTX.clients.map(c => `<option value="${c.slug}">${esc(c.name)}</option>`).join('');
+  document.getElementById('ver').textContent = 'engine ' + CTX.engine_version;
+  cs.onchange = () => { fillYears(); load(); };
+  document.getElementById('year').onchange = load;
+  fillYears(); load();
+}
+
+function fillYears(){
+  const c = CTX.clients.find(x => x.slug === document.getElementById('client').value);
+  const ys = document.getElementById('year');
+  ys.innerHTML = c.years.map(y =>
+    `<option value="${y}">${y}${c.closed_years.includes(y) ? ' · bağlı' : ''}</option>`).join('');
+  ys.value = c.years[c.years.length-1];
+}
+
+async function load(){
+  const slug = document.getElementById('client').value;
+  const year = document.getElementById('year').value;
+  document.getElementById('export').href = `/api/export?client=${slug}&year=${year}`;
+  const r = await fetch(`/api/report?client=${slug}&year=${year}`);
+  const data = await r.json();
+  const errBox = document.getElementById('error');
+  if (!r.ok){
+    // §2.1 — a failed calculation is shown, never replaced by zeros.
+    errBox.style.display = 'block';
+    errBox.innerHTML = `<strong>Hesablama dayandırıldı</strong><br>${esc(data.error)}`;
+    document.getElementById('view').innerHTML = '';
+    document.getElementById('kpis').innerHTML = '';
+    return;
+  }
+  errBox.style.display = 'none';
+  REPORT = data;
+  document.getElementById('sub').textContent =
+    `VÖEN ${data.voen} · ${data.status_name}${data.is_closed ? ' · İL BAĞLIDIR' : ''}`;
+  const n = data.warnings.length + data.open_questions.length;
+  document.getElementById('notecount').textContent = n ? `(${n})` : '';
+  render();
+}
+
+function render(){
+  const d = REPORT, t = d.totals;
+  document.getElementById('kpis').innerHTML = [
+    ['Qalıq — il əvvəli', t.opening, ''],
+    ['Daxilolma', t.acquisition, ''],
+    ['Xaricetmə', t.disposed, ''],
+    ['Amortizasiya', t.depreciation, 'hi'],
+    ['Silinmə 500/5%', t.writeoff, ''],
+    ['Qalıq — il sonu', t.closing, ''],
+  ].map(([k,v,c]) => `<div class="kpi ${c}"><div class="k">${k}</div>
+      <div class="v">${fmt.format(parseFloat(v))}</div></div>`).join('');
+
+  document.getElementById('hint').textContent =
+    TAB === 'monthly' ? 'İllik məbləğ / 12 · yuvarlaqlaşdırma qalığı dekabrda'
+    : TAB === 'annual' ? 'Sətrə klikləyin — hesablamanın gedişi' : '';
+
+  document.getElementById('view').innerHTML =
+    TAB === 'annual' ? viewAnnual(d) : TAB === 'monthly' ? viewMonthly(d) : viewNotes(d);
+}
+
+const match = c => !FILTER ||
+  (c.name + ' ' + c.inv_no + ' ' + c.category).toLowerCase().includes(FILTER);
+
+function viewAnnual(d){
+  const head = ['','İnv.№','Adı','Alış tarixi','İlkin dəyər','Qalıq (il əvvəli)',
+                'Daxilolma','Xaricetmə','Dərəcə','Amortizasiya','Silinmə','Qalıq (il sonu)'];
+  let rows = '';
+  for (const cat of d.categories){
+    const cards = cat.cards.filter(match);
+    if (!cards.length) continue;
+    const r = cat.rate;
+    rows += `<tr class="cat"><td colspan="12">${esc(cat.name_az)}
+      <span class="rate">${pct(r.statutory_max)} × ${r.coefficient} (${esc(d.status)})
+      = ${pct(r.ceiling)} hədd · tətbiq <strong>${pct(r.applied)}</strong>
+      ${r.below_ceiling ? '<span class="tag w">həddən aşağı</span>' : ''}</span></td></tr>`;
+    for (const c of cards){
+      const cls = c.threshold_hit ? 'asset warn' : 'asset';
+      rows += `<tr class="${cls}" onclick="openCard('${c.asset_id}')">
+        <td>${c.threshold_hit ? '⚠' : (c.disposal_type ? '→' : '')}</td>
+        <td>${esc(c.inv_no)}</td>
+        <td>${esc(c.name)}${c.is_legacy_pool ? '<span class="tag">qrup qalığı</span>' : ''}
+            ${c.written_off ? '<span class="tag w">silindi</span>' : ''}
+            ${c.disposal_type ? `<span class="tag d">${esc(c.disposal_type)}</span>` : ''}</td>
+        <td>${esc(c.in_date)}</td>
+        <td class="num">${money(c.cost)}</td>
+        <td class="num">${money(c.opening)}</td>
+        <td class="num">${money(c.acquisition)}</td>
+        <td class="num">${money(c.disposed)}</td>
+        <td class="num">${parseFloat(c.rate) ? pct(c.rate) : '<span class="zero">—</span>'}</td>
+        <td class="num"><strong>${money(c.depreciation)}</strong></td>
+        <td class="num">${money(c.writeoff)}</td>
+        <td class="num">${money(c.closing)}</td></tr>`;
+    }
+    rows += `<tr class="total"><td colspan="4">${esc(cat.name_az)} — yekun</td>
+      <td class="num"></td><td class="num">${money(cat.opening)}</td>
+      <td class="num">${money(cat.acquisition)}</td><td class="num">${money(cat.disposed)}</td>
+      <td></td><td class="num">${money(cat.depreciation)}</td>
+      <td class="num">${money(cat.writeoff)}</td><td class="num">${money(cat.closing)}</td></tr>`;
+  }
+  const t = d.totals;
+  rows += `<tr class="total"><td colspan="4">C Ə M İ</td><td></td>
+    <td class="num">${money(t.opening)}</td><td class="num">${money(t.acquisition)}</td>
+    <td class="num">${money(t.disposed)}</td><td></td>
+    <td class="num">${money(t.depreciation)}</td><td class="num">${money(t.writeoff)}</td>
+    <td class="num">${money(t.closing)}</td></tr>`;
+  return `<div class="card"><div class="scroll"><table><thead><tr>${
+    head.map((h,i) => `<th class="${i>3?'num':''}">${h}</th>`).join('')
+  }</tr></thead><tbody>${rows}</tbody></table></div></div>`;
+}
+
+function viewMonthly(d){
+  let rows = '';
+  for (const cat of d.categories){
+    const cards = cat.cards.filter(c => match(c) && parseFloat(c.depreciation) !== 0);
+    if (!cards.length) continue;
+    rows += `<tr class="cat"><td colspan="15">${esc(cat.name_az)}</td></tr>`;
+    for (const c of cards){
+      rows += `<tr><td>${esc(c.inv_no)}</td><td>${esc(c.name)}</td>` +
+        c.monthly.map(v => `<td class="num">${money(v)}</td>`).join('') +
+        `<td class="num"><strong>${money(c.depreciation)}</strong></td></tr>`;
+    }
+    rows += `<tr class="total"><td colspan="2">${esc(cat.name_az)} — yekun</td>` +
+      cat.monthly.map(v => `<td class="num">${money(v)}</td>`).join('') +
+      `<td class="num">${money(cat.depreciation)}</td></tr>`;
+  }
+  rows += `<tr class="total"><td colspan="2">C Ə M İ</td>` +
+    d.monthly.map(v => `<td class="num">${money(v)}</td>`).join('') +
+    `<td class="num">${money(d.totals.depreciation)}</td></tr>`;
+  return `<div class="card"><div class="scroll"><table><thead><tr>
+    <th>İnv.№</th><th>Adı</th>${d.months.map(m => `<th class="num">${m}</th>`).join('')}
+    <th class="num">C Ə M İ</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+}
+
+function viewNotes(d){
+  let h = '';
+  if (d.warnings.length){
+    h += '<h3>Xəbərdarlıqlar</h3>' +
+      d.warnings.map(w => `<div class="note">${esc(w)}</div>`).join('');
+  }
+  if (d.open_questions.length){
+    h += '<h3>Həll olunmamış suallar (CLAUDE.md §12)</h3>' +
+      d.open_questions.map(w => `<div class="note q">${esc(w)}</div>`).join('');
+  }
+  h += `<h3>Yoxlama</h3><div class="card" style="padding:14px">
+    Balans eyniliyi: qalıq(əvvəl) + daxilolma − xaricetmə − amortizasiya − silinmə = qalıq(son)
+    <br><strong>${fmt.format(parseFloat(d.totals.opening))} +
+    ${fmt.format(parseFloat(d.totals.acquisition))} −
+    ${fmt.format(parseFloat(d.totals.disposed))} −
+    ${fmt.format(parseFloat(d.totals.depreciation))} −
+    ${fmt.format(parseFloat(d.totals.writeoff))} =
+    ${fmt.format(parseFloat(d.totals.closing))}</strong> ✔
+    <div class="hint" style="margin-top:8px">Hər kateqoriya üzrə də yoxlanılır;
+      uyğunsuzluq halında hesablama dayanır (§2.1).</div></div>
+    <h3>Versiya</h3><div class="card" style="padding:14px">
+      engine ${esc(d.engine_version)} · format v${d.format_version}</div>`;
+  return h || '<div class="card" style="padding:16px">Qeyd yoxdur.</div>';
+}
+
+function openCard(id){
+  const c = REPORT.cards ? null : null;
+  let card = null, cat = null;
+  for (const k of REPORT.categories) for (const x of k.cards)
+    if (x.asset_id === id){ card = x; cat = k; }
+  if (!card) return;
+  document.getElementById('dtitle').textContent = (card.inv_no ? card.inv_no + ' · ' : '') + card.name;
+  const step = (l, v, extra='') =>
+    `<div class="step ${extra}"><span class="l">${l}</span><span class="num">${
+      typeof v === 'string' && !isNaN(parseFloat(v)) ? fmt.format(parseFloat(v)) : v}</span></div>`;
+  let h = '';
+  h += step('İlkin dəyər', card.cost);
+  h += step('1 · Qalıq (il əvvəli)', card.opening);
+  h += step('2 · Daxilolma', card.acquisition);
+  h += step('4 · Xaricetmə', card.disposed);
+  const base = (parseFloat(card.opening) + parseFloat(card.acquisition) - parseFloat(card.disposed));
+  h += step('= Amortizasiya bazası', base.toFixed(2));
+  h += `<div class="step"><span class="l">5 · 500/5% həddi</span><span>${
+    card.threshold_hit ? '⚠ düşür' : 'düşmür'}</span></div>`;
+  if (card.threshold_hit)
+    h += `<div class="note" style="margin:8px 0">${esc(card.threshold_reason)}<br>
+      ${card.written_off ? 'writeoffs.tsv-də qərar var → tam silinmə'
+                         : 'qərar yoxdur → silinmə tətbiq edilmədi'}</div>`;
+  h += `<div class="step"><span class="l">6 · Dərəcə</span><span>${
+    pct(cat.rate.statutory_max)} × ${cat.rate.coefficient} = ${pct(cat.rate.ceiling)}
+    → tətbiq ${pct(card.rate)}</span></div>`;
+  h += step('Amortizasiya', card.depreciation);
+  if (parseFloat(card.writeoff)) h += step('Silinmə', card.writeoff);
+  h += step('7 · Qalıq (il sonu)', card.closing, 'res');
+  if (card.disposal_type){
+    h += `<h3>Xaricetmə</h3>` + step('Tarix', card.disposal_date) +
+         step('Növ', card.disposal_type) + step('Satış', card.proceeds) +
+         step('Qalıq', card.disposed) + step('Fərq', card.gain_loss) +
+         `<div class="note q" style="margin-top:8px">Satışdan gəlir/zərərin bəyannamədə
+          əks etdirilməsi həll olunmayıb — CLAUDE.md §12.1</div>`;
+  }
+  if (parseFloat(card.depreciation)){
+    h += '<h3>Aylıq bölgü</h3><div class="scroll"><table>' +
+      card.monthly.map((v,i) =>
+        `<tr><td>${REPORT.months[i]}</td><td class="num">${money(v)}</td></tr>`).join('') +
+      '</table></div>';
+  }
+  document.getElementById('dbody').innerHTML = h;
+  document.getElementById('drawer').classList.add('open');
+}
+const closeDrawer = () => document.getElementById('drawer').classList.remove('open');
+
+document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('.tabs button').forEach(x => x.setAttribute('aria-selected','false'));
+  b.setAttribute('aria-selected','true'); TAB = b.dataset.tab; render();
+});
+document.getElementById('filter').oninput = e => { FILTER = e.target.value.trim().toLowerCase(); render(); };
+document.addEventListener('keydown', e => {
+  if (e.key === '/' && e.target.tagName !== 'INPUT'){ e.preventDefault(); document.getElementById('filter').focus(); }
+  if (e.key === 'Escape') closeDrawer();
+});
+boot();
+</script>
+</body>
+</html>
