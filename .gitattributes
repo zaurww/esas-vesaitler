@@ -1,0 +1,8 @@
+# Data files are part of the storage contract (CLAUDE.md §4, §11):
+# UTF-8 without BOM, LF. Keep git from rewriting line endings on Windows.
+*.tsv  text eol=lf
+*.toml text eol=lf
+*.py   text eol=lf
+*.html text eol=lf
+*.md   text eol=lf
+*.xlsx binary
