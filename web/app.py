@@ -10,6 +10,7 @@ import json
 import sys
 import threading
 import webbrowser
+from datetime import date as dt_date, datetime
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -20,7 +21,7 @@ sys.path.insert(0, str(ROOT))
 
 from engine.calc import MONTHS_AZ, CalcError, compute_year  # noqa: E402
 from engine.excel import build_workbook  # noqa: E402
-from engine.mutate import ACTIONS  # noqa: E402
+from engine.mutate import ACTIONS, IMPORT_FIELDS, guess_columns  # noqa: E402
 from engine import rates  # noqa: E402
 from engine.rates import CATEGORIES, ENGINE_VERSION  # noqa: E402
 from engine.storage import DataError, list_clients, load_client  # noqa: E402
@@ -137,6 +138,54 @@ def serialize(r) -> dict:
     }
 
 
+def parse_upload(body: dict) -> dict:
+    """Turn an uploaded .xlsx / .csv / .tsv into rows of plain strings.
+
+    Excel is the realistic source: every client already keeps their assets in
+    a workbook. Dates are read as dates and re-rendered as ISO so they do not
+    depend on the sheet's display format.
+    """
+    import base64
+    import io as _io
+
+    name = str(body.get("name", "")).lower()
+    raw = base64.b64decode(body.get("b64", ""))
+    if name.endswith((".csv", ".tsv", ".txt")):
+        text = raw.decode("utf-8-sig", "replace")
+        first = text.splitlines()[0] if text.strip() else ""
+        sep = "\t" if "\t" in first else ";" if ";" in first else ","
+        rows = [ln.split(sep) for ln in text.splitlines() if ln.strip()]
+    else:
+        from openpyxl import load_workbook
+        wb = load_workbook(_io.BytesIO(raw), data_only=True, read_only=True)
+        ws = wb[body["sheet"]] if body.get("sheet") in wb.sheetnames else wb.worksheets[0]
+        rows = []
+        for r in ws.iter_rows(values_only=True):
+            out = []
+            for c in r:
+                if c is None:
+                    out.append("")
+                elif isinstance(c, datetime):
+                    out.append(c.date().isoformat())
+                elif isinstance(c, dt_date):
+                    out.append(c.isoformat())
+                elif isinstance(c, float) and c == int(c):
+                    out.append(str(int(c)))
+                else:
+                    out.append(str(c))
+            rows.append(out)
+        rows = [r for r in rows if any(str(x).strip() for x in r)]
+        body["sheets"] = wb.sheetnames
+
+    width = max((len(r) for r in rows), default=0)
+    rows = [list(r) + [""] * (width - len(r)) for r in rows]
+    header = rows[0] if rows else []
+    return {"header": header, "rows": rows[1:],
+            "guess": guess_columns(header),
+            "fields": list(IMPORT_FIELDS),
+            "sheets": body.get("sheets", [])}
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "EsasVesaitler/" + ENGINE_VERSION
 
@@ -233,6 +282,10 @@ class Handler(BaseHTTPRequestHandler):
         re-validates the whole store and rolls back if it no longer parses."""
         url = urlparse(self.path)
         try:
+            if url.path == "/api/parse-file":
+                length = int(self.headers.get("Content-Length", "0"))
+                body = json.loads(self.rfile.read(length) or b"{}")
+                return self._json(parse_upload(body))
             if url.path != "/api/action":
                 return self._json({"error": "not found"}, 404)
             length = int(self.headers.get("Content-Length", "0"))

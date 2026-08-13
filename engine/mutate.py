@@ -537,7 +537,140 @@ def _recompute_everything(root: Path) -> None:
                 compute_year(data, st.year)
 
 
+class _DryRun(Exception):
+    """Raised to force the transaction to roll back after a validation pass."""
+
+
+IMPORT_FIELDS = ("inv_no", "name", "category", "in_date", "cost",
+                 "opening_residual", "counterparty", "note")
+
+# Header names seen in the wild: the source workbook, 1C exports, and the
+# obvious Russian/English equivalents. Matching is case- and space-insensitive.
+IMPORT_ALIASES = {
+    "inv_no": ["inv", "inv.№", "inv №", "inv no", "invno", "inventar",
+               "inventar nömrəsi", "инв", "инв.№", "инв №", "инвентарный номер"],
+    "name": ["ad", "adı", "adi", "name", "наименование", "название", "ос"],
+    "category": ["kod", "kateqoriya", "категория", "код", "group", "qrup"],
+    "in_date": ["alış tarixi", "alis tarixi", "tarix", "дата", "дата приобретения",
+                "date", "in_date"],
+    "cost": ["ilkin dəyər", "ilkin deyer", "первоначальная стоимость",
+             "первоначальная", "cost", "dəyər"],
+    "opening_residual": ["qalıq dəyər", "qaliq deyer", "qalıq", "остаточная стоимость",
+                         "остаток", "residual", "qalıq (il əvvəli)"],
+    "counterparty": ["kontragent", "контрагент", "təchizatçı", "поставщик", "supplier"],
+    "note": ["qeyd", "примечание", "note", "комментарий"],
+}
+
+
+def guess_columns(header: list[str]) -> dict[str, int]:
+    """Best-effort mapping of source columns to our fields. The user corrects
+    it in the UI; guessing only removes the boring part."""
+    norm = [" ".join(str(h or "").split()).lower() for h in header]
+    out: dict[str, int] = {}
+    for field, aliases in IMPORT_ALIASES.items():
+        for i, h in enumerate(norm):
+            if i in out.values() or not h:
+                continue
+            if h in aliases or any(a and (h.startswith(a) or a in h) for a in aliases):
+                out[field] = i
+                break
+    return out
+
+
+def import_assets(root: Path, slug: str, p: dict) -> Any:
+    """Bulk import. `dry_run` validates through the exact same path and then
+    rolls back, so the preview cannot disagree with the real import."""
+    rows = p.get("rows") or []
+    year = int(p.get("opening_year") or 0)
+    dry = bool(p.get("dry_run"))
+    report: dict[str, Any] = {"created": 0, "errors": [], "rows": []}
+
+    try:
+        with transaction(root, slug, "asset.import") as tx:
+            assets = rows_of(root, slug, "assets.tsv")
+            ob = rows_of(root, slug, "opening_balances.tsv")
+            seen_inv = {r["inv_no"] for r in assets if r["inv_no"]}
+
+            for n, raw in enumerate(rows, start=1):
+                try:
+                    inv = str(raw.get("inv_no", "")).strip()
+                    name = str(raw.get("name", "")).strip()
+                    if not name and not inv:
+                        continue                       # blank line, skip quietly
+                    if not name:
+                        raise DataError("Adı boş")
+                    if inv and inv in seen_inv:
+                        raise DataError(f"inv_no {inv!r} təkrarlanır")
+                    category = category_of(raw.get("category"))
+                    residual = str(raw.get("opening_residual", "")).strip()
+                    cost_raw = str(raw.get("cost", "")).strip()
+                    in_date = iso_date(raw.get("in_date"), "Alış tarixi",
+                                       required=False)
+                    mode = "carried" if residual else "new"
+                    if mode == "new" and not cost_raw:
+                        raise DataError("nə ilkin dəyər, nə qalıq dəyər var")
+                    cost = dec(cost_raw or "0", "İlkin dəyər")
+                    if mode == "new" and not in_date:
+                        raise DataError("Alış tarixi tələb olunur")
+
+                    aid = next_asset_id(assets)
+                    assets.append({
+                        "asset_id": aid, "inv_no": inv, "name": name,
+                        "category": category, "in_date": in_date, "cost": cost,
+                        "counterparty": str(raw.get("counterparty", "")).strip(),
+                        "useful_life": "", "is_legacy_pool": "",
+                        "note": str(raw.get("note", "")).strip(),
+                    })
+                    if inv:
+                        seen_inv.add(inv)
+                    residual_norm = ""
+                    if residual:
+                        if not year:
+                            raise DataError("qalıq dəyər üçün il göstərilməyib")
+                        residual_norm = dec(residual, "Qalıq dəyər")
+                        ob.append({
+                            "year": str(year), "asset_id": aid, "category": category,
+                            "residual": residual_norm,
+                            "source": "onboarding", "engine_version": "",
+                            "closed_at": "",
+                        })
+                    report["created"] += 1
+                    # Report the NORMALISED numbers: the preview must show the
+                    # value that will actually be stored, not the raw cell.
+                    report["rows"].append({"line": n, "asset_id": aid, "inv_no": inv,
+                                           "name": name, "category": category,
+                                           "cost": cost, "residual": residual_norm,
+                                           "in_date": in_date, "mode": mode,
+                                           "ok": True})
+                except DataError as e:
+                    report["errors"].append({"line": n, "message": str(e)})
+                    report["rows"].append({"line": n, "inv_no": raw.get("inv_no", ""),
+                                           "name": raw.get("name", ""), "ok": False,
+                                           "message": str(e)})
+
+            if report["errors"]:
+                raise DataError(
+                    f"{len(report['errors'])} sətirdə xəta var — heç nə yazılmadı. "
+                    f"Import ya bütövlükdə keçir, ya da heç keçmir."
+                )
+            if year:
+                guard_open_year(root, slug, year)
+            save_rows(root, slug, "assets.tsv", assets)
+            save_rows(root, slug, "opening_balances.tsv", ob)
+            tx.log("", "import", "", f"{report['created']} ƏV")
+            if dry:
+                raise _DryRun
+    except _DryRun:
+        report["dry_run"] = True
+    except DataError:
+        if not dry:
+            raise
+        report["dry_run"] = True
+    return report
+
+
 ACTIONS = {
+    "asset.import": import_assets,
     "rate.set": set_rate_row,
     "coefficient.set": set_coefficient_row,
     "asset.create": create_asset,

@@ -5,3 +5,5 @@
 2026-08-13T09:45:30+00:00	Zaur	asset.create	AV-007	opening_balance 2025		9250.00
 2026-08-13T09:45:30+00:00	Zaur	asset.create	AV-008	asset		[carried] MA-0001 Kompressor
 2026-08-13T09:45:30+00:00	Zaur	asset.create	AV-008	opening_balance 2025		3400
+2026-08-13T09:57:26+00:00	Zaur	election.set		rate nv 2025		20.00%
+2026-08-13T09:57:58+00:00	Zaur	election.set		rate ym 2025		20.00%

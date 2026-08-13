@@ -71,9 +71,47 @@ class CardResult:
 
     monthly: list[Decimal] = field(default_factory=list)
 
+    # -- gross cost and accumulated depreciation ---------------------------
+    # The tax pipeline only needs the residual, but the movement statement an
+    # accountant hands over wants both halves: cost moving on one side,
+    # accumulated depreciation on the other, meeting at the residual.
+    #
+    # When the initial cost is unknown (a legacy pool, or an asset carried in
+    # with only a residual), the residual IS the carrying amount: gross starts
+    # equal to it and accumulated starts at zero. Inventing a cost would be
+    # inventing history.
+
+    @property
+    def gross_start(self) -> Decimal:
+        if self.acquisition > ZERO and self.opening == ZERO:
+            return ZERO                       # acquired during the year
+        return self.cost if self.cost > ZERO else self.opening
+
+    @property
+    def gross_in(self) -> Decimal:
+        acq = self.acquisition if self.opening == ZERO else ZERO
+        return acq + self.repair_capitalized
+
+    @property
+    def gross_out(self) -> Decimal:
+        return self.gross_start + self.gross_in if self.disposal_type else ZERO
+
+    @property
+    def gross_end(self) -> Decimal:
+        return self.gross_start + self.gross_in - self.gross_out
+
+    @property
+    def accumulated_start(self) -> Decimal:
+        return self.gross_start - self.opening
+
+    @property
+    def accumulated_out(self) -> Decimal:
+        return self.gross_out - self.disposed if self.disposal_type else ZERO
+
     @property
     def accumulated_end(self) -> Decimal:
-        return self.cost - self.closing if not self.is_legacy_pool else ZERO
+        return (self.accumulated_start + self.depreciation + self.writeoff
+                - self.accumulated_out)
 
 
 @dataclass
@@ -383,6 +421,16 @@ def compute_year(data: ClientData, year: int) -> YearResult:
                 f"баланс не сошёлся по категории {code}: "
                 f"{money(lhs)} != {money(cat.closing)}. "
                 f"Это ошибка движка, а не данных."
+            )
+
+        # -- control §5.4.1b: the movement statement must meet the residual --
+        gross_end = sum((c.gross_end for c in group), ZERO)
+        acc_end = sum((c.accumulated_end for c in group), ZERO)
+        if money(gross_end - acc_end) != money(cat.closing):
+            raise CalcError(
+                f"движение не сошлось по категории {code}: первоначальная "
+                f"{money(gross_end)} − накопленная {money(acc_end)} = "
+                f"{money(gross_end - acc_end)}, а остаток {money(cat.closing)}."
             )
         result.categories.append(cat)
 

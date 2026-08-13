@@ -169,6 +169,17 @@
            padding:9px 20px; cursor:pointer; font-weight:600}
   .ghost{background:none; border:1px solid var(--line); border-radius:7px;
          padding:9px 16px; cursor:pointer}
+  .modal .box.wide{width:min(1100px,100%)}
+  .imp-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:8px}
+  .imp-grid .fld{margin:0}
+  .imp table{font-size:12px}
+  .imp .bad td{background:#fdecea}
+  .imp .good td{background:#f2f9f4}
+  .paste{width:100%; min-height:150px; font-family:Consolas,monospace; font-size:12px;
+         border:1px solid var(--line); border-radius:8px; padding:10px}
+  .stepbar{display:flex; gap:8px; margin-bottom:14px; font-size:12px; color:var(--muted)}
+  .stepbar span{padding:4px 10px; border-radius:99px; background:var(--accent-soft)}
+  .stepbar span.on{background:var(--accent); color:#fff}
   .ferr{background:#fdecea; border:1px solid #f3b7b1; color:#8b1a12;
         padding:10px 12px; border-radius:8px; margin-bottom:12px; display:none}
 </style>
@@ -182,6 +193,7 @@
   <div class="spacer"></div>
   <span class="ver" id="ver"></span>
   <button class="btn" onclick="formAsset()">+ Yeni ƏV</button>
+  <button class="btn" onclick="formImport()">⇪ İdxal</button>
   <a class="btn" id="export" href="#">⬇ Excel-ə ixrac</a>
 </header>
 
@@ -699,6 +711,8 @@ async function submitModal(e){
     CTX = await (await fetch('/api/context')).json();
     await load();
   } catch (err) {
+    // A wizard step transition is not a failure -- keep the modal open.
+    if (err.message === '__stay__'){ btn.disabled = false; return false; }
     // The store rolls itself back on failure, so the message is the whole story.
     box.textContent = err.message; box.style.display = 'block';
   } finally { btn.disabled = false; }
@@ -830,6 +844,150 @@ function formElection(cat, card){
                Faizlə yazın (məs. 25 və ya 50). Boş buraxsanız seçim silinir və
                norma (${pct(ri.statutory_max)}) tətbiq olunur.`}),
     d => post('election.set', d));
+}
+
+/* ---- bulk import ----------------------------------------------------
+   Excel is where every client's asset list already lives, so the fast path
+   is: select the range, Ctrl+C, paste. A file picker is the fallback.
+   The preview runs through the SAME server code as the real import and then
+   rolls back, so what it shows is exactly what will happen. --------------- */
+let IMP = null;
+
+function formImport(){
+  IMP = {step:1, header:[], rows:[], map:{}, catmap:{}, year:REPORT.year, fields:[]};
+  impRender();
+}
+
+function impBox(step, body, foot){
+  const bar = ['Yapışdır / fayl','Sütunları uyğunlaşdır','Baxış və idxal']
+    .map((t,i) => `<span class="${i+1===step?'on':''}">${i+1}. ${t}</span>`).join('');
+  document.getElementById('mtitle').textContent = 'ƏV idxalı';
+  document.getElementById('mbody').innerHTML = `<div class="stepbar">${bar}</div>` + body;
+  document.getElementById('ferr').style.display = 'none';
+  document.getElementById('msubmit').textContent = foot;
+  document.querySelector('#modal .box').classList.toggle('wide', step > 1);
+  document.getElementById('modal').classList.add('open');
+}
+
+const STAY = '__stay__';
+
+function impRender(){
+  if (IMP.step === 1){
+    impBox(1, `
+      <div class="fld"><label>Excel-dən kopyalayıb bura yapışdırın</label>
+        <textarea class="paste" id="pastebox"
+          placeholder="Excel-də sahəni seçin → Ctrl+C → burada Ctrl+V"></textarea>
+        <div class="h">Birinci sətir başlıq olmalıdır.</div></div>
+      <div class="fld"><label>…və ya fayl seçin (.xlsx, .csv, .tsv)</label>
+        <input type="file" id="impfile" accept=".xlsx,.csv,.tsv,.txt"></div>`,
+      'Davam et');
+    MSUBMIT = async () => {
+      const f = document.getElementById('impfile').files[0];
+      let payload;
+      if (f){
+        const b64 = await new Promise(res => {
+          const fr = new FileReader();
+          fr.onload = () => res(fr.result.split(',')[1]);
+          fr.readAsDataURL(f);
+        });
+        payload = {name:f.name, b64};
+      } else {
+        const text = document.getElementById('pastebox').value;
+        if (text.split(/\r?\n/).filter(l => l.trim()).length < 2)
+          throw new Error('Ən azı başlıq və bir sətir lazımdır');
+        payload = {name:'paste.tsv', b64: btoa(unescape(encodeURIComponent(text)))};
+      }
+      const r = await fetch('/api/parse-file', {method:'POST',
+        headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error);
+      IMP.header = j.header; IMP.rows = j.rows; IMP.map = j.guess; IMP.fields = j.fields;
+      IMP.step = 2; impRender();
+      throw new Error(STAY);
+    };
+    return;
+  }
+
+  if (IMP.step === 2){
+    const opts = f => ['<option value="">—</option>'].concat(
+      IMP.header.map((h,j) => `<option value="${j}" ${IMP.map[f]===j?'selected':''}>${
+        esc(h) || ('sütun ' + (j+1))}</option>`)).join('');
+    const LBL = {inv_no:'İnv.№', name:'Adı *', category:'Kateqoriya *',
+      in_date:'Alış tarixi', cost:'İlkin dəyər', opening_residual:'Qalıq dəyər',
+      counterparty:'Kontragent', note:'Qeyd'};
+    const cols = IMP.fields.map(f => `<div class="fld"><label>${LBL[f]||f}</label>
+      <select data-f="${f}">${opts(f)}</select></div>`).join('');
+
+    const ci = IMP.map.category;
+    const seen = ci == null ? [] :
+      [...new Set(IMP.rows.map(r => (r[ci]||'').trim()).filter(Boolean))];
+    const cl = CTX.categories.filter(c => !c.code.startsWith('qma'));
+    const catsel = seen.map(v => `<div class="fld"><label>${esc(v)}</label>
+      <select data-cat="${esc(v)}">${cl.map(c => `<option value="${c.code}" ${
+        (c.code === v.toLowerCase() || c.name_az === v) ? 'selected' : ''
+      }>${esc(c.name_az)}</option>`).join('')}</select></div>`).join('');
+
+    impBox(2, `<div class="h" style="margin-bottom:10px">${IMP.rows.length} sətir tapıldı.
+        Hər sahəni mənbə sütunu ilə uyğunlaşdırın.</div>
+      <div class="imp-grid">${cols}</div>
+      ${seen.length ? `<h3>Kateqoriyaların uyğunlaşdırılması</h3>
+        <div class="imp-grid">${catsel}</div>` : ''}
+      <div class="fld" style="max-width:240px;margin-top:14px">
+        <label>Qalıq dəyər hansı ilin əvvəlinə</label>
+        <input type="number" id="impyear" value="${IMP.year}"></div>`,
+      'Baxış');
+    MSUBMIT = async () => {
+      IMP.map = {};
+      document.querySelectorAll('#mbody select[data-f]').forEach(el => {
+        if (el.value !== '') IMP.map[el.dataset.f] = +el.value;
+      });
+      IMP.catmap = {};
+      document.querySelectorAll('#mbody select[data-cat]').forEach(el => {
+        IMP.catmap[el.dataset.cat] = el.value;
+      });
+      IMP.year = +document.getElementById('impyear').value;
+      if (IMP.map.name == null) throw new Error('«Adı» sütunu seçilməyib');
+      if (IMP.map.category == null) throw new Error('«Kateqoriya» sütunu seçilməyib');
+      IMP.step = 3;
+      await impPreview();
+      throw new Error(STAY);
+    };
+  }
+}
+
+const impPayload = () => IMP.rows.map(r => {
+  const o = {};
+  for (const f of Object.keys(IMP.map)) o[f] = (r[IMP.map[f]] ?? '').toString().trim();
+  o.category = IMP.catmap[o.category] || o.category;
+  return o;
+});
+
+async function impPreview(){
+  const rep = (await post('asset.import',
+    {rows: impPayload(), opening_year: IMP.year, dry_run: true})).result;
+  const bad = rep.errors.length;
+  const body = `
+    <div class="h" style="margin-bottom:8px">${bad
+      ? `<strong style="color:var(--neg)">${bad} sətirdə xəta.</strong>
+         İdxal ya bütövlükdə keçir, ya da heç keçmir — düzəldib yenidən cəhd edin.`
+      : `<strong style="color:var(--pos)">${rep.created} ƏV idxala hazırdır.</strong>`}
+    </div>
+    <div class="scroll imp" style="max-height:46vh"><table><thead><tr>
+      <th>#</th><th>İnv.№</th><th>Adı</th><th>Kateqoriya</th>
+      <th class="num">İlkin dəyər</th><th class="num">Qalıq</th>
+      <th>Rejim</th><th>Nəticə</th></tr></thead><tbody>${
+      rep.rows.map(r => `<tr class="${r.ok?'good':'bad'}">
+        <td>${r.line}</td><td>${esc(r.inv_no)}</td><td>${esc(r.name)}</td>
+        <td>${esc(r.category||'')}</td>
+        <td class="num">${r.cost ? money(r.cost) : ''}</td>
+        <td class="num">${r.residual ? money(r.residual) : ''}</td>
+        <td>${r.mode==='carried'?'əvvəlki illərdən':r.mode==='new'?'bu il alınıb':''}</td>
+        <td>${r.ok ? '✓' : esc(r.message)}</td></tr>`).join('')}</tbody></table></div>`;
+  impBox(3, body, bad ? 'Geri qayıt' : `${rep.created} ƏV idxal et`);
+  MSUBMIT = async () => {
+    if (bad){ IMP.step = 2; impRender(); throw new Error(STAY); }
+    await post('asset.import', {rows: impPayload(), opening_year: IMP.year});
+  };
 }
 
 /* ---- taxpayer status ---- */
