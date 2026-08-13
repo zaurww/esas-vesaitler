@@ -20,6 +20,7 @@ sys.path.insert(0, str(ROOT))
 
 from engine.calc import MONTHS_AZ, CalcError, compute_year  # noqa: E402
 from engine.excel import build_workbook  # noqa: E402
+from engine.mutate import ACTIONS  # noqa: E402
 from engine.rates import CATEGORIES, ENGINE_VERSION  # noqa: E402
 from engine.storage import DataError, list_clients, load_client  # noqa: E402
 
@@ -80,6 +81,7 @@ def serialize(r) -> dict:
                 "writeoff": m(c.writeoff),
                 "closing": m(c.closing),
                 "repair_limit": m(c.repair_limit),
+                "repair_limit_pct": m(c.repair_limit_pct),
                 "repair_actual": m(c.repair_actual),
                 "repair_deductible": m(c.repair_deductible),
                 "repair_capitalized": m(c.repair_capitalized),
@@ -213,6 +215,28 @@ class Handler(BaseHTTPRequestHandler):
         except (DataError, CalcError) as e:
             # §2.1: a failed calculation is reported, never silently zeroed.
             self._json({"error": str(e), "kind": type(e).__name__}, 400)
+        except Exception as e:  # noqa: BLE001
+            self._json({"error": f"{type(e).__name__}: {e}", "kind": "internal"}, 500)
+
+    def do_POST(self):
+        """Every write goes through engine.mutate, which backs up, applies,
+        re-validates the whole store and rolls back if it no longer parses."""
+        url = urlparse(self.path)
+        try:
+            if url.path != "/api/action":
+                return self._json({"error": "not found"}, 404)
+            length = int(self.headers.get("Content-Length", "0"))
+            body = json.loads(self.rfile.read(length) or b"{}")
+            slug = body.get("client", "")
+            action = body.get("action", "")
+            if action not in ACTIONS:
+                return self._json({"error": f"naməlum əməliyyat: {action}"}, 400)
+            result = ACTIONS[action](ROOT, slug, body.get("payload") or {})
+            self._json({"ok": True, "result": result})
+        except (DataError, CalcError) as e:
+            self._json({"error": str(e), "kind": type(e).__name__}, 400)
+        except (KeyError, ValueError, TypeError) as e:
+            self._json({"error": f"düzgün olmayan məlumat: {e}"}, 400)
         except Exception as e:  # noqa: BLE001
             self._json({"error": f"{type(e).__name__}: {e}", "kind": "internal"}, 500)
 

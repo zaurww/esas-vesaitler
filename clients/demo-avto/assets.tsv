@@ -1,8 +1,9 @@
-asset_id	inv_no	name	category	in_date	cost	counterparty	useful_life	is_legacy_pool	note
+﻿asset_id	inv_no	name	category	in_date	cost	counterparty	useful_life	is_legacy_pool	note
 AV-001	NV-0001	Toyota Camry 2.5	nv	2023-03-10	45000.00	Toyota Center Baku			
 AV-002	NV-0002	Hyundai Sonata	nv	2024-06-01	32000.00	Hyundai Azerbaijan			
 AV-003	NV-0003	Kia Sportage	nv	2025-02-15	38000.00	Kia Motors Azerbaijan			İlin daxilolması
 AV-004	NV-0004	VAZ-21074	nv	2017-08-20	3200.00	Şəxsi satıcı			
 AV-005	YM-0001	Ford Transit yük	ym	2022-04-01	28000.00	Ford Baku			2025-də satılıb
-
 AV-006	NV-0005	Qoşqu (treyler)	nv	2019-05-12	2800.00	Aqro Texnika			İl sonuna 500 AZN-dən aşağı düşür
+AV-007		Digər əsas vəsaitlər — qrup qalığı	dg		0.00			1	
+AV-008	MA-0001	Kompressor	ma		0.00				

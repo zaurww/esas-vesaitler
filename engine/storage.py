@@ -89,12 +89,18 @@ def read_tsv(path: Path) -> list[dict[str, str]]:
 
 
 def write_tsv(path: Path, header: list[str], rows: Iterable[list[Any]]) -> None:
-    """Atomic write: either the whole file lands or it is left untouched (§8)."""
+    """Atomic write: either the whole file lands or it is left untouched (§8).
+
+    Written as UTF-8 WITH a BOM. Excel and Notepad on Windows have no other
+    way to tell UTF-8 from the ANSI codepage, and guessing wrong turns every
+    `ə ç ş ğ ı ö ü` into mojibake. Readers here use utf-8-sig, so the BOM
+    never reaches the engine.
+    """
     body = ["\t".join(header)]
     for r in rows:
         body.append("\t".join("" if c is None else str(c) for c in r))
     tmp = tempfile.NamedTemporaryFile(
-        "w", encoding="utf-8", newline="\n", delete=False, dir=str(path.parent)
+        "w", encoding="utf-8-sig", newline="\n", delete=False, dir=str(path.parent)
     )
     try:
         tmp.write("\n".join(body) + "\n")
@@ -126,7 +132,7 @@ def load_client(root: Path, slug: str) -> ClientData:
     cfg_path = folder / "config.toml"
     if not cfg_path.exists():
         raise DataError(f"нет config.toml в {folder}")
-    cfg = tomllib.loads(cfg_path.read_text(encoding="utf-8"))
+    cfg = tomllib.loads(cfg_path.read_text(encoding="utf-8-sig"))
 
     data = ClientData(
         slug=slug,

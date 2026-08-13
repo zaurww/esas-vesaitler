@@ -105,6 +105,7 @@ class CategoryResult:
     acquisition: Decimal = ZERO
     repair_actual: Decimal = ZERO
     repair_limit: Decimal = ZERO
+    repair_limit_pct: Decimal = ZERO
     repair_deductible: Decimal = ZERO
     repair_capitalized: Decimal = ZERO
     disposed: Decimal = ZERO
@@ -370,6 +371,7 @@ def compute_year(data: ClientData, year: int) -> YearResult:
             setattr(cat, f, sum((getattr(c, f) for c in group), ZERO))
         st = statutory(year, code)
         if st.repair_limit is not None:
+            cat.repair_limit_pct = st.repair_limit
             cat.repair_limit = money(cat.opening * st.repair_limit)
         cat.monthly = [sum((c.monthly[m] for c in group), ZERO) for m in range(12)]
 
@@ -415,6 +417,12 @@ def compute_year(data: ClientData, year: int) -> YearResult:
                     f"{c.rate_info.applied:.0%} (kateqoriya üzrə "
                     f"{cat.rate.applied:.0%}, hədd {c.rate_info.ceiling:.0%})."
                 )
+    for c in result.cards:
+        if not c.is_legacy_pool and c.cost == ZERO and c.opening > ZERO:
+            result.warnings.append(
+                f"{c.inv_no or c.name}: ilkin dəyər məlum deyil — 500/5% "
+                f"testinin yalnız 500 AZN hissəsi tətbiq oluna bilər."
+            )
     for c in result.threshold_next_cards:
         result.warnings.append(
             f"{c.inv_no or c.name}: il sonuna qalıq {c.closing:.2f} AZN — "

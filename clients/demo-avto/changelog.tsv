@@ -1,1 +1,7 @@
-timestamp	user	action	asset_id	field	old_value	new_value
+﻿timestamp	user	action	asset_id	field	old_value	new_value
+2026-08-13T09:45:29+00:00	Zaur	election.set		rate nv 2025		50.00%
+2026-08-13T09:45:30+00:00	Zaur	election.set		rate nv 2025		25.00%
+2026-08-13T09:45:30+00:00	Zaur	asset.create	AV-007	asset		[pool]  Digər əsas vəsaitlər — qrup qalığı
+2026-08-13T09:45:30+00:00	Zaur	asset.create	AV-007	opening_balance 2025		9250.00
+2026-08-13T09:45:30+00:00	Zaur	asset.create	AV-008	asset		[carried] MA-0001 Kompressor
+2026-08-13T09:45:30+00:00	Zaur	asset.create	AV-008	opening_balance 2025		3400

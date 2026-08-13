@@ -50,10 +50,18 @@ class RateRow(NamedTuple):
 
 
 # TODO §12.2 -- confirm effective_year against the current tax code wording.
+#
+# Two kinds of change touch this table, and they are NOT the same:
+#   * the law changes  -> APPEND a row with a higher effective_year, so past
+#                         years keep computing the way they were filed;
+#   * we transcribed it wrong -> EDIT the row in place, because every year
+#                         computed from it was wrong. Closed years stay safe
+#                         (their balances are stored facts), and `ev.py verify`
+#                         will report the difference -- which is the point.
 STATUTORY_RATES: List[RateRow] = [
     RateRow(2001, "bt", D("0.07"), D("0.02")),
     RateRow(2001, "ma", D("0.20"), D("0.05")),
-    RateRow(2001, "nv", D("0.25"), D("0.03")),
+    RateRow(2001, "nv", D("0.25"), D("0.05")),  # corrected from 3%
     RateRow(2001, "ym", D("0.25"), D("0.08")),  # TODO §12.3 -- verify this 8%
     RateRow(2001, "yt", D("0.25"), D("0.03")),
     RateRow(2001, "dg", D("0.20"), D("0.03")),
