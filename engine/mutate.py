@@ -16,6 +16,7 @@ change. If it no longer loads, the change never happened.
 from __future__ import annotations
 
 import getpass
+import re
 import shutil
 from contextlib import contextmanager
 from datetime import date, datetime, timezone
@@ -161,6 +162,40 @@ def category_of(value: Any, field: str = "category") -> str:
     return v
 
 
+INV_PATTERN = re.compile(r"^(.*?)(\d+)$")
+
+
+def suggest_inv_no(rows: list[dict[str, str]], category: str) -> str:
+    """Propose the next inventory number, following whatever the client
+    already uses rather than imposing a scheme.
+
+    Numbering conventions differ per office and often arrive from 1C, so the
+    prevailing prefix and zero-padding of that category are copied and the
+    counter is stepped. Only when a category has none does it fall back to
+    <CATEGORY>-0001. The suggestion is always editable -- it is a convenience,
+    not a rule.
+    """
+    used = {r.get("inv_no", "").strip() for r in rows if r.get("inv_no", "").strip()}
+    prefixes: dict[tuple[str, int], int] = {}
+    for r in rows:
+        if r.get("category") != category:
+            continue
+        m = INV_PATTERN.match(r.get("inv_no", "").strip())
+        if m:
+            key = (m.group(1), len(m.group(2)))
+            prefixes[key] = max(prefixes.get(key, 0), int(m.group(2)))
+
+    if prefixes:
+        (prefix, width), top = max(prefixes.items(), key=lambda kv: (kv[1], kv[0][1]))
+    else:
+        prefix, width, top = f"{category.upper()}-", 4, 0
+
+    n = top + 1
+    while f"{prefix}{n:0{width}d}" in used:
+        n += 1
+    return f"{prefix}{n:0{width}d}"
+
+
 def next_asset_id(rows: list[dict[str, str]]) -> str:
     n = 0
     for r in rows:
@@ -219,6 +254,12 @@ def create_asset(root: Path, slug: str, p: dict) -> str:
                 raise DataError("Əvvəlki illərdən gələn ƏV üçün qalıq dəyər "
                                 "tələb olunur")
 
+        if not inv and mode != "pool":
+            # An asset with no inventory number is a defect, not a choice --
+            # it is how the physical object is identified. Fill it in from the
+            # scheme already in use rather than leaving a silent hole. A group
+            # residual is the one legitimate exception: nothing to label.
+            inv = suggest_inv_no(assets, category)
         aid = next_asset_id(assets)
         assets.append({
             "asset_id": aid, "inv_no": inv, "name": name, "category": category,
@@ -694,6 +735,11 @@ def import_assets(root: Path, slug: str, p: dict) -> Any:
                     if inv and inv in seen_inv:
                         raise DataError(f"inv_no {inv!r} təkrarlanır")
                     category = category_of(raw.get("category"))
+                    if not inv:
+                        inv = suggest_inv_no(assets, category)
+                        auto_inv = True
+                    else:
+                        auto_inv = False
                     residual = str(raw.get("opening_residual", "")).strip()
                     cost_raw = str(raw.get("cost", "")).strip()
                     in_date = iso_date(raw.get("in_date"), "Alış tarixi",
@@ -730,6 +776,7 @@ def import_assets(root: Path, slug: str, p: dict) -> Any:
                     # Report the NORMALISED numbers: the preview must show the
                     # value that will actually be stored, not the raw cell.
                     report["rows"].append({"line": n, "asset_id": aid, "inv_no": inv,
+                                           "auto_inv": auto_inv,
                                            "name": name, "category": category,
                                            "cost": cost, "residual": residual_norm,
                                            "in_date": in_date, "mode": mode,

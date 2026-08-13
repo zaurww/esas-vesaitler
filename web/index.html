@@ -226,7 +226,7 @@
       <button role="tab" data-tab="norms" aria-selected="false">Normalar</button>
       <button role="tab" data-tab="notes" aria-selected="false">Qeydlər <span id="notecount"></span></button>
     </div>
-    <input class="filter" id="filter" placeholder="Axtar:  ad, inv.№…   ( / )">
+    <input class="filter" id="filter" placeholder="Axtar:  ad, inv.№, kontragent…   ( / )">
     <span class="hint" id="hint"></span>
   </div>
 
@@ -539,7 +539,8 @@ function viewRepair(d){
 }
 
 const match = c => !FILTER ||
-  (c.name + ' ' + c.inv_no + ' ' + c.category).toLowerCase().includes(FILTER);
+  (c.name + ' ' + c.inv_no + ' ' + c.category + ' ' + (c.counterparty || ''))
+    .toLowerCase().includes(FILTER);
 // The sidebar narrows the whole report to one category; the text box narrows
 // it further to matching cards. Both are view state, never engine state.
 const cats = d => d.categories.filter(c => !CATFILTER || c.code === CATFILTER);
@@ -694,6 +695,9 @@ function openCard(id){
     </div>
     <div class="note">${REPORT.year} ili bağlıdır — dəyişiklik qəbul edilmir (§6).</div>`;
   }
+  if (card.counterparty)
+    h += `<div class="step"><span class="l">Kontragent</span>
+      <span>${esc(card.counterparty)}</span></div>`;
   h += step('İlkin dəyər (alış)', card.cost);
   if (parseFloat(card.cost_effective) !== parseFloat(card.cost))
     h += step('İlkin dəyər (artımlarla)', card.cost_effective);
@@ -840,7 +844,15 @@ function formAsset(card){
              options:catOptions(card ? card.category : 'nv')});
     if (!pool){
       h += `<div class="row2">
-        ${fld('inv_no','İnv.№',{value:card&&card.inv_no,placeholder:'NV-0006'})}
+        <div class="fld"><label>İnv.№</label>
+          <div style="display:flex;gap:6px">
+            <input name="inv_no" value="${val(card && card.inv_no)}"
+              placeholder="məs. NV-0006">
+            <button type="button" class="ghost" style="padding:8px 12px;white-space:nowrap"
+              onclick="suggestInv()">növbəti</button>
+          </div>
+          <div class="h">Boş buraxsanız, mövcud nömrələməyə uyğun olaraq
+            <strong>avtomatik verilir</strong>.</div></div>
         ${fld('in_date','Alış tarixi',{type:'date',value:card&&card.in_date,
               req:mode==='new'})}</div>`;
       h += fld('name','Adı',{value:card&&card.name,req:true,placeholder:'Toyota Camry 2.5'});
@@ -868,6 +880,19 @@ function formAsset(card){
   };
   window.ASSETMODE = m => { mode = m; render(); };
   render();
+}
+
+/* Inventory numbers come from the office, often out of 1C, so the app
+   follows whatever scheme is already in use instead of imposing one: it
+   reads the prevailing prefix and padding of the category and steps the
+   counter. Always a suggestion, never enforced. */
+async function suggestInv(){
+  const cat = document.querySelector('#mbody select[name=category]').value;
+  const slug = document.getElementById('client').value;
+  const r = await fetch(`/api/next-inv?client=${slug}&category=${cat}`);
+  const j = await r.json();
+  const box = document.querySelector('#mbody input[name=inv_no]');
+  if (j.inv_no){ box.value = j.inv_no; box.focus(); }
 }
 
 /* ---- opening balance of an existing card ---- */
@@ -1156,7 +1181,9 @@ async function impPreview(){
       <th class="num">İlkin dəyər</th><th class="num">Qalıq</th>
       <th>Rejim</th><th>Nəticə</th></tr></thead><tbody>${
       rep.rows.map(r => `<tr class="${r.ok?'good':'bad'}">
-        <td>${r.line}</td><td>${esc(r.inv_no)}</td><td>${esc(r.name)}</td>
+        <td>${r.line}</td>
+        <td>${esc(r.inv_no)}${r.auto_inv ? '<span class="tag">avto</span>' : ''}</td>
+        <td>${esc(r.name)}</td>
         <td>${esc(r.category||'')}</td>
         <td class="num">${r.cost ? money(r.cost) : ''}</td>
         <td class="num">${r.residual ? money(r.residual) : ''}</td>

@@ -21,7 +21,9 @@ sys.path.insert(0, str(ROOT))
 
 from engine.calc import MONTHS_AZ, CalcError, compute_year  # noqa: E402
 from engine.excel import build_workbook  # noqa: E402
-from engine.mutate import ACTIONS, IMPORT_FIELDS, guess_columns  # noqa: E402
+from engine.mutate import (  # noqa: E402
+    ACTIONS, IMPORT_FIELDS, guess_columns, rows_of, suggest_inv_no,
+)
 from engine import rates  # noqa: E402
 from engine.rates import CATEGORIES, CATEGORY_BY_CODE, ENGINE_VERSION  # noqa: E402
 from engine.storage import DataError, list_clients, load_client  # noqa: E402
@@ -30,6 +32,7 @@ INDEX = Path(__file__).resolve().parent / "index.html"
 
 _closed_cache: set = set()
 _has_opening = False
+_counterparty: dict = {}
 
 
 def m(x: Decimal) -> str:
@@ -119,6 +122,7 @@ def serialize(r) -> dict:
                         "in_date": k.in_date.isoformat() if k.in_date else "",
                         "cost": m(k.cost),
                         "is_legacy_pool": k.is_legacy_pool,
+                        "counterparty": _counterparty.get(k.asset_id, ""),
                         "opening": m(k.opening),
                         "opening_source": k.opening_source,
                         "acquisition": m(k.acquisition),
@@ -384,6 +388,8 @@ class Handler(BaseHTTPRequestHandler):
                 rates.refresh(ROOT)      # pick up edits without a restart
                 data = load_client(ROOT, slug)
                 global _closed_cache, _has_opening
+                global _counterparty
+                _counterparty = {a.asset_id: a.counterparty for a in data.assets}
                 _closed_cache = data.closed_years()
                 _has_opening = any(ob.year == year for ob in data.opening_balances)
                 if data.status_for(year) is None:
@@ -403,6 +409,13 @@ class Handler(BaseHTTPRequestHandler):
                                          q.get("asset_id", [""])[0]))
                 return
 
+            if url.path == "/api/next-inv":
+                slug = q.get("client", [""])[0]
+                cat = q.get("category", [""])[0]
+                self._json({"inv_no": suggest_inv_no(
+                    rows_of(ROOT, slug, "assets.tsv"), cat)})
+                return
+
             if url.path == "/api/rates":
                 year = int(q.get("year", ["0"])[0])
                 rates.refresh(ROOT)
@@ -415,7 +428,8 @@ class Handler(BaseHTTPRequestHandler):
                 slug = q.get("client", [""])[0]
                 year = int(q.get("year", ["0"])[0])
                 data = load_client(ROOT, slug)
-                blob = build_workbook(compute_year(data, year))
+                cp = {a.asset_id: a.counterparty for a in data.assets}
+                blob = build_workbook(compute_year(data, year), cp)
                 fname = f"{slug}-{year}-amortizasiya.xlsx"
                 self._send(
                     200, blob,

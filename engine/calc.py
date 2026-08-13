@@ -547,6 +547,13 @@ def compute_year(data: ClientData, year: int,
                             f"{cat.rate.ceiling:.0%} mümkündür)" for cat in unused)
             )
 
+    missing_inv = [c for c in result.cards if not c.is_legacy_pool and not c.inv_no]
+    if missing_inv:
+        result.warnings.append(
+            "İnventar nömrəsi olmayan ƏV: "
+            + ", ".join(c.name for c in missing_inv)
+            + " — kartı redaktə edib nömrə verin («növbəti» düyməsi təklif edir)."
+        )
     for c in result.cards:
         if not c.is_legacy_pool and c.cost == ZERO and c.opening > ZERO:
             result.warnings.append(

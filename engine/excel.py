@@ -101,7 +101,8 @@ def _sheet_summary(wb: Workbook, r: YearResult) -> None:
         row += 1
 
 
-def _sheet_cards(wb: Workbook, r: YearResult) -> None:
+def _sheet_cards(wb: Workbook, r: YearResult,
+                 counterparty: dict | None = None) -> None:
     """Flat card list: one row per asset, category as a COLUMN.
 
     Category headers used to sit as merged banner rows above each group. That
@@ -109,11 +110,12 @@ def _sheet_cards(wb: Workbook, r: YearResult) -> None:
     across banner rows. Flat plus an autofilter lets the accountant slice it
     any way they need.
     """
+    counterparty = counterparty or {}
     ws = wb.create_sheet("Kartlar")
-    _header(ws, 1, ["⚠", "Kod", "Kateqoriya", "İnv.№", "Adı", "Alış tarixi",
-                    "İlkin dəyər", "Qalıq (il əvvəli)", "Daxilolma",
-                    "Kapital. təmir", "Xaricetmə", "Dərəcə", "Amortizasiya",
-                    "Silinmə", "Qalıq (il sonu)"])
+    _header(ws, 1, ["⚠", "Kod", "Kateqoriya", "İnv.№", "Adı", "Kontragent",
+                    "Alış tarixi", "İlkin dəyər", "Qalıq (il əvvəli)",
+                    "Daxilolma", "Dəyər artımı", "Kapital. təmir", "Xaricetmə",
+                    "Dərəcə", "Amortizasiya", "Silinmə", "Qalıq (il sonu)"])
     row = 2
     for cat in r.categories:
         for card in cat.cards:
@@ -121,25 +123,27 @@ def _sheet_cards(wb: Workbook, r: YearResult) -> None:
                     else "→" if card.disposal_type else "")
             vals = [flag, card.category, cat.name_az, card.inv_no,
                     card.name + (" (qrup qalığı)" if card.is_legacy_pool else ""),
+                    counterparty.get(card.asset_id, ""),
                     card.in_date.isoformat() if card.in_date else "",
                     _f(card.cost), _f(card.opening), _f(card.acquisition),
-                    _f(card.repair_capitalized), _f(card.disposed), _f(card.rate),
+                    _f(card.addition), _f(card.repair_capitalized),
+                    _f(card.disposed), _f(card.rate),
                     _f(card.depreciation), _f(card.writeoff), _f(card.closing)]
             for i, v in enumerate(vals, start=1):
                 cell = ws.cell(row, i, v)
                 cell.border = BORDER
-                if i == 12:
+                if i == 14:
                     cell.number_format = PCT
-                elif i >= 7:
+                elif i >= 8:
                     cell.number_format = MONEY
                 if card.threshold_hit:
                     cell.fill = WARN_FILL
                 elif card.threshold_next:
                     cell.fill = NEXT_FILL
             row += 1
-    ws.auto_filter.ref = f"A1:O{max(row - 1, 1)}"
+    ws.auto_filter.ref = f"A1:Q{max(row - 1, 1)}"
     ws.freeze_panes = "A2"
-    _widths(ws, [4, 7, 26, 12, 32, 13, 15, 17, 14, 14, 14, 9, 15, 13, 17])
+    _widths(ws, [4, 7, 26, 12, 32, 26, 13, 15, 17, 14, 14, 14, 14, 9, 15, 13, 17])
 
 
 def _sheet_movement(wb: Workbook, r: YearResult) -> None:
@@ -314,11 +318,11 @@ def _sheet_notes(wb: Workbook, r: YearResult) -> None:
     _widths(ws, [130])
 
 
-def build_workbook(r: YearResult) -> bytes:
+def build_workbook(r: YearResult, counterparty: dict | None = None) -> bytes:
     wb = Workbook()
     wb.remove(wb.active)
     _sheet_summary(wb, r)
-    _sheet_cards(wb, r)
+    _sheet_cards(wb, r, counterparty)
     _sheet_movement(wb, r)
     _sheet_monthly(wb, r)
     _sheet_repair(wb, r)

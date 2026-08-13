@@ -18,3 +18,16 @@
 2026-08-13T10:30:45+00:00	Zaur	status.set		əmsal 2025	imtina	istifadə
 2026-08-13T10:33:45+00:00	Zaur	year.close		close 2025		7 sətir → 2026
 2026-08-13T10:33:45+00:00	Zaur	year.reopen		reopen 2025	7 sətir	silindi
+2026-08-13T10:52:26+00:00	Zaur	asset.create	AV-012	asset		[new]  araba
+2026-08-13T10:56:46+00:00	Zaur	asset.create	AV-013	asset		[new]  Printer HP
+2026-08-13T10:56:46+00:00	Zaur	asset.create	AV-014	asset		[pool]  Binalar, tikililər — qrup qalığı
+2026-08-13T10:56:46+00:00	Zaur	asset.create	AV-014	opening_balance 2026		5000
+2026-08-13T10:58:01+00:00	Zaur	asset.create	AV-015	asset		[new] MA-0002 Skaner Canon
+2026-08-13T10:58:01+00:00	Zaur	asset.create	AV-016	asset		[pool]  Yüksək texnologiya — qrup qalığı
+2026-08-13T10:58:01+00:00	Zaur	asset.create	AV-016	opening_balance 2026		3000
+2026-08-13T10:58:20+00:00	Zaur	asset.delete	AV-013	asset	 Printer HP	silindi
+2026-08-13T10:58:20+00:00	Zaur	asset.delete	AV-014	opening_balances.tsv	1 sətir	silindi
+2026-08-13T10:58:20+00:00	Zaur	asset.delete	AV-014	asset	 Binalar, tikililər — qrup qalığı	silindi
+2026-08-13T10:58:20+00:00	Zaur	asset.delete	AV-015	asset	MA-0002 Skaner Canon	silindi
+2026-08-13T10:58:20+00:00	Zaur	asset.delete	AV-016	opening_balances.tsv	1 sətir	silindi
+2026-08-13T10:58:20+00:00	Zaur	asset.delete	AV-016	asset	 Yüksək texnologiya — qrup qalığı	silindi
