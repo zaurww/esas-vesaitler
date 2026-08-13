@@ -25,7 +25,7 @@ from typing import Any, Iterator
 
 from .calc import compute_year
 from . import rates
-from .rates import CATEGORY_BY_CODE
+from .rates import CATEGORY_BY_CODE, ENGINE_VERSION
 from .storage import DataError, load_client, read_tsv, write_tsv
 
 D = Decimal
@@ -411,6 +411,61 @@ def remove_addition(root: Path, slug: str, p: dict) -> str:
     return aid
 
 
+def close_year(root: Path, slug: str, p: dict) -> str:
+    """Close a year: write its closing balances as next year's opening ones.
+
+    This is the ONLY way balances move between years (CLAUDE.md §6). Nothing
+    carries over automatically, because carrying over is what freezes the
+    numbers that went into a filed return -- it has to be a deliberate act,
+    stamped with who closed it, when, and with which engine version.
+    """
+    year = int(p["year"])
+    data = load_client(root, slug)
+    if year in data.closed_years():
+        raise DataError(f"{year} ili artıq bağlıdır")
+    rates.refresh(root)
+    result = compute_year(data, year)
+    stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+    with transaction(root, slug, "year.close") as tx:
+        rows = rows_of(root, slug, "opening_balances.tsv")
+        n = 0
+        for c in result.cards:
+            if c.closing == 0 and (c.written_off or c.disposal_type):
+                continue                      # the asset has left the books
+            rows.append({
+                "year": str(year + 1), "asset_id": c.asset_id,
+                "category": c.category, "residual": f"{c.closing:.2f}",
+                "source": "year_close", "engine_version": ENGINE_VERSION,
+                "closed_at": stamp,
+            })
+            n += 1
+        save_rows(root, slug, "opening_balances.tsv", rows)
+        tx.log("", f"close {year}", "", f"{n} sətir → {year + 1}")
+    return f"{year} → {year + 1}: {n}"
+
+
+def reopen_year(root: Path, slug: str, p: dict) -> str:
+    """Undo a close.
+
+    §6 seals closed years on purpose, but a misclick must not require editing
+    files by hand -- that is the very thing the app exists to prevent. The
+    reversal is loud: it is named in the changelog, and it throws away the
+    stored balances, so the next close recomputes them from scratch.
+    """
+    year = int(p["year"])
+    with transaction(root, slug, "year.reopen") as tx:
+        rows = rows_of(root, slug, "opening_balances.tsv")
+        kept = [r for r in rows if not (r["year"] == str(year + 1)
+                                        and r["source"] == "year_close")]
+        removed = len(rows) - len(kept)
+        if not removed:
+            raise DataError(f"{year} ili bağlı deyil")
+        save_rows(root, slug, "opening_balances.tsv", kept)
+        tx.log("", f"reopen {year}", f"{removed} sətir", "silindi")
+    return f"{year}"
+
+
 def set_writeoff(root: Path, slug: str, p: dict) -> str:
     """Record (or withdraw) the decision to write an asset off under 500/5%."""
     aid, year = str(p["asset_id"]), int(p["year"])
@@ -722,4 +777,6 @@ ACTIONS = {
     "writeoff.set": set_writeoff,
     "election.set": set_election,
     "status.set": set_status,
+    "year.close": close_year,
+    "year.reopen": reopen_year,
 }

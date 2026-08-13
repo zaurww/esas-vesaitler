@@ -216,6 +216,8 @@
   <div id="error" style="display:none" class="err"></div>
   <div class="kpis" id="kpis"></div>
 
+  <div id="carry"></div>
+
   <div class="toolbar">
     <div class="tabs" role="tablist">
       <button role="tab" data-tab="annual" aria-selected="true">İllik hesabat</button>
@@ -335,6 +337,7 @@ function render(){
   ].map(([k,v,c]) => `<div class="kpi ${c}"><div class="k">${k}</div>
       <div class="v">${fmt.format(parseFloat(v))}</div></div>`).join('');
 
+  renderCarry(d);
   document.getElementById('hint').textContent =
     TAB === 'monthly' ? 'İllik məbləğ / 12 · yuvarlaqlaşdırma qalığı dekabrda'
     : TAB === 'annual' ? 'Sətrə klikləyin — hesablamanın gedişi' : '';
@@ -416,6 +419,57 @@ function formCoef(c){
       ${fld('effective_year','Qüvvəyə minmə ili',{type:'number',value:c.effective_year,req:true})}
      </div>` + fld('note','Qeyd'),
     d => post('coefficient.set', d));
+}
+
+/* Balances move between years ONLY by closing a year (§6). Nothing carries
+   over on its own, so an empty year needs to say why and offer the act. */
+function renderCarry(d){
+  const box = document.getElementById('carry');
+  const prev = d.year - 1;
+  const closed = d.closed_years.includes(d.year);
+  if (closed){
+    box.innerHTML = `<div class="note">${d.year} ili <strong>bağlıdır</strong> —
+      qalıqlar ${d.year + 1} ilə köçürülüb, dəyişiklik qəbul edilmir (§6).
+      <div class="acts" style="margin:8px 0 0">
+        <button onclick="confirmReopen(${d.year})">Bağlanışı ləğv et</button>
+      </div></div>`;
+    return;
+  }
+  if (!d.has_opening && !d.prev_year_closed && d.closed_years.length === 0
+      && parseFloat(d.totals.opening) === 0){
+    box.innerHTML = `<div class="note">
+      <strong>${d.year} ilinə giriş qalıqları yoxdur.</strong>
+      Qalıqlar özbaşına köçmür: ${prev} ilini bağlamaq lazımdır — bağlanış
+      ${prev} ilinin son qalıqlarını ${d.year} ilinin giriş qalığı kimi yazır.
+      <div class="acts" style="margin:8px 0 0">
+        <button onclick="confirmClose(${prev})">${prev} ilini bağla</button>
+      </div></div>`;
+    return;
+  }
+  box.innerHTML = `<div class="acts" style="margin:0 0 12px">
+    <button onclick="confirmClose(${d.year})">${d.year} ilini bağla →
+      ${d.year + 1} giriş qalığı</button></div>`;
+}
+
+function confirmClose(year){
+  openModal(`${year} ilini bağla`,
+    `<input type="hidden" name="year" value="${year}">
+     <div class="h">${year} ilinin son qalıqları ${year + 1} ilinin
+     <strong>giriş qalığı</strong> kimi yazılacaq, mühərrik versiyası və tarix
+     ilə möhürlənəcək.<br><br>
+     Bundan sonra ${year} ili <strong>bağlı</strong> sayılır: bəyannamə təqdim
+     edilmiş il kimi qorunur və dəyişiklik qəbul etmir (§6). Səhv olarsa,
+     bağlanışı ləğv etmək olar.</div>`,
+    d => post('year.close', d), 'Bağla');
+}
+
+function confirmReopen(year){
+  openModal(`${year} ilinin bağlanışını ləğv et`,
+    `<input type="hidden" name="year" value="${year}">
+     <div class="note">${year + 1} ilinin saxlanmış giriş qalıqları
+     <strong>silinəcək</strong>. Növbəti bağlanışda onlar yenidən hesablanacaq.
+     Əməliyyat changelog-a yazılır.</div>`,
+    d => post('year.reopen', d), 'Ləğv et');
 }
 
 function renderSide(d){

@@ -28,6 +28,9 @@ from engine.storage import DataError, list_clients, load_client  # noqa: E402
 
 INDEX = Path(__file__).resolve().parent / "index.html"
 
+_closed_cache: set = set()
+_has_opening = False
+
 
 def m(x: Decimal) -> str:
     """Money as a plain string; the UI formats for display."""
@@ -65,6 +68,9 @@ def serialize(r) -> dict:
         "status": r.status,
         "status_name": r.status_name,
         "use_coefficient": r.use_coefficient,
+        "closed_years": sorted(_closed_cache),
+        "prev_year_closed": (r.year - 1) in _closed_cache,
+        "has_opening": _has_opening,
         "engine_version": r.engine_version,
         "format_version": r.format_version,
         "months": MONTHS_AZ,
@@ -375,6 +381,9 @@ class Handler(BaseHTTPRequestHandler):
                 year = int(q.get("year", ["0"])[0])
                 rates.refresh(ROOT)      # pick up edits without a restart
                 data = load_client(ROOT, slug)
+                global _closed_cache, _has_opening
+                _closed_cache = data.closed_years()
+                _has_opening = any(ob.year == year for ob in data.opening_balances)
                 if data.status_for(year) is None:
                     # Not a failure of the data -- a year nobody has set up
                     # yet. Say what is missing and let the UI offer the form.

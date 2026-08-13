@@ -70,20 +70,8 @@ def cmd_export(slug: str, year: int) -> None:
 
 def cmd_close(slug: str, year: int) -> None:
     """Write closing balances as next year's opening balances (CLAUDE.md §6)."""
-    data = load_client(ROOT, slug)
-    if year in data.closed_years():
-        raise SystemExit(f"{year} ili artıq bağlıdır")
-    r = compute_year(data, year)
-    stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    rows = []
-    for c in r.cards:
-        if c.closing == 0 and (c.written_off or c.disposal_type):
-            continue  # the asset has left the books
-        rows.append([year + 1, c.asset_id, c.category, f"{money(c.closing):.2f}",
-                     "year_close", ENGINE_VERSION, stamp])
-    path = ROOT / "clients" / slug / "opening_balances.tsv"
-    append_tsv(path, OPENING_HEADER, rows)
-    print(f"{year} ili bağlandı · {len(rows)} sətir → {year + 1} ilin giriş qalığı")
+    from engine.mutate import close_year
+    print(close_year(ROOT, slug, {"year": year}))
 
 
 def cmd_verify(slug: str) -> None:
