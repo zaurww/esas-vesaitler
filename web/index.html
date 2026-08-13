@@ -175,6 +175,10 @@
   .imp table{font-size:12px}
   .imp .bad td{background:#fdecea}
   .imp .good td{background:#f2f9f4}
+  kbd{background:var(--accent-soft); border:1px solid var(--line);
+      border-radius:4px; padding:1px 6px; font:inherit; font-size:12px}
+  .imp thead select{width:100%; padding:5px 7px; border:1px solid var(--line);
+      border-radius:6px; background:#fff}
   .paste{width:100%; min-height:150px; font-family:Consolas,monospace; font-size:12px;
          border:1px solid var(--line); border-radius:8px; padding:10px}
   .stepbar{display:flex; gap:8px; margin-bottom:14px; font-size:12px; color:var(--muted)}
@@ -776,6 +780,9 @@ async function post(action, payload){
 }
 
 function openModal(title, body, onSubmit, submitLabel){
+  // the import wizard repurposes this button as "back"; restore it
+  const cancel = document.querySelector('#mform .foot .ghost');
+  cancel.textContent = 'İmtina'; cancel.onclick = closeModal;
   document.getElementById('mtitle').textContent = title;
   document.getElementById('mbody').innerHTML = body;
   document.getElementById('ferr').style.display = 'none';
@@ -1051,118 +1058,173 @@ async function showHistory(id){
 }
 
 /* ---- bulk import ----------------------------------------------------
-   Excel is where every client's asset list already lives, so the fast path
-   is: select the range, Ctrl+C, paste. A file picker is the fallback.
-   The preview runs through the SAME server code as the real import and then
-   rolls back, so what it shows is exactly what will happen. --------------- */
+   Designed around what a bookkeeper sees, not around the schema.
+
+   The first version asked "which column is the name?" with a grid of field
+   dropdowns -- that is the developer's model. A bookkeeper looks at the
+   sheet and says "this column here is the name", so the mapping step now
+   shows THEIR rows with a dropdown sitting on top of each column.
+
+   And when every required column is recognised, the step is skipped
+   entirely: a decision nobody needs to make should not be shown. --------- */
 let IMP = null;
+
+const IMP_LABELS = {
+  inv_no:'İnv.№', name:'Adı', category:'Kateqoriya', in_date:'Alış tarixi',
+  cost:'İlkin dəyər', opening_residual:'Qalıq dəyər',
+  counterparty:'Kontragent', note:'Qeyd'};
+const IMP_REQUIRED = ['name','category'];
 
 function formImport(){
   IMP = {step:1, header:[], rows:[], map:{}, catmap:{}, year:REPORT.year, fields:[]};
   impRender();
 }
 
-function impBox(step, body, foot){
-  const bar = ['Yapışdır / fayl','Sütunları uyğunlaşdır','Baxış və idxal']
-    .map((t,i) => `<span class="${i+1===step?'on':''}">${i+1}. ${t}</span>`).join('');
-  document.getElementById('mtitle').textContent = 'ƏV idxalı';
-  document.getElementById('mbody').innerHTML = `<div class="stepbar">${bar}</div>` + body;
+function impBox(step, body, foot, back){
+  const steps = ['Cədvəli gətirin','Sütunları yoxlayın','Baxış və idxal'];
+  document.getElementById('mtitle').textContent =
+    `ƏV idxalı · ${step}/3 · ${steps[step-1]}`;
+  document.getElementById('mbody').innerHTML = body;
   document.getElementById('ferr').style.display = 'none';
   document.getElementById('msubmit').textContent = foot;
+  const cancel = document.querySelector('#mform .foot .ghost');
+  cancel.textContent = back ? '← Geri' : 'İmtina';
+  cancel.onclick = back ? back : closeModal;
   document.querySelector('#modal .box').classList.toggle('wide', step > 1);
   document.getElementById('modal').classList.add('open');
 }
 
 const STAY = '__stay__';
+const impCats = () => CTX.categories.filter(c => !c.code.startsWith('qma'));
 
+/* ---- step 1: get the sheet in ---- */
 function impRender(){
-  if (IMP.step === 1){
-    impBox(1, `
-      <div class="fld"><label>Excel-dən kopyalayıb bura yapışdırın</label>
-        <textarea class="paste" id="pastebox"
-          placeholder="Excel-də sahəni seçin → Ctrl+C → burada Ctrl+V"></textarea>
-        <div class="h">Birinci sətir başlıq olmalıdır.</div></div>
-      <div class="fld"><label>…və ya fayl seçin (.xlsx, .csv, .tsv)</label>
-        <input type="file" id="impfile" accept=".xlsx,.csv,.tsv,.txt"></div>
-      <div class="note q">Müştəridə hazır cədvəl yoxdursa, şablonu yükləyib
-        ona göndərin: sütunlar hazırdır, kateqoriya siyahıdan seçilir.
-        <div class="acts" style="margin:8px 0 0">
-          <a class="btn" style="border:1px solid var(--line)"
-             href="/api/import-template">⬇ İdxal şablonunu yüklə</a>
-        </div></div>`,
-      'Davam et');
-    MSUBMIT = async () => {
-      const f = document.getElementById('impfile').files[0];
-      let payload;
-      if (f){
-        const b64 = await new Promise(res => {
-          const fr = new FileReader();
-          fr.onload = () => res(fr.result.split(',')[1]);
-          fr.readAsDataURL(f);
-        });
-        payload = {name:f.name, b64};
-      } else {
-        const text = document.getElementById('pastebox').value;
-        if (text.split(/\r?\n/).filter(l => l.trim()).length < 2)
-          throw new Error('Ən azı başlıq və bir sətir lazımdır');
-        payload = {name:'paste.tsv', b64: btoa(unescape(encodeURIComponent(text)))};
-      }
-      const r = await fetch('/api/parse-file', {method:'POST',
-        headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
-      const j = await r.json();
-      if (!r.ok) throw new Error(j.error);
-      IMP.header = j.header; IMP.rows = j.rows; IMP.map = j.guess; IMP.fields = j.fields;
-      IMP.step = 2; impRender();
-      throw new Error(STAY);
-    };
-    return;
-  }
-
-  if (IMP.step === 2){
-    const opts = f => ['<option value="">—</option>'].concat(
-      IMP.header.map((h,j) => `<option value="${j}" ${IMP.map[f]===j?'selected':''}>${
-        esc(h) || ('sütun ' + (j+1))}</option>`)).join('');
-    const LBL = {inv_no:'İnv.№', name:'Adı *', category:'Kateqoriya *',
-      in_date:'Alış tarixi', cost:'İlkin dəyər', opening_residual:'Qalıq dəyər',
-      counterparty:'Kontragent', note:'Qeyd'};
-    const cols = IMP.fields.map(f => `<div class="fld"><label>${LBL[f]||f}</label>
-      <select data-f="${f}">${opts(f)}</select></div>`).join('');
-
-    const ci = IMP.map.category;
-    const seen = ci == null ? [] :
-      [...new Set(IMP.rows.map(r => (r[ci]||'').trim()).filter(Boolean))];
-    const cl = CTX.categories.filter(c => !c.code.startsWith('qma'));
-    const catsel = seen.map(v => `<div class="fld"><label>${esc(v)}</label>
-      <select data-cat="${esc(v)}">${cl.map(c => `<option value="${c.code}" ${
-        (c.code === v.toLowerCase() || c.name_az === v) ? 'selected' : ''
-      }>${esc(c.name_az)}</option>`).join('')}</select></div>`).join('');
-
-    impBox(2, `<div class="h" style="margin-bottom:10px">${IMP.rows.length} sətir tapıldı.
-        Hər sahəni mənbə sütunu ilə uyğunlaşdırın.</div>
-      <div class="imp-grid">${cols}</div>
-      ${seen.length ? `<h3>Kateqoriyaların uyğunlaşdırılması</h3>
-        <div class="imp-grid">${catsel}</div>` : ''}
-      <div class="fld" style="max-width:240px;margin-top:14px">
-        <label>Qalıq dəyər hansı ilin əvvəlinə</label>
-        <input type="number" id="impyear" value="${IMP.year}"></div>`,
-      'Baxış');
-    MSUBMIT = async () => {
-      IMP.map = {};
-      document.querySelectorAll('#mbody select[data-f]').forEach(el => {
-        if (el.value !== '') IMP.map[el.dataset.f] = +el.value;
+  impBox(1, `
+    <p style="margin:0 0 14px">Müştərinin cədvəlini olduğu kimi gətirin —
+      sütunların adı və sırası vacib deyil, proqram özü tanıyacaq.</p>
+    <div class="fld"><label>Excel-də sahəni seçin → <kbd>Ctrl+C</kbd> →
+      burada <kbd>Ctrl+V</kbd></label>
+      <textarea class="paste" id="pastebox"
+        placeholder="Buraya yapışdırın…"></textarea></div>
+    <div class="fld"><label>və ya faylı seçin</label>
+      <input type="file" id="impfile" accept=".xlsx,.csv,.tsv,.txt"></div>
+    <div class="h">Birinci sətir sütun adları olmalıdır.
+      Müştəridə cədvəl yoxdursa —
+      <a href="/api/import-template">hazır şablonu yükləyib</a> ona göndərin.</div>`,
+    'Davam et');
+  MSUBMIT = async () => {
+    const f = document.getElementById('impfile').files[0];
+    let payload;
+    if (f){
+      const b64 = await new Promise(res => {
+        const fr = new FileReader();
+        fr.onload = () => res(fr.result.split(',')[1]);
+        fr.readAsDataURL(f);
       });
-      IMP.catmap = {};
-      document.querySelectorAll('#mbody select[data-cat]').forEach(el => {
-        IMP.catmap[el.dataset.cat] = el.value;
-      });
-      IMP.year = +document.getElementById('impyear').value;
-      if (IMP.map.name == null) throw new Error('«Adı» sütunu seçilməyib');
-      if (IMP.map.category == null) throw new Error('«Kateqoriya» sütunu seçilməyib');
-      IMP.step = 3;
-      await impPreview();
-      throw new Error(STAY);
-    };
+      payload = {name:f.name, b64};
+    } else {
+      const text = document.getElementById('pastebox').value;
+      if (text.split(/\r?\n/).filter(l => l.trim()).length < 2)
+        throw new Error('Ən azı başlıq sətri və bir ƏV sətri lazımdır');
+      payload = {name:'paste.tsv', b64: btoa(unescape(encodeURIComponent(text)))};
+    }
+    const r = await fetch('/api/parse-file', {method:'POST',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error);
+    IMP.header = j.header; IMP.rows = j.rows; IMP.map = j.guess; IMP.fields = j.fields;
+    impAfterParse();
+    throw new Error(STAY);
+  };
+}
+
+/* Skip the mapping step when there is nothing to decide. */
+function impAfterParse(){
+  const ok = IMP_REQUIRED.every(f => IMP.map[f] != null);
+  IMP.catmap = {};
+  const unknown = impUnknownCats();
+  if (ok && !unknown.length){ impPreview(); } else { impColumns(); }
+}
+
+function impUnknownCats(){
+  const ci = IMP.map.category;
+  if (ci == null) return [];
+  const known = new Set(impCats().map(c => c.code));
+  const seen = new Map();
+  for (const r of IMP.rows){
+    const v = (r[ci] || '').trim();
+    if (!v || known.has(v)) continue;
+    seen.set(v, (seen.get(v) || 0) + 1);
   }
+  return [...seen.entries()];
+}
+
+/* ---- step 2: their rows, with a dropdown over each column ---- */
+function impColumns(){
+  IMP.step = 2;
+  const opts = i => `<select onchange="impSetCol(${i}, this.value)">
+      <option value="">— istifadə olunmur —</option>
+      ${IMP.fields.map(f => `<option value="${f}" ${IMP.map[f] === i ? 'selected' : ''}
+        >${IMP_LABELS[f]}${IMP_REQUIRED.includes(f) ? ' *' : ''}</option>`).join('')}
+    </select>`;
+  const missing = IMP_REQUIRED.filter(f => IMP.map[f] == null);
+  const sample = IMP.rows.slice(0, 5);
+  const table = `<div class="scroll imp" style="max-height:34vh"><table>
+    <thead>
+      <tr>${IMP.header.map((h,i) => `<th style="min-width:150px">${opts(i)}</th>`).join('')}</tr>
+      <tr>${IMP.header.map(h => `<th style="font-weight:400;text-transform:none;
+        color:var(--muted)">${esc(h) || '(adsız sütun)'}</th>`).join('')}</tr>
+    </thead>
+    <tbody>${sample.map(r => `<tr>${IMP.header.map((_,i) =>
+      `<td>${esc(r[i] ?? '')}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+
+  const unknown = impUnknownCats();
+  const cats = unknown.length ? `<h3>Kateqoriyalar tanınmadı</h3>
+    <p class="h" style="margin:0 0 8px">Cədvəldəki bu dəyərlərin hansı
+      kateqoriyaya uyğun gəldiyini göstərin.</p>
+    <div class="imp-grid">${unknown.map(([v,n]) => `<div class="fld">
+      <label>«${esc(v)}» — ${n} sətir</label>
+      <select data-cat="${esc(v)}" required>
+        <option value="">— seçin —</option>
+        ${impCats().map(c =>
+          `<option value="${c.code}">${esc(c.name_az)}</option>`).join('')}</select>
+      </div>`).join('')}</div>` : '';
+
+  impBox(2, `
+    <p style="margin:0 0 12px">${IMP.rows.length} sətir oxundu.
+      ${missing.length
+        ? `<strong style="color:var(--neg)">Hər sütunun üstündə onun nə olduğunu
+           seçin.</strong> Tanınmayan sütunları «istifadə olunmur» kimi buraxın.`
+        : 'Proqram sütunları özü tanıdı — yoxlayın və davam edin.'}
+      <br><span class="h">* — mütləq lazımdır</span></p>
+    ${table}${cats}
+    <div class="fld" style="max-width:260px;margin-top:14px">
+      <label>«Qalıq dəyər» hansı ilin əvvəlinə aiddir</label>
+      <input type="number" id="impyear" value="${IMP.year}"></div>`,
+    'Baxış', () => { IMP.step = 1; impRender(); });
+
+  MSUBMIT = async () => {
+    const unset = [];
+    document.querySelectorAll('#mbody select[data-cat]').forEach(el => {
+      if (!el.value) unset.push(el.dataset.cat);
+      IMP.catmap[el.dataset.cat] = el.value;
+    });
+    if (unset.length)
+      throw new Error('Kateqoriya seçilməyib: ' + unset.join(', '));
+    IMP.year = +document.getElementById('impyear').value;
+    const miss = IMP_REQUIRED.filter(f => IMP.map[f] == null);
+    if (miss.length)
+      throw new Error('Seçilməyib: ' + miss.map(f => IMP_LABELS[f]).join(', '));
+    await impPreview();
+    throw new Error(STAY);
+  };
+}
+
+/* One field belongs to one column: assigning it elsewhere frees the old one. */
+function impSetCol(index, field){
+  for (const f of Object.keys(IMP.map)) if (IMP.map[f] === index) delete IMP.map[f];
+  if (field) IMP.map[field] = index;
+  impColumns();
 }
 
 const impPayload = () => IMP.rows.map(r => {
@@ -1172,32 +1234,43 @@ const impPayload = () => IMP.rows.map(r => {
   return o;
 });
 
+/* ---- step 3: plain-language check ---- */
 async function impPreview(){
+  IMP.step = 3;
   const rep = (await post('asset.import',
     {rows: impPayload(), opening_year: IMP.year, dry_run: true})).result;
   const bad = rep.errors.length;
-  const body = `
-    <div class="h" style="margin-bottom:8px">${bad
-      ? `<strong style="color:var(--neg)">${bad} sətirdə xəta.</strong>
-         İdxal ya bütövlükdə keçir, ya da heç keçmir — düzəldib yenidən cəhd edin.`
-      : `<strong style="color:var(--pos)">${rep.created} ƏV idxala hazırdır.</strong>`}
-    </div>
-    <div class="scroll imp" style="max-height:46vh"><table><thead><tr>
+  const carried = rep.rows.filter(r => r.mode === 'carried').length;
+  const fresh = rep.rows.filter(r => r.mode === 'new').length;
+  const auto = rep.rows.filter(r => r.auto_inv).length;
+
+  const summary = bad
+    ? `<div class="note"><strong>${bad} sətirdə problem var.</strong>
+        İdxal ya bütövlükdə keçir, ya da heç keçmir — belə ki, yarımçıq
+        müştəri yaranmasın. Aşağıda qırmızı sətirləri düzəldib yenidən cəhd edin.</div>`
+    : `<div class="note q"><strong>${rep.created} ƏV əlavə olunacaq.</strong><br>
+        ${carried ? `${carried}-i əvvəlki illərdən gəlir — ${IMP.year} ilin
+          əvvəlinə qalıq dəyəri ilə.<br>` : ''}
+        ${fresh ? `${fresh}-i bu il alınıb — ilkin dəyəri ilə.<br>` : ''}
+        ${auto ? `${auto} ƏV üçün inventar nömrəsi avtomatik veriləcək.` : ''}</div>`;
+
+  impBox(3, summary + `
+    <div class="scroll imp" style="max-height:42vh"><table><thead><tr>
       <th>#</th><th>İnv.№</th><th>Adı</th><th>Kateqoriya</th>
-      <th class="num">İlkin dəyər</th><th class="num">Qalıq</th>
-      <th>Rejim</th><th>Nəticə</th></tr></thead><tbody>${
+      <th class="num">İlkin dəyər</th><th class="num">Qalıq dəyər</th>
+      <th>Nəticə</th></tr></thead><tbody>${
       rep.rows.map(r => `<tr class="${r.ok?'good':'bad'}">
         <td>${r.line}</td>
         <td>${esc(r.inv_no)}${r.auto_inv ? '<span class="tag">avto</span>' : ''}</td>
-        <td>${esc(r.name)}</td>
-        <td>${esc(r.category||'')}</td>
+        <td>${esc(r.name)}</td><td>${esc(r.category||'')}</td>
         <td class="num">${r.cost ? money(r.cost) : ''}</td>
         <td class="num">${r.residual ? money(r.residual) : ''}</td>
-        <td>${r.mode==='carried'?'əvvəlki illərdən':r.mode==='new'?'bu il alınıb':''}</td>
-        <td>${r.ok ? '✓' : esc(r.message)}</td></tr>`).join('')}</tbody></table></div>`;
-  impBox(3, body, bad ? 'Geri qayıt' : `${rep.created} ƏV idxal et`);
+        <td>${r.ok ? '✓' : esc(r.message)}</td></tr>`).join('')}</tbody></table></div>`,
+    bad ? 'Sütunlara qayıt' : `Bəli, ${rep.created} ƏV idxal et`,
+    () => impColumns());
+
   MSUBMIT = async () => {
-    if (bad){ IMP.step = 2; impRender(); throw new Error(STAY); }
+    if (bad){ impColumns(); throw new Error(STAY); }
     await post('asset.import', {rows: impPayload(), opening_year: IMP.year});
   };
 }

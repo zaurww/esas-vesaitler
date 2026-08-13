@@ -682,13 +682,15 @@ IMPORT_FIELDS = ("inv_no", "name", "category", "in_date", "cost",
 # obvious Russian/English equivalents. Matching is case- and space-insensitive.
 IMPORT_ALIASES = {
     "inv_no": ["inv", "inv.№", "inv №", "inv no", "invno", "inventar",
-               "inventar nömrəsi", "инв", "инв.№", "инв №", "инвентарный номер"],
+               "inventar nömrəsi", "nömrə", "nomre", "№", "kod nömrə",
+               "инв", "инв.№", "инв №", "инвентарный номер", "номер"],
     "name": ["ad", "adı", "adi", "name", "наименование", "название", "ос"],
     "category": ["kod", "kateqoriya", "категория", "код", "group", "qrup"],
     "in_date": ["alış tarixi", "alis tarixi", "tarix", "дата", "дата приобретения",
                 "date", "in_date"],
     "cost": ["ilkin dəyər", "ilkin deyer", "первоначальная стоимость",
-             "первоначальная", "cost", "dəyər"],
+             "первоначальная", "cost", "dəyər", "alış qiyməti", "qiymət",
+             "стоимость", "цена"],
     "opening_residual": ["qalıq dəyər", "qaliq deyer", "qalıq", "остаточная стоимость",
                          "остаток", "residual", "qalıq (il əvvəli)"],
     "counterparty": ["kontragent", "контрагент", "təchizatçı", "поставщик", "supplier"],
@@ -713,17 +715,29 @@ def _fold(text: object) -> str:
     return " ".join(s.lower().split())
 
 
+# People type headers without the Azerbaijani letters all the time -- "Deyer"
+# for "Dəyər", "Qaliq" for "Qalıq". A second, blunter fold lets those match
+# too. Used only for comparing headers, never for storing anything.
+_ASCII = str.maketrans({"ə": "e", "ç": "c", "ş": "s", "ğ": "g", "ö": "o", "ü": "u"})
+
+
+def _fold2(text: object) -> str:
+    return _fold(text).translate(_ASCII)
+
+
 def guess_columns(header: list[str]) -> dict[str, int]:
     """Best-effort mapping of source columns to our fields. The user corrects
     it in the UI; guessing only removes the boring part."""
     norm = [_fold(h) for h in header]
+    norm2 = [_fold2(h) for h in header]
     out: dict[str, int] = {}
     for field, aliases in IMPORT_ALIASES.items():
-        folded = [_fold(a) for a in aliases]
-        for i, h in enumerate(norm):
+        folded = {_fold(a) for a in aliases} | {_fold2(a) for a in aliases}
+        for i, (h, h2) in enumerate(zip(norm, norm2)):
             if i in out.values() or not h:
                 continue
-            if h in folded or any(a and (h.startswith(a) or a in h) for a in folded):
+            if any(x in folded or any(a and (x.startswith(a) or a in x) for a in folded)
+                   for x in (h, h2)):
                 out[field] = i
                 break
     return out
