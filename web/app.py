@@ -21,6 +21,7 @@ sys.path.insert(0, str(ROOT))
 from engine.calc import MONTHS_AZ, CalcError, compute_year  # noqa: E402
 from engine.excel import build_workbook  # noqa: E402
 from engine.mutate import ACTIONS  # noqa: E402
+from engine import rates  # noqa: E402
 from engine.rates import CATEGORIES, ENGINE_VERSION  # noqa: E402
 from engine.storage import DataError, list_clients, load_client  # noqa: E402
 
@@ -193,8 +194,17 @@ class Handler(BaseHTTPRequestHandler):
             if url.path == "/api/report":
                 slug = q.get("client", [""])[0]
                 year = int(q.get("year", ["0"])[0])
+                rates.refresh(ROOT)      # pick up edits without a restart
                 data = load_client(ROOT, slug)
                 self._json(serialize(compute_year(data, year)))
+                return
+
+            if url.path == "/api/rates":
+                year = int(q.get("year", ["0"])[0])
+                rates.refresh(ROOT)
+                self._json({"year": year,
+                            "rates": rates.table_for(year),
+                            "coefficients": rates.coefficients_for(year)})
                 return
 
             if url.path == "/api/export":

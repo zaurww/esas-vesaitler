@@ -1,0 +1,5 @@
+
+# Owner edits to the statutory table. One file per installation, not per
+# client. Empty cell = fall back to the engine default for that field.
+# Law changed -> add a row with a later effective_year.
+# We transcribed it wrong -> correct the existing year in place.

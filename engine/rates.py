@@ -93,6 +93,59 @@ STATUS_NAMES = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Rows entered by the owner, read from `rates.tsv` / `coefficients.tsv` next to
+# the engine. They are ONE FILE PER INSTALLATION, deliberately not per client:
+# the tax code is the same for every client, and a per-client copy would give
+# five clients five different readings of the law.
+#
+# Kept separate from the defaults above so an engine update can ship corrected
+# defaults without erasing what the owner typed. For the same
+# (effective_year, category) the owner's row wins, and the report says so.
+# ---------------------------------------------------------------------------
+
+USER_RATES: List[RateRow] = []
+USER_MULTIPLIERS: List[MultiplierRow] = []
+USER_SOURCE: set = set()          # keys that came from the files, for the UI
+
+RATES_HEADER = ["effective_year", "category", "max_rate", "repair_limit", "note"]
+COEFF_HEADER = ["effective_year", "status", "coefficient", "note"]
+
+
+def _num(v: str) -> Decimal | None:
+    v = (v or "").strip().replace(",", ".")
+    return None if v in ("", "-") else D(v)
+
+
+def refresh(root) -> None:
+    """Re-read the owner's rate files. Called before every calculation, so an
+    edit takes effect on the next page load without restarting anything."""
+    from .storage import read_tsv          # local import: storage imports us
+    from pathlib import Path
+
+    root = Path(root)
+    USER_RATES.clear()
+    USER_MULTIPLIERS.clear()
+    USER_SOURCE.clear()
+
+    for r in read_tsv(root / "rates.tsv"):
+        cat = (r.get("category") or "").strip()
+        if cat not in CATEGORY_BY_CODE:
+            raise ValueError(f"rates.tsv: naməlum kateqoriya {cat!r}")
+        year = int(r["effective_year"])
+        USER_RATES.append(RateRow(year, cat, _num(r.get("max_rate", "")),
+                                  _num(r.get("repair_limit", ""))))
+        USER_SOURCE.add(("rate", year, cat))
+
+    for r in read_tsv(root / "coefficients.tsv"):
+        st = (r.get("status") or "").strip()
+        if st not in STATUS_NAMES:
+            raise ValueError(f"coefficients.tsv: naməlum status {st!r}")
+        year = int(r["effective_year"])
+        USER_MULTIPLIERS.append(MultiplierRow(year, st, D(r["coefficient"])))
+        USER_SOURCE.add(("coef", year, st))
+
+
 def _latest(rows, year: int, key_fn, key_value):
     """Row with the greatest effective_year <= year."""
     found = None
@@ -105,7 +158,17 @@ def _latest(rows, year: int, key_fn, key_value):
 
 
 def statutory(year: int, category: str) -> RateRow:
-    row = _latest(STATUTORY_RATES, year, lambda r: r.category, category)
+    """The owner's rows take precedence over the shipped defaults."""
+    row = _latest(USER_RATES, year, lambda r: r.category, category)
+    base = _latest(STATUTORY_RATES, year, lambda r: r.category, category)
+    if row is None:
+        row = base
+    elif base is not None and row.effective_year >= base.effective_year:
+        # a partially filled row falls back to the default for the blank field
+        row = RateRow(row.effective_year, category,
+                      row.max_rate if row.max_rate is not None else base.max_rate,
+                      row.repair_limit if row.repair_limit is not None
+                      else base.repair_limit)
     if row is None:
         raise LookupError(
             f"нет статутной ставки для категории {category!r} на {year} год"
@@ -114,9 +177,43 @@ def statutory(year: int, category: str) -> RateRow:
 
 
 def multiplier(year: int, status: str) -> MultiplierRow:
-    row = _latest(MULTIPLIERS, year, lambda r: r.status, status)
+    row = _latest(USER_MULTIPLIERS, year, lambda r: r.status, status)
+    if row is None:
+        row = _latest(MULTIPLIERS, year, lambda r: r.status, status)
     if row is None:
         raise LookupError(
             f"нет коэффициента для статуса {status!r} на {year} год"
         )
     return row
+
+
+def table_for(year: int) -> list[dict]:
+    """The effective table for one year, with where each number came from."""
+    out = []
+    for c in CATEGORIES:
+        try:
+            st = statutory(year, c.code)
+        except LookupError:
+            continue
+        user = _latest(USER_RATES, year, lambda r: r.category, c.code)
+        out.append({
+            "code": c.code, "name_az": c.name_az, "name_ru": c.name_ru,
+            "effective_year": st.effective_year,
+            "max_rate": None if st.max_rate is None else f"{st.max_rate:.4f}",
+            "repair_limit": None if st.repair_limit is None
+                            else f"{st.repair_limit:.4f}",
+            "source": "user" if user is not None else "engine",
+        })
+    return out
+
+
+def coefficients_for(year: int) -> list[dict]:
+    out = []
+    for status, name in STATUS_NAMES.items():
+        m = multiplier(year, status)
+        user = _latest(USER_MULTIPLIERS, year, lambda r: r.status, status)
+        out.append({"status": status, "name": name,
+                    "effective_year": m.effective_year,
+                    "coefficient": str(m.coefficient),
+                    "source": "user" if user is not None else "engine"})
+    return out

@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from .calc import compute_year
+from . import rates
 from .rates import CATEGORY_BY_CODE
 from .storage import DataError, load_client, read_tsv, write_tsv
 
@@ -449,7 +450,96 @@ def set_status(root: Path, slug: str, p: dict) -> str:
     return status
 
 
+def set_rate_row(root: Path, slug: str, p: dict) -> str:
+    """Add or correct a row in the installation-wide rates.tsv.
+
+    Not per client: the tax code is the same for everyone (§5.1). Rolls back
+    if the new table stops any open year from computing.
+    """
+    year = int(p["effective_year"])
+    cat = category_of(p.get("category"))
+    path = root / "rates.tsv"
+    before = path.read_bytes() if path.exists() else None
+    rows = [{h: r.get(h, "") for h in rates.RATES_HEADER}
+            for r in read_tsv(path)]
+    rows = [r for r in rows
+            if not (r["effective_year"] == str(year) and r["category"] == cat)]
+    if not p.get("remove"):
+        rows.append({
+            "effective_year": str(year), "category": cat,
+            "max_rate": _rate_or_blank(p.get("max_rate")),
+            "repair_limit": _rate_or_blank(p.get("repair_limit")),
+            "note": str(p.get("note", "")).strip(),
+        })
+    write_tsv(path, rates.RATES_HEADER,
+              [[r.get(h, "") for h in rates.RATES_HEADER] for r in rows])
+    try:
+        _recompute_everything(root)
+    except BaseException:
+        if before is None:
+            path.unlink(missing_ok=True)
+        else:
+            path.write_bytes(before)
+        rates.refresh(root)
+        raise
+    return f"{cat} {year}"
+
+
+def set_coefficient_row(root: Path, slug: str, p: dict) -> str:
+    year = int(p["effective_year"])
+    status = str(p.get("status", "")).strip()
+    if status not in ("mikro", "kicik", "orta", "iri"):
+        raise DataError("Status: mikro | kicik | orta | iri")
+    path = root / "coefficients.tsv"
+    before = path.read_bytes() if path.exists() else None
+    rows = [{h: r.get(h, "") for h in rates.COEFF_HEADER} for r in read_tsv(path)]
+    rows = [r for r in rows
+            if not (r["effective_year"] == str(year) and r["status"] == status)]
+    if not p.get("remove"):
+        rows.append({"effective_year": str(year), "status": status,
+                     "coefficient": str(p.get("coefficient", "")).strip(),
+                     "note": str(p.get("note", "")).strip()})
+    write_tsv(path, rates.COEFF_HEADER,
+              [[r.get(h, "") for h in rates.COEFF_HEADER] for r in rows])
+    try:
+        _recompute_everything(root)
+    except BaseException:
+        if before is None:
+            path.unlink(missing_ok=True)
+        else:
+            path.write_bytes(before)
+        rates.refresh(root)
+        raise
+    return f"{status} {year}"
+
+
+def _rate_or_blank(value: Any) -> str:
+    v = str(value or "").strip().replace(",", ".").rstrip("%")
+    if v == "":
+        return ""
+    d = D(v)
+    if d > 1:
+        d = d / 100                    # accept both 5 and 0.05
+    if d < 0 or d > 1:
+        raise DataError(f"dərəcə 0 və 1 arasında olmalıdır — {value!r}")
+    return f"{d:.4f}".rstrip("0").rstrip(".")
+
+
+def _recompute_everything(root: Path) -> None:
+    """A rate change touches every client, so every client must still compute."""
+    from .storage import list_clients
+    rates.refresh(root)
+    for s in list_clients(root):
+        data = load_client(root, s)
+        closed = data.closed_years()
+        for st in data.statuses:
+            if st.year not in closed:
+                compute_year(data, st.year)
+
+
 ACTIONS = {
+    "rate.set": set_rate_row,
+    "coefficient.set": set_coefficient_row,
     "asset.create": create_asset,
     "asset.update": update_asset,
     "asset.delete": delete_asset,

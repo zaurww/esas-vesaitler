@@ -209,6 +209,7 @@
       <button role="tab" data-tab="annual" aria-selected="true">İllik hesabat</button>
       <button role="tab" data-tab="monthly" aria-selected="false">Aylıq</button>
       <button role="tab" data-tab="repair" aria-selected="false">Təmir (m.115)</button>
+      <button role="tab" data-tab="norms" aria-selected="false">Normalar</button>
       <button role="tab" data-tab="notes" aria-selected="false">Qeydlər <span id="notecount"></span></button>
     </div>
     <input class="filter" id="filter" placeholder="Axtar:  ad, inv.№…   ( / )">
@@ -306,7 +307,80 @@ function render(){
   renderSide(d);
   document.getElementById('view').innerHTML =
     TAB === 'annual' ? viewAnnual(d) : TAB === 'monthly' ? viewMonthly(d)
-    : TAB === 'repair' ? viewRepair(d) : viewNotes(d);
+    : TAB === 'repair' ? viewRepair(d)
+    : TAB === 'norms' ? '<div class="card" style="padding:16px">yüklənir…</div>'
+    : viewNotes(d);
+  if (TAB === 'norms') loadNorms();
+}
+
+/* Statutory norms: ONE file per installation, not per client (§5.1).
+   The law is the same for everyone; a per-client copy would give five
+   clients five readings of it. */
+async function loadNorms(){
+  const d = await (await fetch(`/api/rates?year=${REPORT.year}`)).json();
+  const src = s => s === 'user'
+    ? '<span class="tag w">əl ilə yazılıb</span>'
+    : '<span class="tag d">proqramdan</span>';
+  // A null rate means the category derives it from the useful life (FİM),
+  // not that the value is missing.
+  const pc = v => v == null ? '<span class="zero">FİM-dən</span>'
+                            : (parseFloat(v)*100).toFixed(v*100 % 1 ? 2 : 0) + '%';
+  let rows = d.rates.map(r => `<tr>
+      <td>${esc(r.code)}</td><td>${esc(r.name_az)}</td>
+      <td class="num">${pc(r.max_rate)}</td>
+      <td class="num">${pc(r.repair_limit)}</td>
+      <td class="num">${r.effective_year}</td>
+      <td>${src(r.source)}</td>
+      <td><button class="tagbtn" onclick='formNorm(${JSON.stringify(r)})'>dəyiş</button></td>
+    </tr>`).join('');
+  let coef = d.coefficients.map(c => `<tr>
+      <td>${esc(c.status)}</td><td>${esc(c.name)}</td>
+      <td class="num">× ${c.coefficient}</td>
+      <td class="num">${c.effective_year}</td>
+      <td>${src(c.source)}</td>
+      <td><button class="tagbtn" onclick='formCoef(${JSON.stringify(c)})'>dəyiş</button></td>
+    </tr>`).join('');
+  document.getElementById('view').innerHTML = `
+    <div class="card"><div class="scroll"><table><thead><tr>
+      <th>Kod</th><th>Kateqoriya</th><th class="num">Norma (maks)</th>
+      <th class="num">Təmir limiti (m.115)</th><th class="num">Qüvvədə</th>
+      <th>Mənbə</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>
+    <h3>Sahibkarlıq əmsalları</h3>
+    <div class="card"><div class="scroll"><table><thead><tr>
+      <th>Kod</th><th>Status</th><th class="num">Əmsal</th>
+      <th class="num">Qüvvədə</th><th>Mənbə</th><th></th></tr></thead>
+      <tbody>${coef}</tbody></table></div></div>
+    <div class="note q">Bu cədvəl <strong>bütün müştərilər üçün ümumidir</strong> —
+      qanun hamı üçün eynidir. Dəyişiklik <code>rates.tsv</code> /
+      <code>coefficients.tsv</code> fayllarına yazılır.<br>
+      <strong>Qanun dəyişibsə</strong> — yeni qüvvəyəminmə ili ilə sətir əlavə edin,
+      keçmiş illər toxunulmaz qalır. <strong>Səhv yazılıbsa</strong> — həmin ili
+      düzəldin: onda bütün keçmiş hesablamalar da düzəlir.</div>`;
+}
+
+function formNorm(r){
+  openModal(`Norma — ${r.name_az}`,
+    `<input type="hidden" name="category" value="${r.code}">` +
+    `<div class="row2">
+      ${fld('max_rate','Amortizasiya norması (maks)',{value:r.max_rate==null?'':(r.max_rate*100).toFixed(0),
+            hint:'Faizlə. Boş = mövcud dəyər.'})}
+      ${fld('repair_limit','Təmir limiti (m.115)',{value:r.repair_limit==null?'':(r.repair_limit*100).toFixed(0),
+            hint:'Faizlə.'})}</div>` +
+    fld('effective_year','Qüvvəyə minmə ili',{type:'number',value:r.effective_year,req:true,
+        hint:'Qanun dəyişibsə — yeni il yazın (keçmiş illər dəyişmir). '
+           + 'Səhvi düzəldirsinizsə — mövcud ili ('+r.effective_year+') saxlayın.'}) +
+    fld('note','Qeyd',{placeholder:'VM m.115.1'}),
+    d => post('rate.set', d));
+}
+
+function formCoef(c){
+  openModal(`Əmsal — ${c.name}`,
+    `<input type="hidden" name="status" value="${c.status}">` +
+    `<div class="row2">
+      ${fld('coefficient','Əmsal',{value:c.coefficient,req:true,hint:'Məs. 2 və ya 1.5'})}
+      ${fld('effective_year','Qüvvəyə minmə ili',{type:'number',value:c.effective_year,req:true})}
+     </div>` + fld('note','Qeyd'),
+    d => post('coefficient.set', d));
 }
 
 function renderSide(d){
