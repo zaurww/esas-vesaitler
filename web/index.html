@@ -197,6 +197,7 @@
   <div class="spacer"></div>
   <span class="ver" id="ver"></span>
   <button class="btn" onclick="formClient()">+ Müştəri</button>
+  <button class="btn" onclick="formBaza()">⇄ Baza</button>
   <button class="btn" onclick="formAsset()">+ Yeni ƏV</button>
   <button class="btn" onclick="formImport()">⇪ İdxal</button>
   <a class="btn" id="export" href="#">⬇ Excel-ə ixrac</a>
@@ -294,6 +295,57 @@ function formClient(){
     `<div class="h">Bütün fayllar <code>clients/&lt;ad&gt;/</code> qovluğunda
       yaradılacaq. Sonradan hər şeyi dəyişmək olar.</div>`,
     async d => { NEWCLIENT = (await post('client.create', d)).result; }, 'Yarat');
+}
+
+/* Moving a client to another machine.
+   Copying the folder alone is not enough and fails silently: the norms live
+   next to the engine, and an older engine there does not read files added
+   later. The archive carries both and the import compares before writing. */
+function formBaza(){
+  const slug = document.getElementById('client').value;
+  openModal('Bazanın köçürülməsi',
+    `<div class="fld"><label>Bu müştərini arxivləşdirin</label>
+      <div class="h" style="margin:0 0 8px">Müştərinin bütün faylları,
+        istifadə olunan normalar və hansı mühərriklə yazıldığı — bir fayl.</div>
+      ${slug ? `<a class="btn" style="border:1px solid var(--line)"
+        href="/api/client-archive?client=${slug}">⬇ «${esc(slug)}» arxivini yüklə</a>`
+        : '<div class="h">Müştəri seçilməyib.</div>'}</div>
+    <hr style="border:0;border-top:1px solid var(--line);margin:16px 0">
+    <div class="fld"><label>Başqa maşından gələn arxivi yükləyin</label>
+      <input type="file" id="bazafile" accept=".zip"></div>
+    <div id="bazainfo"></div>`,
+    async () => {
+      const f = document.getElementById('bazafile').files[0];
+      if (!f) throw new Error('Fayl seçilməyib');
+      const b64 = await new Promise(res => {
+        const fr = new FileReader();
+        fr.onload = () => res(fr.result.split(',')[1]);
+        fr.readAsDataURL(f);
+      });
+      const info = (await post('client.import', {b64, dry_run: true})).result;
+      if (info.blocking.length) throw new Error(info.blocking.join(' '));
+      const m = info.manifest;
+      document.getElementById('bazainfo').innerHTML = `
+        <div class="note q"><strong>${esc(m.client_name)}</strong> ·
+          VÖEN ${esc(m.voen)} · mühərrik ${esc(m.engine_version)} ·
+          format v${m.format_version}<br>
+          ${esc(m.exported_at)} tarixində ${esc(m.exported_by)} tərəfindən
+          ixrac edilib, ${Object.keys(m.files).length} fayl.</div>
+        ${info.notes.map(n => `<div class="note">${esc(n)}</div>`).join('')}
+        ${fld('slug','Qovluğun adı',{value:info.exists ? '' : info.suggested_slug,
+              req:true, placeholder:info.suggested_slug})}
+        <label style="font-size:12.5px;display:flex;gap:8px;align-items:flex-start">
+          <input type="checkbox" name="apply_norms" checked style="width:auto;margin-top:3px">
+          <span>Arxivdəki normaları tətbiq et — <strong>bütün müştərilərə
+            təsir edir</strong>, çünki normalar proqramın yanındadır.</span></label>`;
+      MSUBMIT = async d => {
+        const r = await post('client.import',
+          {b64, slug: d.slug, apply_norms: !!d.apply_norms});
+        NEWCLIENT = r.result.slug;
+      };
+      document.getElementById('msubmit').textContent = 'İdxal et';
+      throw new Error('__stay__');
+    }, 'Arxivi oxu');
 }
 
 function needStatus(year){

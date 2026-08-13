@@ -22,7 +22,8 @@ sys.path.insert(0, str(ROOT))
 from engine.calc import MONTHS_AZ, CalcError, compute_year  # noqa: E402
 from engine.excel import build_import_template, build_workbook  # noqa: E402
 from engine.mutate import (  # noqa: E402
-    ACTIONS, IMPORT_FIELDS, guess_columns, rows_of, suggest_inv_no,
+    ACTIONS, IMPORT_FIELDS, export_client, guess_columns, rows_of,
+    suggest_inv_no,
 )
 from engine import rates  # noqa: E402
 from engine.rates import CATEGORIES, CATEGORY_BY_CODE, ENGINE_VERSION  # noqa: E402
@@ -425,6 +426,17 @@ class Handler(BaseHTTPRequestHandler):
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     {"Content-Disposition":
                      'attachment; filename="EV-idxal-sablonu.xlsx"'},
+                )
+                return
+
+            if url.path == "/api/client-archive":
+                slug = q.get("client", [""])[0]
+                blob = export_client(ROOT, slug)
+                stamp = datetime.now().strftime("%Y%m%d")
+                self._send(
+                    200, blob, "application/zip",
+                    {"Content-Disposition":
+                     f'attachment; filename="{slug}-{stamp}.evbaza.zip"'},
                 )
                 return
 
