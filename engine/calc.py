@@ -283,15 +283,24 @@ def compute_year(data: ClientData, year: int) -> YearResult:
         if st.repair_limit is None:
             continue
         opening_total = sum((c.opening for c in group), ZERO)
-        limit = opening_total * st.repair_limit
-        for c in group:
+        limit = money(opening_total * st.repair_limit)
+        # The deductible total is fixed by law: MIN(limit, actual). Split it
+        # across the assets pro rata to their own repair spend, rounding to
+        # the qəpik and giving the last one the remainder, so the parts add
+        # back up to that total exactly (§5.3 rounding rule).
+        deductible_total = min(limit, actual_total)
+        spenders = [c for c in group if group_repairs[c.asset_id] != ZERO]
+        allocated = ZERO
+        for i, c in enumerate(spenders):
             amt = group_repairs[c.asset_id]
-            if amt == ZERO:
-                continue
-            share = limit * amt / actual_total if actual_total else ZERO
+            if i == len(spenders) - 1:
+                share = deductible_total - allocated
+            else:
+                share = money(deductible_total * amt / actual_total)
+                allocated += share
             c.repair_actual = amt
-            c.repair_deductible = min(amt, share)
-            c.repair_capitalized = max(ZERO, amt - share)
+            c.repair_deductible = share
+            c.repair_capitalized = amt - share
 
     # -- steps 4-7, per card ------------------------------------------------
     for c in cards.values():
