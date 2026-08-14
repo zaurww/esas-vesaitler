@@ -27,6 +27,13 @@
   }
   header .brand{font-weight:600; letter-spacing:.2px; margin-right:4px}
   header .brand small{display:block;font-weight:400;font-size:11px;opacity:.7}
+  /* the status sits in the header as plain text until you notice it is
+     clickable -- a button box there would compete with the real buttons */
+  .linkish{
+    background:none; border:0; padding:0; font:inherit; color:inherit;
+    cursor:pointer; border-bottom:1px dotted rgba(255,255,255,.55);
+  }
+  .linkish:hover{border-bottom-style:solid}
   header select{
     background:rgba(255,255,255,.12); border:1px solid rgba(255,255,255,.25);
     color:#fff; border-radius:6px; padding:6px 10px; cursor:pointer;
@@ -229,6 +236,7 @@
   <div class="spacer"></div>
   <span class="ver" id="ver"></span>
   <button class="btn" onclick="formClient()">+ Müştəri</button>
+  <button class="btn" onclick="formSettings()" title="Firmanın parametrləri">⚙</button>
   <button class="btn" onclick="formBaza()">⇄ Baza</button>
   <button class="btn" onclick="formAsset()">+ Yeni ƏV</button>
   <button class="btn" onclick="formImport()">⇪ İdxal</button>
@@ -449,8 +457,14 @@ async function load(){
   if (!r.ok) return fail(data.error);
   document.getElementById('error').style.display = 'none';
   REPORT = data;
-  document.getElementById('sub').textContent =
-    `VÖEN ${data.voen} · ${data.status_name}${data.is_closed ? ' · İL BAĞLIDIR' : ''}`;
+  // The status was only ever reachable while it was MISSING, so picking the
+  // wrong one when creating a client left no way back -- the fact was on
+  // screen but not editable. Put the control on the fact itself.
+  document.getElementById('sub').innerHTML =
+    `VÖEN ${esc(data.voen)} · ` + (data.is_closed
+      ? `${esc(data.status_name)} · İL BAĞLIDIR`
+      : `<button type="button" class="linkish" title="${data.year} üçün statusu dəyiş"
+           onclick="formStatus(${data.year})">${esc(data.status_name)}</button>`);
   const n = data.warnings.length + data.open_questions.length;
   document.getElementById('notecount').textContent = n ? `(${n})` : '';
   render();
@@ -1745,6 +1759,33 @@ async function impPreview(){
 }
 
 /* ---- taxpayer status ---- */
+/* Everything about the FIRM, as opposed to its assets. The creation form
+   asked for these once and then there was nowhere to go: a typo in the name,
+   the wrong VÖEN or the wrong status was permanent. */
+function formSettings(){
+  if (!REPORT) return fail('Əvvəlcə müştəri seçin');
+  const slug = document.getElementById('client').value;
+  openModal(`Firmanın parametrləri — ${esc(REPORT.client_name || slug)}`,
+    fld('client_name','Firmanın adı',{value:REPORT.client_name,req:true}) +
+    `<div class="row2">
+      ${fld('voen','VÖEN',{value:REPORT.voen})}
+      ${fld('start_year','Başlanğıc il',{type:'number',value:REPORT.start_year,req:true,
+            hint:'Bundan əvvəlki illər göstərilmir.'})}</div>
+    <div class="fld"><label>Sahibkarlıq statusu — ${REPORT.year}</label>
+      <div class="h" style="margin:0 0 8px">Status <strong>il üzrə</strong>
+        saxlanılır: dövriyyə və işçi sayı hər il yenidən qiymətləndirilir,
+        ona görə keçmiş illər dəyişmir.</div>
+      ${REPORT.is_closed
+        ? `<div class="note">${REPORT.year} bağlıdır — status dəyişdirilmir.</div>`
+        : `<button type="button" class="btn" style="border:1px solid var(--line)"
+             onclick="closeModal(); formStatus(${REPORT.year})"
+             >${esc(REPORT.status_name)} — dəyiş</button>`}</div>
+    <div class="note q">Qovluğun adı — <code>${esc(slug)}</code> — dəyişmir:
+      onunla ehtiyat nüsxələr və arxivlər bağlıdır. Başqa ad lazımdırsa,
+      «⇄ Baza» ilə ixrac edib yeni adla idxal edin.</div>`,
+    d => post('client.update', d));
+}
+
 function formStatus(year){
   // Reachable before any report exists, so it cannot read REPORT.
   const y = year || REPORT.year;

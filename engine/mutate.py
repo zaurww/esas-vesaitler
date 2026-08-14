@@ -19,6 +19,7 @@ import getpass
 import io
 import re
 import shutil
+import tomllib
 import unicodedata
 from contextlib import contextmanager
 from datetime import date, datetime, timezone
@@ -508,6 +509,51 @@ def remove_repair(root: Path, slug: str, p: dict) -> str:
     return aid
 
 
+def _toml_str(value: str) -> str:
+    """Quote a value for config.toml. A client name legitimately contains
+    «» and " -- unescaped it produced a file tomllib then refused to read."""
+    return '"' + str(value).replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def update_client(root: Path, slug: str, p: dict) -> str:
+    """Edit the client's own details: name, VÖEN, first year.
+
+    There was no way to do this at all -- the creation form asked once and
+    that was final, so a typo in the name or the wrong VÖEN was permanent.
+
+    The folder name is NOT among them. It is the client's identity: every
+    backup, archive and URL carries it, and renaming it here would leave
+    those pointing at nothing. Moving to a different name is export/import.
+    """
+    folder = mutate_folder(root, slug)
+    cfg = tomllib.loads((folder / "config.toml").read_text(encoding="utf-8-sig"))
+    name = str(p.get("client_name", cfg.get("client_name", ""))).strip()
+    if not name:
+        raise DataError("Müştərinin adı boş ola bilməz")
+    voen = str(p.get("voen", cfg.get("voen", ""))).strip()
+    try:
+        year = int(p.get("start_year") or cfg.get("start_year"))
+    except (TypeError, ValueError):
+        raise DataError("İl düzgün deyil") from None
+    if not (1990 < year < 2100):
+        raise DataError(f"Başlanğıc il düzgün deyil: {year}")
+
+    with transaction(root, slug, "client.update") as tx:
+        for field, old, new in (("client_name", cfg.get("client_name", ""), name),
+                                ("voen", cfg.get("voen", ""), voen),
+                                ("start_year", str(cfg.get("start_year", "")), str(year))):
+            if str(old) != str(new):
+                tx.log("", field, str(old), str(new))
+        (folder / "config.toml").write_text(
+            f"client_name = {_toml_str(name)}\n"
+            f"voen = {_toml_str(voen)}\n"
+            f"start_year = {year}\n"
+            f"format_version = {cfg.get('format_version', FORMAT_VERSION)}\n",
+            encoding="utf-8-sig", newline="\n",
+        )
+    return slug
+
+
 def add_addition(root: Path, slug: str, p: dict) -> str:
     """Capitalise a component or upgrade onto an existing asset."""
     aid = str(p["asset_id"])
@@ -585,10 +631,10 @@ def create_client(root: Path, _slug: str, p: dict) -> str:
 
     try:
         (folder / "config.toml").write_text(
-            f'client_name = "{name}"\n'
-            f'voen = "{voen}"\n'
-            f'start_year = {year}\n'
-            f'format_version = {FORMAT_VERSION}\n',
+            f"client_name = {_toml_str(name)}\n"
+            f"voen = {_toml_str(voen)}\n"
+            f"start_year = {year}\n"
+            f"format_version = {FORMAT_VERSION}\n",
             encoding="utf-8-sig", newline="\n",
         )
         for fname, header in HEADERS.items():
@@ -1290,6 +1336,7 @@ ACTIONS = {
     "election.set": set_election,
     "status.set": set_status,
     "client.create": create_client,
+    "client.update": update_client,
     "client.import": import_client,
     "year.close": close_year,
     "year.reopen": reopen_year,

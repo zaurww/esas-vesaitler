@@ -67,6 +67,7 @@ def serialize(r) -> dict:
         "client_name": r.client_name,
         "voen": r.voen,
         "slug": r.slug,
+        "start_year": r.start_year,
         "year": r.year,
         "is_closed": r.is_closed,
         "status": r.status,

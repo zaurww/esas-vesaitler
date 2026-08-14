@@ -168,6 +168,7 @@ class YearResult:
     client_name: str
     voen: str
     slug: str
+    start_year: int
     year: int
     is_closed: bool
     status: str
@@ -300,6 +301,7 @@ def compute_year(data: ClientData, year: int,
         client_name=data.client_name,
         voen=data.voen,
         slug=data.slug,
+        start_year=data.start_year,
         year=year,
         is_closed=year in data.closed_years(),
         status=status_row.status,
