@@ -110,6 +110,13 @@
   }
   .tag.w{background:var(--warn-bg); color:var(--warn-ink); border:1px solid var(--warn-line)}
   .tag.d{background:#eee; color:#555}
+  /* the entrepreneur coefficient, carried by this row -- deliberately the
+     loudest thing in a column of quiet ×1, because scanning for who has it is
+     the whole reason the column exists */
+  .tag.c{background:#e7f3ea; color:#1f6b3a; border:1px solid #b6d8c2; margin-left:0}
+  /* an asset whose life is over: still listed, visibly not part of the year */
+  tr.retired td{background:#fafbfc; color:#98a3b3}
+  tr.retired td a, tr.retired strong{color:inherit; font-weight:400}
   .zero{color:#b6bfcb}
   /* paste grid: inputs sit flush in the cells so it reads as a sheet, which
      is what the user is copying from */
@@ -270,6 +277,7 @@
       <button role="tab" data-tab="monthly" aria-selected="false">Aylıq</button>
       <button role="tab" data-tab="repair" aria-selected="false">Təmir (m.115)</button>
       <button role="tab" data-tab="norms" aria-selected="false">Normalar</button>
+      <button role="tab" data-tab="threshold" aria-selected="false">500/5% <span id="thrcount"></span></button>
       <button role="tab" data-tab="notes" aria-selected="false">Qeydlər <span id="notecount"></span></button>
     </div>
     <input class="filter" id="filter" placeholder="Axtar:  ad, inv.№, kontragent…   ( / )">
@@ -292,7 +300,13 @@
 const fmt = new Intl.NumberFormat('az-AZ',{minimumFractionDigits:2,maximumFractionDigits:2});
 const money = s => { const n = parseFloat(s); return n === 0
   ? '<span class="zero">—</span>' : fmt.format(n); };
-const pct = s => (parseFloat(s)*100).toFixed(0) + '%';
+/* A rate is printed with the digits it actually has. Rounding to a whole
+   number was not cosmetic: the small-entrepreneur ceiling 25% x 1.5 = 37.5%
+   appeared everywhere as "38%", and the rate form prefilled itself from the
+   same rendering -- so opening it and pressing save offered 38%, which the
+   engine rightly refuses as above the very ceiling it was showing. */
+const pctnum = s => String(Math.round(parseFloat(s) * 1e6) / 1e4);
+const pct = s => pctnum(s) + '%';
 const esc = s => String(s??'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
 let CTX = null, REPORT = null, TAB = 'annual', FILTER = '', CATFILTER = '';
@@ -467,6 +481,11 @@ async function load(){
            onclick="formStatus(${data.year})">${esc(data.status_name)}</button>`);
   const n = data.warnings.length + data.open_questions.length;
   document.getElementById('notecount').textContent = n ? `(${n})` : '';
+  // Only the undecided ones are counted: a decision already taken is not
+  // something still asking to be dealt with.
+  const undecided = data.categories.flatMap(c => c.cards)
+    .filter(c => c.threshold_hit && !c.written_off).length;
+  document.getElementById('thrcount').textContent = undecided ? `(${undecided})` : '';
   render();
 }
 
@@ -485,12 +504,15 @@ function render(){
   renderCarry(d);
   document.getElementById('hint').textContent =
     TAB === 'monthly' ? 'İllik məbləğ / 12 · yuvarlaqlaşdırma qalığı dekabrda'
-    : TAB === 'annual' ? 'Sətrə klikləyin — hesablamanın gedişi' : '';
+    : TAB === 'annual' ? 'Sətrə klikləyin — hesablamanın gedişi'
+    : TAB === 'threshold' ? 'VM m.114.8 · qərar birdəfəlik, bütün seçilmişlərə'
+    : '';
 
   renderSide(d);
   document.getElementById('view').innerHTML =
     TAB === 'annual' ? viewAnnual(d) : TAB === 'monthly' ? viewMonthly(d)
     : TAB === 'repair' ? viewRepair(d)
+    : TAB === 'threshold' ? viewThreshold(d)
     : TAB === 'norms' ? '<div class="card" style="padding:16px">yüklənir…</div>'
     : viewNotes(d);
   if (TAB === 'norms') loadNorms();
@@ -707,8 +729,12 @@ function renderSide(d){
               `${cardCount(d)} ƏV · ${fmt.format(parseFloat(d.totals.depreciation))}`,
               CATFILTER === '') + '<hr>';
   for (const cat of d.categories){
+    // A category can now be all retired rows and no holdings. "0 ƏV" alone
+    // reads like a bug; the archived count says why the line is there at all.
+    const ret = cat.cards.length - liveCards(cat).length;
     h += btn(cat.code, cat.name_az,
-             `${cat.cards.length} ƏV · ${fmt.format(parseFloat(cat.depreciation))}`,
+             `${liveCards(cat).length} ƏV${ret ? ` · ${ret} arxiv` : ''}`
+             + ` · ${fmt.format(parseFloat(cat.depreciation))}`,
              CATFILTER === cat.code);
   }
   document.getElementById('side').innerHTML = h;
@@ -776,18 +802,157 @@ const match = c => !FILTER ||
 // The sidebar narrows the whole report to one category; the text box narrows
 // it further to matching cards. Both are view state, never engine state.
 const cats = d => d.categories.filter(c => !CATFILTER || c.code === CATFILTER);
-const cardCount = d => d.categories.reduce((n, c) => n + c.cards.length, 0);
+// Counts are about the year's live assets. A card kept on screen after its
+// life ended is a record, not a holding, and must not inflate "how many ƏV".
+const liveCards = cat => cat.cards.filter(c => !c.retired);
+const cardCount = d => d.categories.reduce((n, c) => n + liveCards(c).length, 0);
+
+/* How a card's life ended, in the language of the report. */
+const RETIRED_AZ = {writeoff:'500/5% silinib', realizasiya:'satılıb',
+                    leqv:'ləğv edilib', amortizasiya:'tam amortizasiya olunub'};
+
+/* Retired rows are shown by DEFAULT -- an asset that leaves the balance sheet
+   does not leave the office, and "it disappeared from the report" is not an
+   answer to what happened to it. The switch exists because after ten years
+   the tail gets long, and the year's own work should not be read past it. */
+let HIDERETIRED = false;
+
+/* The applied rate taken apart: the article 114.3 norm on one side, what that
+   norm was multiplied by on the other, so that norm × factor = rate exactly.
+
+   One column reading "37.5%" cannot say WHY it is 37.5%, and with the
+   entrepreneur coefficient the question worth answering is which assets carry
+   it and which do not -- that should be visible by running an eye down a
+   column, not by opening cards one at a time. The factor is computed from the
+   two rates rather than read off the status, because it has to stay honest
+   for an asset whose rate was picked by hand: there it shows what was really
+   applied instead of the coefficient the status would have allowed.
+
+   `available` is the coefficient the status offers. A row sitting at ×1 while
+   the status offers 1.5 is not an error -- the coefficient is a right, not a
+   duty (§5.2) -- but it IS the row someone may have meant to raise, so it
+   says so quietly rather than looking identical to a row with no right at
+   all. */
+function rateSplit(applied, statutory, available){
+  const s = parseFloat(statutory), a = parseFloat(applied);
+  if (!s) return ['<span class="zero">—</span>', '<span class="zero">—</span>'];
+  const f = a / s, av = parseFloat(available || 1);
+  const shown = '×' + String(Math.round(f * 1e4) / 1e4);
+  let cell;
+  if (f > 1 + 1e-9)         cell = `<span class="tag c">${shown}</span>`;
+  else if (Math.abs(f - 1) < 1e-9)
+    cell = av > 1
+      ? `<span class="zero" title="${pct(s)} × ${av} = ${pct(Math.min(s * av, 1))} mümkün idi">×1
+         <span class="tag">${av} mümkün</span></span>`
+      : '×1';
+  else                      cell = `<span title="normadan aşağı">${shown}</span>`;
+  return [pct(s), cell];
+}
+
+/* Everything the 114.8 test caught, in one place, decidable in one go.
+
+   The engine has always produced this list (§5.6.3) but it was only ever
+   shown as a ⚠ scattered down the annual table and a line each in the notes:
+   fine for the one trailer in the demo, useless when a workshop's worth of
+   tooling crosses the threshold in the same year and each one has to be
+   opened, decided and closed by hand.
+
+   Two sections, because they are two different years and only one of them is
+   actionable: ⚠ is this year's decision, ◐ is a forecast for next year and
+   deliberately has no buttons -- the test binds to the closing residual, so
+   the write-off belongs to the year after it trips (§5.3-bis). */
+function thresholdCards(d){
+  const all = d.categories.flatMap(c => c.cards);
+  return {now: all.filter(c => c.threshold_hit),
+          next: all.filter(c => c.threshold_next)};
+}
+
+function viewThreshold(d){
+  const {now, next} = thresholdCards(d);
+  const pending = now.filter(c => !c.written_off);
+  const name = c => `${c.inv_no ? esc(c.inv_no) + ' · ' : ''}${esc(c.name)}`;
+
+  const row = (c, pick) => `<tr>
+    <td>${pick ? `<input type="checkbox" class="thrpick" value="${c.asset_id}"
+            ${c.written_off ? 'checked' : ''} style="width:auto">` : ''}</td>
+    <td><a href="#" onclick="openCard('${c.asset_id}');return false">${name(c)}</a>
+      ${c.written_off ? '<span class="tag w">qərar var</span>' : ''}</td>
+    <td>${esc(CTX.categories.find(x => x.code === c.category)?.name_az || c.category)}</td>
+    <td class="num">${money(c.cost)}</td>
+    <td class="num">${money(pick ? c.opening : c.closing)}</td>
+    <td class="h">${esc(pick ? c.threshold_reason : c.threshold_next_reason)}</td></tr>`;
+
+  const table = (cards, pick, head) => `<div class="card"><div class="scroll">
+    <table><thead><tr>
+      <th style="width:28px">${pick && !d.is_closed
+        ? `<input type="checkbox" onclick="thrAll(this.checked)" style="width:auto"
+             title="hamısını seç">` : ''}</th>
+      <th>${head}</th><th>Kateqoriya</th><th class="num">İlkin dəyər</th>
+      <th class="num">${pick ? 'Qalıq (il əvvəli)' : 'Qalıq (il sonu)'}</th>
+      <th>Səbəb</th>
+    </tr></thead><tbody>${cards.map(c => row(c, pick)).join('')}</tbody></table>
+  </div></div>`;
+
+  let h = '';
+  if (!now.length && !next.length)
+    return `<div class="card" style="padding:16px">${d.year} ilində
+      500/5% həddinə düşən ƏV yoxdur.</div>`;
+
+  if (now.length){
+    h += `<h3>${d.year} — həddə düşür (${now.length})</h3>`;
+    h += table(now, true, 'ƏV');
+    if (!d.is_closed)
+      h += `<div class="acts" style="margin:10px 0 18px">
+        <button onclick="bulkWriteoff(true)">Seçilmişləri sil (m.114.8)</button>
+        <button class="ghost" onclick="bulkWriteoff(false)">Seçilmişlərin qərarını ləğv et</button>
+        <span class="h" style="align-self:center">Qərarı olmayan: <strong>${pending.length}</strong>.
+          Qərar verilməzsə, ƏV adi qaydada amortizasiya olunmağa davam edir.</span></div>`;
+  }
+  if (next.length){
+    h += `<h3>${d.year + 1} — həddə düşəcək (${next.length})</h3>`;
+    h += table(next, false, 'ƏV');
+    h += `<div class="note" style="margin:10px 0">Bu il üçün qərar tələb
+      olunmur: test ilin sonuna qalığa bağlıdır, ona görə silinmə növbəti ildə
+      olur (§5.3-bis). Siyahı ona görə var ki, gələn il gözlənilməz olmasın.</div>`;
+  }
+  return h;
+}
+
+function thrAll(on){
+  document.querySelectorAll('.thrpick').forEach(x => { x.checked = on; });
+}
+
+function bulkWriteoff(on){
+  const ids = [...document.querySelectorAll('.thrpick:checked')].map(x => x.value);
+  if (!ids.length) return fail('Heç bir ƏV seçilməyib.');
+  const {now} = thresholdCards(REPORT);
+  const picked = now.filter(c => ids.includes(c.asset_id));
+  const total = picked.reduce((s, c) => s + parseFloat(c.opening), 0);
+  openModal(on ? `500/5% silinməsi — ${ids.length} ƏV`
+               : `Silinmə qərarı ləğv edilsin — ${ids.length} ƏV`,
+    `<input type="hidden" name="year" value="${REPORT.year}">
+     <div class="h" style="margin-bottom:10px">${picked.map(c =>
+        esc((c.inv_no ? c.inv_no + ' · ' : '') + c.name)).join('<br>')}</div>` +
+    (on ? `<div class="note" style="margin-bottom:12px">Gəlirdən çıxılacaq qalıq
+             cəmi: <strong>${fmt.format(total)}</strong> AZN. Bu ƏV-lər üzrə
+             ${REPORT.year} ili amortizasiyası hesablanmayacaq.</div>` +
+          fld('reason','Əsas',{value:'VM m.114 — 500/5% həddi, birdəfəlik silinmə'})
+        : '<div class="h">Seçilmiş ƏV-lər adi qaydada amortizasiya olunacaq.</div>'),
+    d => post('writeoff.set', {...d, asset_ids: ids, enabled: on}),
+    on ? 'Sil' : 'Ləğv et');
+}
 
 function viewAnnual(d){
   const head = ['','İnv.№','Adı','Alış tarixi','İlkin dəyər','Qalıq (il əvvəli)',
-                'Daxilolma','Dəyər artımı','Kapital. təmir','Xaricetmə','Dərəcə',
+                'Daxilolma','Dəyər artımı','Kapital. təmir','Xaricetmə',
+                'Norma (m.114.3)','Əmsal','Dərəcə',
                 'Amortizasiya','Silinmə','Qalıq (il sonu)'];
   let rows = '';
   for (const cat of cats(d)){
     const cards = cat.cards.filter(match);
     if (!cards.length) continue;
     const r = cat.rate;
-    rows += `<tr class="cat"><td colspan="14">${esc(cat.name_az)}
+    rows += `<tr class="cat"><td colspan="16">${esc(cat.name_az)}
       <span class="rate">${pct(r.statutory_max)} × ${r.coefficient} (${esc(d.status)})
       = ${pct(r.ceiling)} hədd · tətbiq <strong>${pct(r.applied)}</strong>
       ${cat.mixed_rates ? '<span class="tag">fərdi dərəcələr var</span>'
@@ -796,15 +961,20 @@ function viewAnnual(d){
         onclick="event.stopPropagation();formElection(REPORT.categories.find(x=>x.code==='${cat.code}'))"
         >dərəcəni dəyiş</button>`}</span></td></tr>`;
     for (const c of cards){
-      const cls = c.threshold_hit ? 'asset warn'
+      if (c.retired && HIDERETIRED) continue;
+      const cls = c.retired ? 'asset retired'
+                : c.threshold_hit ? 'asset warn'
                 : c.threshold_next ? 'asset next' : 'asset';
       rows += `<tr class="${cls}" onclick="openCard('${c.asset_id}')"
-        title="${c.threshold_next ? esc(c.threshold_next_reason) : ''}">
-        <td>${c.threshold_hit ? '⚠' : c.threshold_next ? '◐'
+        title="${c.retired ? esc(RETIRED_AZ[c.retired_kind] || '') + ' · ' + c.retired_year
+                : c.threshold_next ? esc(c.threshold_next_reason) : ''}">
+        <td>${c.retired ? '·' : c.threshold_hit ? '⚠' : c.threshold_next ? '◐'
              : (c.disposal_type ? '→' : '')}</td>
         <td>${esc(c.inv_no)}</td>
         <td>${esc(c.name)}${c.is_legacy_pool ? '<span class="tag">qrup qalığı</span>' : ''}
             ${c.written_off ? '<span class="tag w">silindi</span>' : ''}
+            ${c.retired ? `<span class="tag d">${esc(RETIRED_AZ[c.retired_kind]
+                || 'balansdan çıxıb')}${c.retired_year ? ' ' + c.retired_year : ''}</span>` : ''}
             ${c.disposal_type ? `<span class="tag d">${esc(c.disposal_type)}</span>` : ''}</td>
         <td class="d">${esc(c.in_date)}</td>
         <td class="num">${money(c.cost)}</td>
@@ -813,9 +983,17 @@ function viewAnnual(d){
         <td class="num">${money(c.addition)}</td>
         <td class="num">${money(c.repair_capitalized)}</td>
         <td class="num">${money(c.disposed)}</td>
-        <td class="num">${parseFloat(c.rate) ? pct(c.rate) : '<span class="zero">—</span>'}${
-          c.rate_info && c.rate_info.source === 'asset'
-            ? '<span class="tag" title="bu ƏV üçün fərdi dərəcə">f</span>' : ''}</td>
+        ${(() => {
+          const ri = c.rate_info || cat.rate;
+          const [norm, factor] = parseFloat(c.rate)
+            ? rateSplit(c.rate, ri.statutory_max, ri.coefficient)
+            : ['<span class="zero">—</span>', '<span class="zero">—</span>'];
+          return `<td class="num">${norm}</td><td class="num">${factor}${
+            ri.source === 'asset'
+              ? '<span class="tag" title="bu ƏV üçün fərdi seçim">f</span>' : ''}</td>`;
+        })()}
+        <td class="num">${parseFloat(c.rate) ? pct(c.rate)
+          : '<span class="zero">—</span>'}</td>
         <td class="num"><strong>${money(c.depreciation)}</strong></td>
         <td class="num">${money(c.writeoff)}</td>
         <td class="num">${money(c.closing)}</td></tr>`;
@@ -826,7 +1004,8 @@ function viewAnnual(d){
       <td class="num">${money(cat.addition)}</td>
       <td class="num">${money(cat.repair_capitalized)}</td>
       <td class="num">${money(cat.disposed)}</td>
-      <td></td><td class="num">${money(cat.depreciation)}</td>
+      <td></td><td></td><td></td>
+      <td class="num">${money(cat.depreciation)}</td>
       <td class="num">${money(cat.writeoff)}</td><td class="num">${money(cat.closing)}</td></tr>`;
   }
   // With a category picked, the grand total must cover only what is shown.
@@ -841,10 +1020,16 @@ function viewAnnual(d){
     <td class="num">${money(t.opening)}</td><td class="num">${money(t.acquisition)}</td>
     <td class="num">${money(t.addition)}</td>
     <td class="num">${money(t.repair_capitalized)}</td>
-    <td class="num">${money(t.disposed)}</td><td></td>
+    <td class="num">${money(t.disposed)}</td><td></td><td></td><td></td>
     <td class="num">${money(t.depreciation)}</td><td class="num">${money(t.writeoff)}</td>
     <td class="num">${money(t.closing)}</td></tr>`;
-  return `<div class="card"><div class="scroll"><table><thead><tr>${
+  const retired = d.categories.flatMap(c => c.cards).filter(c => c.retired).length;
+  const toggle = retired ? `<div class="h" style="margin:0 0 8px">
+      <label style="display:inline-flex;gap:6px;align-items:center;cursor:pointer">
+        <input type="checkbox" style="width:auto" ${HIDERETIRED ? 'checked' : ''}
+          onchange="HIDERETIRED=this.checked;render()">
+        Balansdan çıxmış ƏV-ləri gizlət (${retired})</label></div>` : '';
+  return toggle + `<div class="card"><div class="scroll"><table><thead><tr>${
     head.map((h,i) => `<th class="${i>3?'num':''}">${h}</th>`).join('')
   }</tr></thead><tbody>${rows}</tbody></table></div></div>`;
 }
@@ -1139,6 +1324,25 @@ function formAsset(card){
               {type:'number',step:'0.01',req:true})}
         ${fld('opening_year','İl',{type:'number',value:year,req:true})}</div>`;
     }
+    // The opening residual is editable from here too -- a figure typed wrong
+    // during import is corrected where it is read. Only when it IS a stored
+    // fact: a residual carried from last year is computed (§2), and putting a
+    // computed number in a form would turn it into stored data the moment
+    // someone pressed save. For that case, point at the deliberate act.
+    if (edit && card.opening_source === 'explicit'){
+      h += `<input type="hidden" name="opening_edit" value="1">
+            <input type="hidden" name="opening_year" value="${year}">` +
+        fld('opening_residual',`Qalıq dəyər — ${year} ilin əvvəlinə (AZN)`,
+            {type:'number',step:'0.01',value:card.opening,
+             hint:'Əl ilə daxil edilmiş açılış qalığı (idxal da bura yazır). '
+                + 'Boş buraxsanız sətir silinir və qalıq əvvəlki ildən hesablanır.'});
+    }
+    if (edit && card.opening_source === 'carried'){
+      h += `<div class="fld"><div class="h">Qalıq (${year} ilin əvvəlinə)
+        <strong>${money(card.opening)}</strong> — əvvəlki ildən hesablanıb,
+        saxlanılan rəqəm deyil, ona görə burada redaktə olunmur. Bu il üçün
+        onu əl ilə təyin etmək lazımdırsa: «Açılış qalığı».</div></div>`;
+    }
     h += fld('note','Qeyd',{value:card&&card.note});
     openModal(edit ? `ƏV redaktəsi — ${card.inv_no || card.name}` : 'Yeni ƏV', h,
       d => post(edit ? 'asset.update' : 'asset.create', d),
@@ -1228,19 +1432,35 @@ function formAddition(card){
 function formElection(cat, card){
   const ri = card ? card.rate_info : cat.rate;
   const target = card ? `ƏV: ${card.inv_no || card.name}` : `Kateqoriya: ${cat.name_az}`;
+  // Two shortcuts, because these are the only two figures the law actually
+  // names: the plain article 114.3 norm, and that norm times the
+  // entrepreneur coefficient. Typing 37.5 by hand is where the rounding bug
+  // used to bite, and the ceiling is the whole point of having a status.
+  const quick = [['m.114.3 norması', ri.statutory_max]]
+    .concat(parseFloat(ri.coefficient) > 1 ? [['yuxarı hədd', ri.ceiling]] : [])
+    .map(([l, v]) => `<button type="button" class="ghost"
+       style="padding:8px 12px;white-space:nowrap" onclick="SETRATE('${pctnum(v)}')"
+       >${l} ${pct(v)}</button>`).join('');
   openModal('Amortizasiya dərəcəsi',
     `<input type="hidden" name="year" value="${REPORT.year}">
      <input type="hidden" name="category" value="${cat.code}">
      ${card ? `<input type="hidden" name="asset_id" value="${card.asset_id}">` : ''}
-     <div class="h" style="margin-bottom:12px">${esc(target)}</div>` +
-    fld('applied_rate','Tətbiq olunan dərəcə',
-        {value:(parseFloat(ri.applied)*100).toFixed(0),
-         hint:`m.114.3 norması ${pct(ri.statutory_max)} · sahibkar əmsalı
-               ×${ri.coefficient} · yuxarı hədd <strong>${pct(ri.ceiling)}</strong>.
-               Faizlə yazın (məs. 25 və ya 50). Boş buraxsanız seçim silinir və
-               norma (${pct(ri.statutory_max)}) tətbiq olunur.`}),
+     <div class="h" style="margin-bottom:12px">${esc(target)}</div>
+     <div class="fld"><label>Tətbiq olunan dərəcə</label>
+       <div style="display:flex;gap:6px">
+         <input name="applied_rate" value="${pctnum(ri.applied)}">${quick}</div>
+       <div class="h">m.114.3 norması ${pct(ri.statutory_max)} · sahibkar əmsalı
+         ×${ri.coefficient} · yuxarı hədd <strong>${pct(ri.ceiling)}</strong>.
+         Faizlə yazın (məs. 25 və ya 37.5). Boş buraxsanız seçim silinir və
+         norma (${pct(ri.statutory_max)}) tətbiq olunur.
+         ${card ? '' : 'Ayrı-ayrı ƏV üçün seçilmiş fərdi dərəcə qüvvədə qalır.'}</div>
+     </div>`,
     d => post('election.set', d));
 }
+window.SETRATE = v => {
+  const box = document.querySelector('#mbody input[name=applied_rate]');
+  box.value = v; box.focus();
+};
 
 /* ---- asset history ("лицевой счёт") ----
    Every year of one asset recomputed from the events, so it can never drift
@@ -1266,7 +1486,12 @@ async function showHistory(id){
     <td class="num">${money(y.repair_capitalized)}</td>
     <td class="num">${money(y.disposed)}</td>
     <td class="num">${money(y.base)}</td>
-    <td class="num">${parseFloat(y.rate) ? pct(y.rate) : '<span class="zero">—</span>'}</td>
+    ${(parseFloat(y.rate)
+        ? rateSplit(y.rate, y.rate_statutory, y.coefficient)
+        : ['<span class="zero">—</span>', '<span class="zero">—</span>'])
+      .map(v => `<td class="num">${v}</td>`).join('')}
+    <td class="num">${parseFloat(y.rate) ? pct(y.rate)
+      : '<span class="zero">—</span>'}</td>
     <td class="num"><strong>${money(y.depreciation)}</strong></td>
     <td class="num">${money(y.writeoff)}</td>
     <td class="num">${money(y.closing)}</td>
@@ -1301,7 +1526,9 @@ async function showHistory(id){
     <div class="card"><div class="scroll"><table><thead><tr>
       <th>İl</th><th class="num">Qalıq (əvvəl)</th><th class="num">Daxilolma</th>
       <th class="num">Dəyər artımı</th><th class="num">Kapital. təmir</th>
-      <th class="num">Xaricetmə</th><th class="num">Baza</th><th class="num">Dərəcə</th>
+      <th class="num">Xaricetmə</th><th class="num">Baza</th>
+      <th class="num">Norma (m.114.3)</th><th class="num">Əmsal</th>
+      <th class="num">Dərəcə</th>
       <th class="num">Amortizasiya</th><th class="num">Silinmə</th>
       <th class="num">Qalıq (son)</th><th class="num">Yığılmış</th>
     </tr></thead><tbody>${yr}</tbody></table></div></div>
@@ -1786,16 +2013,46 @@ function formSettings(){
     d => post('client.update', d));
 }
 
+/* The four statuses and what each multiplies the norm by. Comes from the
+   report, i.e. from the rate table, because a coefficient is a figure of the
+   law and §5.1-bis keeps those out of code. Before the first report exists
+   there is nothing to compute a ceiling for, so plain labels will do. */
+const STATUS_FALLBACK = {mikro:{name:'Mikro sahibkar'}, kicik:{name:'Kiçik sahibkar'},
+                         orta:{name:'Orta sahibkar'}, iri:{name:'İri sahibkar'}};
+
 function formStatus(year){
   // Reachable before any report exists, so it cannot read REPORT.
   const y = year || REPORT.year;
   const cur = REPORT ? REPORT.status : 'mikro';
+  const COEF = (REPORT && REPORT.coefficients) || STATUS_FALLBACK;
+
+  // Setting the status is the moment the right to the coefficient appears,
+  // so it is the moment to ask whether to use it. The engine never applies it
+  // by itself (§5.2) -- doubling a client's depreciation is not a decision a
+  // program makes -- but the election used to live on another screen
+  // entirely, which is how "I set kiçik and the 1.5 never applied" happens.
+  //
+  // Per CATEGORY, not one switch for everything: the answer is often "yes for
+  // the cars, no for the building". Nothing is ticked by default, and a rate
+  // chosen for an individual asset is more specific and survives untouched,
+  // which is how "all the cars at 1.5 except this one" stays expressible.
+  const cats = (REPORT ? REPORT.categories : []).filter(c => c.cards.length);
+  const coefBox = cats.length ? `<div class="fld" id="coefbox">
+      <label>Əmsalı tətbiq et — kateqoriya üzrə</label>
+      ${cats.map(c => `<label data-max="${c.rate.statutory_max}"
+        style="display:flex;gap:8px;align-items:center;padding:3px 0">
+        <input type="checkbox" name="apply_cat" value="${c.code}" style="width:auto">
+        <span>${esc(c.name_az)} — <span class="cur"></span></span></label>`).join('')}
+      <div class="h">Qeyd edilməyən kateqoriyalar m.114.3 norması ilə qalır.
+        Ayrı-ayrı ƏV üçün seçilmiş fərdi dərəcələr dəyişmir.</div>
+    </div>` : '';
+
   openModal(`Sahibkarlıq statusu — ${y}`,
     `<input type="hidden" name="year" value="${y}">` +
     fld('status','Status',{type:'select',req:true,options:
-      [['mikro','Mikro sahibkar (×2)'],['kicik','Kiçik sahibkar (×1.5)'],
-       ['orta','Orta sahibkar (×1)'],['iri','İri sahibkar (×1)']]
-      .map(([v,t]) => `<option value="${v}" ${v===cur?'selected':''}>${t}</option>`).join('')}) +
+      Object.entries(COEF).map(([v,s]) => `<option value="${v}"
+        ${v===cur?'selected':''}>${esc(s.name)}${s.coefficient
+          ? ` (×${esc(s.coefficient)})` : ''}</option>`).join('')}) +
     fld('basis','Əsas',{placeholder:'İllik dövriyyə, işçi sayı…'}) +
     `<div class="fld"><label style="display:flex;gap:8px;align-items:flex-start">
        <input type="checkbox" name="no_coefficient" style="width:auto;margin-top:3px"
@@ -1804,8 +2061,27 @@ function formStatus(year){
          <div class="h" style="margin:2px 0 0">Sahibkarlıq əmsalından imtina:
            yuxarı hədd m.114.3 normasında qalır və hesabat əmsalı təklif etmir.
            Status faktdır, əmsaldan istifadə isə qərardır — ayrıca saxlanılır.</div>
-       </span></label></div>`,
-    d => post('status.set', {...d, use_coefficient: !d.no_coefficient}));
+       </span></label></div>` + coefBox,
+    d => post('status.set', {...d, use_coefficient: !d.no_coefficient,
+      // FormData collapses repeated names, so the ticks are read from the DOM.
+      apply_coefficient_to: [...document.querySelectorAll(
+        '#mbody input[name=apply_cat]:checked')].map(x => x.value)}));
+
+  const sel = document.querySelector('#mbody select[name=status]');
+  const off = document.querySelector('#mbody input[name=no_coefficient]');
+  window.STATUSCOEF = () => {
+    const box = document.getElementById('coefbox');
+    if (!box) return;
+    const c = off.checked ? 1 : parseFloat((COEF[sel.value] || {}).coefficient || 1);
+    box.style.display = c > 1 ? '' : 'none';
+    box.querySelectorAll('[data-max]').forEach(el => {
+      const max = parseFloat(el.dataset.max), ceil = Math.min(max * c, 1);
+      el.querySelector('.cur').innerHTML =
+        `${pct(max)} × ${c} = <strong>${pct(ceil)}</strong>`;
+    });
+  };
+  sel.onchange = off.onchange = STATUSCOEF;
+  STATUSCOEF();
 }
 
 /* ---- write-off decision & delete ---- */

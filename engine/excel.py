@@ -19,7 +19,10 @@ from .calc import MONTHS_AZ, YearResult
 from .rates import CATEGORIES, statutory
 
 MONEY = "#,##0.00"
-PCT = "0%"
+# Fractional digits only when the rate has them: 25% stays "25%", while the
+# small-entrepreneur ceiling 25% x 1.5 prints as "37.5%" instead of a "38%"
+# that is above the ceiling it is reporting.
+PCT = "0.##%"
 
 HEAD_FILL = PatternFill("solid", fgColor="1F3A5F")
 HEAD_FONT = Font(bold=True, color="FFFFFF", size=10)
@@ -143,28 +146,53 @@ def _sheet_cards(wb: Workbook, r: YearResult,
     """
     counterparty = counterparty or {}
     ws = wb.create_sheet("Kartlar")
+    # The rate is split into the norm and the factor applied to it, so that
+    # "which assets carry the entrepreneur coefficient" is a column you can
+    # sort and filter on rather than a figure you have to decompose in your
+    # head. Norm x factor = rate, which is why the rate itself stays.
     _header(ws, 1, ["⚠", "Kod", "Kateqoriya", "İnv.№", "Adı", "Kontragent",
                     "Alış tarixi", "İlkin dəyər", "Qalıq (il əvvəli)",
                     "Daxilolma", "Dəyər artımı", "Kapital. təmir", "Xaricetmə",
-                    "Dərəcə", "Amortizasiya", "Silinmə", "Qalıq (il sonu)"])
+                    "Norma (m.114.3)", "Əmsal", "Dərəcə",
+                    "Amortizasiya", "Silinmə", "Qalıq (il sonu)"])
     row = 2
     for cat in r.categories:
         for card in cat.cards:
-            flag = ("⚠" if card.threshold_hit else "◐" if card.threshold_next
+            flag = ("·" if card.retired
+                    else "⚠" if card.threshold_hit else "◐" if card.threshold_next
                     else "→" if card.disposal_type else "")
+            ri = card.rate_info or cat.rate
+            norm = ri.statutory_max
+            # A retired row states no rate: there is no base for one to act on.
+            if card.retired or not norm:
+                norm_out, factor = None, None
+            else:
+                norm_out, factor = _f(norm), float(card.rate / norm)
+            RETIRED_AZ = {"writeoff": "500/5% silinib", "realizasiya": "satılıb",
+                          "leqv": "ləğv edilib",
+                          "amortizasiya": "tam amortizasiya olunub"}
+            suffix = ""
+            if card.is_legacy_pool:
+                suffix = " (qrup qalığı)"
+            elif card.retired:
+                suffix = (f" ({RETIRED_AZ.get(card.retired_kind, 'balansdan çıxıb')}"
+                          f"{', ' + str(card.retired_year) if card.retired_year else ''})")
             vals = [flag, card.category, cat.name_az, card.inv_no,
-                    card.name + (" (qrup qalığı)" if card.is_legacy_pool else ""),
+                    card.name + suffix,
                     counterparty.get(card.asset_id, ""),
                     card.in_date.isoformat() if card.in_date else "",
                     _f(card.cost), _f(card.opening), _f(card.acquisition),
                     _f(card.addition), _f(card.repair_capitalized),
-                    _f(card.disposed), _f(card.rate),
+                    _f(card.disposed), norm_out, factor,
+                    None if card.retired else _f(card.rate),
                     _f(card.depreciation), _f(card.writeoff), _f(card.closing)]
             for i, v in enumerate(vals, start=1):
                 cell = ws.cell(row, i, v)
                 cell.border = BORDER
-                if i == 14:
+                if i in (14, 16):
                     cell.number_format = PCT
+                elif i == 15:
+                    cell.number_format = "0.##\\x"
                 elif i >= 8:
                     cell.number_format = MONEY
                 if card.threshold_hit:
@@ -172,9 +200,10 @@ def _sheet_cards(wb: Workbook, r: YearResult,
                 elif card.threshold_next:
                     cell.fill = NEXT_FILL
             row += 1
-    ws.auto_filter.ref = f"A1:Q{max(row - 1, 1)}"
+    ws.auto_filter.ref = f"A1:S{max(row - 1, 1)}"
     ws.freeze_panes = "A2"
-    _widths(ws, [4, 7, 26, 12, 32, 26, 13, 15, 17, 14, 14, 14, 14, 9, 15, 13, 17])
+    _widths(ws, [4, 7, 26, 12, 32, 26, 13, 15, 17, 14, 14, 14, 14,
+                 14, 8, 9, 15, 13, 17])
 
 
 def _sheet_movement(wb: Workbook, r: YearResult) -> None:

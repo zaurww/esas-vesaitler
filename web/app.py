@@ -1,4 +1,4 @@
-"""Local web UI on localhost. Stdlib http.server only, no framework.
+﻿"""Local web UI on localhost. Stdlib http.server only, no framework.
 
 The server holds no state: every request reloads the client folder and
 recomputes from events (CLAUDE.md §2, §3).
@@ -41,12 +41,44 @@ def m(x: Decimal) -> str:
     return f"{x:.2f}"
 
 
+def rate(x: Decimal) -> str:
+    """A rate at full precision. A rate is not money -- do not send it as such.
+
+    Rounded to the qəpik like an amount, the small-entrepreneur ceiling
+    25% x 1.5 = 0.375 reached the browser as "0.38". That is not a display
+    nicety: 0.38 is ABOVE the ceiling it claims to be, and the rate form,
+    prefilled from the same figure, offered it back as an election the engine
+    then refused -- the program appearing to reject a number it had just
+    printed itself.
+    """
+    return format(x.normalize(), "f")
+
+
 def available_years(data) -> list[int]:
+    """Years the client can be opened on.
+
+    Every year the data mentions, and then forward to the current one.
+
+    That second half is the point. Balances carry themselves forward (§6.1),
+    so the year after the last recorded event is a perfectly good report --
+    but it could not be reached: the picker offered only years that already
+    had rows, and no row can be written into a year that cannot be opened.
+    The ways out were to close a year that had not been filed, or to buy
+    something dated next year. Locking is a separate and deliberate act
+    (§6.2); it must not be the toll for turning the page.
+
+    Forward only -- years before the earliest recorded one are not invented.
+    A year with nothing set up yet is not an error either: the report says so
+    and offers to set the status, which is what puts the first row in it.
+    """
     years = {ob.year for ob in data.opening_balances}
     years |= {s.year for s in data.statuses}
     years |= {a.in_date.year for a in data.assets if a.in_date}
     years = {y for y in years if y >= data.start_year}
-    return sorted(years) or [data.start_year]
+    if not years:
+        return [data.start_year]
+    years |= set(range(max(years), max(max(years), dt_date.today().year) + 1))
+    return sorted(years)
 
 
 def default_year(data, years: list[int]) -> int:
@@ -73,6 +105,13 @@ def serialize(r) -> dict:
         "status": r.status,
         "status_name": r.status_name,
         "use_coefficient": r.use_coefficient,
+        # Every status's coefficient for this year, so the status form can
+        # show what each choice would raise the ceiling to. Sent from the
+        # table rather than restated in the page: these are figures of the
+        # law, and §5.1-bis keeps those out of code -- including this code.
+        "coefficients": {s: {"name": n,
+                             "coefficient": rate(rates.multiplier(r.year, s).coefficient)}
+                         for s, n in rates.STATUS_NAMES.items()},
         "carried_from_prev": r.carried_from_prev,
         "closed_years": sorted(_closed_cache),
         "prev_year_closed": (r.year - 1) in _closed_cache,
@@ -100,11 +139,11 @@ def serialize(r) -> dict:
                 "name_ru": c.name_ru,
                 "mixed_rates": c.mixed_rates,
                 "rate": {
-                    "statutory_max": m(c.rate.statutory_max),
+                    "statutory_max": rate(c.rate.statutory_max),
                     "statutory_year": c.rate.statutory_year,
                     "coefficient": str(c.rate.coefficient),
-                    "ceiling": m(c.rate.ceiling),
-                    "applied": m(c.rate.applied),
+                    "ceiling": rate(c.rate.ceiling),
+                    "applied": rate(c.rate.applied),
                     "elected": c.rate.elected,
                     "below_ceiling": c.rate.below_ceiling,
                     "below_statutory": c.rate.below_statutory,
@@ -119,7 +158,7 @@ def serialize(r) -> dict:
                 "writeoff": m(c.writeoff),
                 "closing": m(c.closing),
                 "repair_limit": m(c.repair_limit),
-                "repair_limit_pct": m(c.repair_limit_pct),
+                "repair_limit_pct": rate(c.repair_limit_pct),
                 "repair_actual": m(c.repair_actual),
                 "repair_deductible": m(c.repair_deductible),
                 "repair_capitalized": m(c.repair_capitalized),
@@ -144,21 +183,24 @@ def serialize(r) -> dict:
                         "repair_capitalized": m(k.repair_capitalized),
                         "disposed": m(k.disposed),
                         "base": m(k.base),
-                        "rate": m(k.rate),
+                        "rate": rate(k.rate),
                         "depreciation": m(k.depreciation),
                         "writeoff": m(k.writeoff),
                         "closing": m(k.closing),
                         "rate_info": {
-                            "statutory_max": m(k.rate_info.statutory_max),
+                            "statutory_max": rate(k.rate_info.statutory_max),
                             "statutory_year": k.rate_info.statutory_year,
                             "coefficient": str(k.rate_info.coefficient),
-                            "ceiling": m(k.rate_info.ceiling),
-                            "applied": m(k.rate_info.applied),
+                            "ceiling": rate(k.rate_info.ceiling),
+                            "applied": rate(k.rate_info.applied),
                             "source": k.rate_info.source,
                             "below_ceiling": k.rate_info.below_ceiling,
                             "below_statutory": k.rate_info.below_statutory,
                             "coefficient_used": k.rate_info.coefficient_used,
                         } if k.rate_info else None,
+                        "retired": k.retired,
+                        "retired_kind": k.retired_kind,
+                        "retired_year": k.retired_year,
                         "threshold_hit": k.threshold_hit,
                         "threshold_reason": k.threshold_reason,
                         "threshold_next": k.threshold_next,
@@ -272,9 +314,9 @@ def asset_history(root: Path, slug: str, asset_id: str) -> dict:
             "repair_capitalized": m(card.repair_capitalized),
             "disposed": m(card.disposed),
             "base": m(card.base),
-            "rate": m(card.rate),
-            "rate_ceiling": m(ri.ceiling) if ri else "0.00",
-            "rate_statutory": m(ri.statutory_max) if ri else "0.00",
+            "rate": rate(card.rate),
+            "rate_ceiling": rate(ri.ceiling) if ri else "0",
+            "rate_statutory": rate(ri.statutory_max) if ri else "0",
             "coefficient": str(ri.coefficient) if ri else "1",
             "depreciation": m(card.depreciation),
             "writeoff": m(card.writeoff),

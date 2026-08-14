@@ -361,13 +361,8 @@ def create_asset(root: Path, slug: str, p: dict) -> str:
             year = int(p["opening_year"])
             guard_open_year(root, slug, year)
             ob = rows_of(root, slug, "opening_balances.tsv")
-            ob.append({
-                "year": str(year), "asset_id": aid, "category": category,
-                "residual": dec(residual, "Qalıq dəyər"),
-                "source": "onboarding", "engine_version": "", "closed_at": "",
-            })
+            _apply_opening(ob, aid, category, year, residual, tx)
             save_rows(root, slug, "opening_balances.tsv", ob)
-            tx.log(aid, f"opening_balance {year}", "", residual)
     return aid
 
 
@@ -403,6 +398,25 @@ def update_asset(root: Path, slug: str, p: dict) -> str:
         for r in ob:
             if r["asset_id"] == aid and r["category"] != new["category"]:
                 r["category"] = new["category"]
+
+        # The opening residual is edited from this same form now. It used to
+        # be reachable only from a second button, which meant a residual typed
+        # wrong during import looked uncorrectable: the number was on screen,
+        # the edit form did not have it, and nobody guessed that "Açılış
+        # qalığı" next door was the way in.
+        #
+        # `opening_edit` is what the form ticks when it actually showed the
+        # field, so an empty value means "delete this year's row" rather than
+        # "the caller did not mention it". The form only shows the field for a
+        # residual that IS an explicit fact: a balance carried from last year
+        # is computed (§2, §6.1), and prefilling a computed number into a form
+        # would freeze it into stored data the moment someone pressed save --
+        # the same trap the norms form fell into (§5.1).
+        if p.get("opening_edit"):
+            year = int(p["opening_year"])
+            guard_open_year(root, slug, year)
+            _apply_opening(ob, aid, new["category"], year,
+                           str(p.get("opening_residual", "")).strip(), tx)
         save_rows(root, slug, "opening_balances.tsv", ob)
     return aid
 
@@ -432,6 +446,33 @@ def delete_asset(root: Path, slug: str, p: dict) -> str:
     return aid
 
 
+def _apply_opening(rows: list[dict[str, str]], aid: str, category: str,
+                   year: int, value: str, tx: "Tx") -> None:
+    """Set, change or drop the explicit opening balance of one asset-year.
+
+    Three callers write this row -- creating a card, editing one, and the
+    dedicated form -- and they must agree on what an empty value means and on
+    what lands in the changelog, so the rule lives here once.
+    """
+    old = next((r for r in rows
+                if r["asset_id"] == aid and r["year"] == str(year)), None)
+    if value == "":
+        if old:
+            rows.remove(old)
+            tx.log(aid, f"opening_balance {year}", old["residual"], "silindi")
+        return
+    v = dec(value, "Qalıq dəyər")
+    if old:
+        if old["residual"] != v:
+            tx.log(aid, f"opening_balance {year}", old["residual"], v)
+            old["residual"] = v
+    else:
+        rows.append({"year": str(year), "asset_id": aid, "category": category,
+                     "residual": v, "source": "onboarding",
+                     "engine_version": "", "closed_at": ""})
+        tx.log(aid, f"opening_balance {year}", "", v)
+
+
 def set_opening(root: Path, slug: str, p: dict) -> str:
     aid, year = str(p["asset_id"]), int(p["year"])
     with transaction(root, slug, "opening.set") as tx:
@@ -441,24 +482,8 @@ def set_opening(root: Path, slug: str, p: dict) -> str:
         if asset is None:
             raise DataError(f"ƏV tapılmadı: {aid}")
         rows = rows_of(root, slug, "opening_balances.tsv")
-        value = str(p.get("residual", "")).strip()
-        old = next((r for r in rows
-                    if r["asset_id"] == aid and r["year"] == str(year)), None)
-        if value == "":
-            if old:
-                rows.remove(old)
-                tx.log(aid, f"opening_balance {year}", old["residual"], "silindi")
-        elif old:
-            v = dec(value, "Qalıq dəyər")
-            if old["residual"] != v:
-                tx.log(aid, f"opening_balance {year}", old["residual"], v)
-                old["residual"] = v
-        else:
-            v = dec(value, "Qalıq dəyər")
-            rows.append({"year": str(year), "asset_id": aid,
-                         "category": asset["category"], "residual": v,
-                         "source": "onboarding", "engine_version": "", "closed_at": ""})
-            tx.log(aid, f"opening_balance {year}", "", v)
+        _apply_opening(rows, aid, asset["category"], year,
+                       str(p.get("residual", "")).strip(), tx)
         save_rows(root, slug, "opening_balances.tsv", rows)
     return aid
 
@@ -865,21 +890,51 @@ def reopen_year(root: Path, slug: str, p: dict) -> str:
 
 def set_writeoff(root: Path, slug: str, p: dict) -> str:
     """Record (or withdraw) the decision to write an asset off under 500/5%."""
-    aid, year = str(p["asset_id"]), int(p["year"])
+    """Record (or withdraw) the 114.8 write-off for one asset or for many.
+
+    Many matters more than it looks. Every transaction backs the whole client
+    folder up, then reloads and recomputes every open year (§8.1) -- correct
+    for one decision, absurd forty times over when a workshop's worth of
+    tooling crosses the threshold in the same year. Forty backups, forty
+    recomputes, forty lines of changelog for what the accountant did as a
+    single act.
+
+    So the decision is one transaction whatever its size: all the assets land
+    together or none of them do. The changelog still gets a line per asset --
+    the grouping is a convenience for the person, not a reason to record less
+    about what happened.
+    """
+    year = int(p["year"])
+    ids = p.get("asset_ids")
+    if ids is None:
+        ids = [p["asset_id"]]
+    elif isinstance(ids, str):
+        ids = [i for i in (s.strip() for s in ids.split(",")) if i]
+    ids = [str(i) for i in ids]
+    if not ids:
+        raise DataError("silinmə üçün ƏV seçilməyib")
+
     with transaction(root, slug, "writeoff.set") as tx:
         guard_open_year(root, slug, year)
+        known = {r["asset_id"] for r in rows_of(root, slug, "assets.tsv")}
+        missing = [i for i in ids if i not in known]
+        if missing:
+            raise DataError("ƏV tapılmadı: " + ", ".join(missing))
         rows = rows_of(root, slug, "writeoffs.tsv")
+        target = set(ids)
         rows = [r for r in rows
-                if not (r["asset_id"] == aid and r["year"] == str(year))]
+                if not (r["asset_id"] in target and r["year"] == str(year))]
         if p.get("enabled"):
             reason = str(p.get("reason", "")).strip() or \
                 "VM m.114 — 500/5% həddi, birdəfəlik silinmə"
-            rows.append({"year": str(year), "asset_id": aid, "reason": reason})
-            tx.log(aid, f"writeoff {year}", "", reason)
+            for aid in ids:
+                rows.append({"year": str(year), "asset_id": aid, "reason": reason})
+                tx.log(aid, f"writeoff {year}", "", reason)
         else:
-            tx.log(aid, f"writeoff {year}", "var", "silindi")
+            for aid in ids:
+                tx.log(aid, f"writeoff {year}", "var", "silindi")
         save_rows(root, slug, "writeoffs.tsv", rows)
-    return aid
+    return ", ".join(ids)
 
 
 def set_election(root: Path, slug: str, p: dict) -> str:
@@ -910,15 +965,63 @@ def set_election(root: Path, slug: str, p: dict) -> str:
     return aid or category
 
 
+def _pct(value: D) -> str:
+    """A rate as a percentage, keeping the digits it actually has.
+
+    25% x 1.5 is 37.5%, and rounding that to "38%" in a message is not a
+    cosmetic loss: 38% is above the ceiling it is describing.
+    """
+    return _plain(value * 100) + "%"
+
+
+def _ceiling(year: int, category: str, coefficient: D) -> D | None:
+    st = rates.statutory(year, category)
+    if st.max_rate is None:
+        return None
+    return min(st.max_rate * coefficient, D("1"))
+
+
 def set_status(root: Path, slug: str, p: dict) -> str:
     year = int(p["year"])
     status = str(p.get("status", "")).strip()
     if status not in ("mikro", "kicik", "orta", "iri"):
         raise DataError("Status: mikro | kicik | orta | iri")
+    use_coefficient = bool(p.get("use_coefficient"))
+    coefficient = (rates.multiplier(year, status).coefficient
+                   if use_coefficient else D("1"))
+
+    # The lock comes first: a closed year is refused because it is closed, and
+    # saying anything else about it -- a rate above its ceiling, say -- names
+    # a reason the user could act on when the real one is that the return has
+    # been filed.
+    guard_open_year(root, slug, year)
+
+    # Lowering the status -- or waiving the coefficient -- lowers the CEILING,
+    # and a rate already on file can end up above it. The transaction would
+    # catch that anyway and roll back, but the message it produced talked
+    # about a depreciation rate the user had not touched, on a form about
+    # status. Name the rate that is in the way and where to change it.
+    blocked = []
+    for e in load_client(root, slug).elections:
+        if e.year != year:
+            continue
+        ceiling = _ceiling(year, e.category, coefficient)
+        if ceiling is not None and e.applied_rate > ceiling:
+            who = f" ({e.asset_id})" if e.asset_id else ""
+            blocked.append(f"{e.category}{who} — {_pct(e.applied_rate)} > "
+                           f"{_pct(ceiling)}")
+    if blocked:
+        raise DataError(
+            f"{year}: status dəyişdirilə bilməz, çünki seçilmiş amortizasiya "
+            f"dərəcəsi yeni yuxarı həddi aşır — " + "; ".join(blocked) + ". "
+            f"Əvvəlcə həmin dərəcəni azaldın (kateqoriya sətrində «dərəcəni "
+            f"dəyiş», ƏV kartında «Fərdi dərəcə»), sonra statusu dəyişin."
+        )
+
     with transaction(root, slug, "status.set") as tx:
         guard_open_year(root, slug, year)
         rows = rows_of(root, slug, "taxpayer_status.tsv")
-        use = "" if p.get("use_coefficient") else "0"
+        use = "" if use_coefficient else "0"
         old = next((r for r in rows if r["year"] == str(year)), None)
         if old:
             if old["status"] != status:
@@ -936,6 +1039,41 @@ def set_status(root: Path, slug: str, p: dict) -> str:
                          "use_coefficient": use})
             tx.log("", f"status {year}", "", status)
         save_rows(root, slug, "taxpayer_status.tsv", rows)
+
+        # Applying the coefficient stays a decision, never a consequence of
+        # typing a status (§5.2) -- the engine has no business doubling a
+        # client's depreciation on its own. What moved is WHERE the decision
+        # is offered: next to the fact that creates the right, instead of on a
+        # separate screen the user has to know exists. That separate screen is
+        # exactly what got missed -- "I set kiçik and the 1.5 did not apply".
+        # Nothing is ticked by default, so an unanswered form still elects
+        # nothing.
+        #
+        # Only CATEGORY elections are written here. A rate chosen for a single
+        # asset is more specific and keeps winning (§5.2), which is how "all
+        # the cars at 1.5, except this one" stays expressible.
+        chosen = p.get("apply_coefficient_to") or []
+        if isinstance(chosen, str):
+            chosen = [c for c in chosen.split(",") if c.strip()]
+        if chosen and coefficient <= D("1"):
+            raise DataError(
+                f"{rates.STATUS_NAMES[status]} üçün əmsal yoxdur (×1) — "
+                f"tətbiq ediləcək bir şey yoxdur"
+            )
+        if chosen:
+            elections = rows_of(root, slug, "rate_elections.tsv")
+            for code in chosen:
+                code = category_of(code)
+                ceiling = _ceiling(year, code, coefficient)
+                if ceiling is None:
+                    continue
+                elections = [r for r in elections if not (
+                    r["year"] == str(year) and r["category"] == code
+                    and not r.get("asset_id", ""))]
+                elections.append({"year": str(year), "category": code,
+                                  "applied_rate": _plain(ceiling), "asset_id": ""})
+                tx.log("", f"rate {code} {year}", "", _pct(ceiling))
+            save_rows(root, slug, "rate_elections.tsv", elections)
     return status
 
 

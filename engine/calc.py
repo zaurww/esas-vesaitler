@@ -67,6 +67,21 @@ class CardResult:
     threshold_next: bool = False      # closing residual trips it -> next year
     threshold_next_reason: str = ""
     written_off: bool = False
+
+    # -- assets whose life is over -----------------------------------------
+    # Zero in every column, present in every list. The report used to drop a
+    # card the year after its residual reached zero, on the reasoning that it
+    # is no longer on the balance sheet -- true, and beside the point: the
+    # accountant still has the physical thing, still gets asked what happened
+    # to it, and "it vanished from the report" is not an answer. So the row
+    # stays, carrying nothing, saying how it ended.
+    #
+    # Nothing here can move a total: every figure on a retired card is zero,
+    # and the balance identity (§5.4.1) adds zeros on both sides.
+    retired: bool = False
+    retired_kind: str = ""    # writeoff | realizasiya | leqv | amortizasiya
+    retired_year: Optional[int] = None
+
     disposal_type: str = ""
     disposal_date: Optional[date] = None
     proceeds: Decimal = ZERO
@@ -381,6 +396,24 @@ def compute_year(data: ClientData, year: int,
     priceable = {c.code for c in CATEGORIES
                  if c.kind == "ev" and statutory(year, c.code).max_rate is not None}
 
+    # An asset counts as having STARTED once it was bought, or once a balance
+    # was recorded for it, in this year or any earlier one. The distinction
+    # matters below: nothing on the books and never started is an asset that
+    # does not exist yet; nothing on the books after it started is an asset
+    # whose life is over.
+    started: set[str] = {
+        aid for aid, a in assets.items()
+        if a.in_date is not None and a.in_date.year <= year
+    }
+    started |= {ob.asset_id for ob in data.opening_balances if ob.year <= year}
+
+    # Retirements, whenever they happened -- the reason a spent card is spent.
+    disposed_ever = {d.asset_id: d for d in data.disposals if d.date is not None}
+    written_ever: dict[str, int] = {}
+    for w in data.writeoffs:
+        if w.asset_id not in written_ever or w.year < written_ever[w.asset_id]:
+            written_ever[w.asset_id] = w.year
+
     # -- step 1: opening balances and acquisitions --------------------------
     cards: dict[str, CardResult] = {}
     for aid, asset in assets.items():
@@ -395,8 +428,19 @@ def compute_year(data: ClientData, year: int,
         acq = ZERO
         if asset.in_date is not None and asset.in_date.year == year:
             acq = asset.cost
+        retired = False
         if open_val == ZERO and acq == ZERO:
-            continue  # the asset does not exist in this year yet, or any more
+            # Nothing carried in and nothing bought. Three different things,
+            # and they used to be one `continue`:
+            if additions.get(aid, ZERO) or repairs.get(aid, ZERO):
+                pass          # spent, but money was put into it this year --
+                              # it comes back onto the books and must be
+                              # computed, not dropped in silence (§2.1)
+            elif aid in started:
+                retired = True   # its life is over; kept as a zero row so the
+                                 # list still shows it (see CardResult.retired)
+            else:
+                continue      # not bought yet -- it does not exist in this year
         cards[aid] = CardResult(
             asset_id=aid, inv_no=asset.inv_no, name=asset.name,
             category=asset.category, in_date=asset.in_date, cost=asset.cost,
@@ -406,7 +450,19 @@ def compute_year(data: ClientData, year: int,
             acquisition=acq,
             addition=additions.get(aid, ZERO),
             cost_prior=asset.cost + additions_prior.get(aid, ZERO),
+            retired=retired,
         )
+        if retired:
+            c = cards[aid]
+            if aid in written_ever and written_ever[aid] < year:
+                c.retired_kind, c.retired_year = "writeoff", written_ever[aid]
+            elif aid in disposed_ever and disposed_ever[aid].date.year < year:
+                c.retired_kind = ("realizasiya"
+                                  if disposed_ever[aid].type == "realizasiya"
+                                  else "leqv")
+                c.retired_year = disposed_ever[aid].date.year
+            else:
+                c.retired_kind = "amortizasiya"
 
     # -- step 3: art. 115 repairs (limit per group, spend recorded per asset)
     for code in EV_CODES:
@@ -446,6 +502,13 @@ def compute_year(data: ClientData, year: int,
                 f"dəstəklənmir (dərəcə istifadə müddətindən, mərhələ 1b)"
             )
         c.rate_info = resolve_rate(c.category, c.asset_id)
+        if c.retired:
+            # Nothing to depreciate and therefore no rate to state. Leaving
+            # the category rate on the row printed "20%" next to a line of
+            # dashes, which invites the reader to look for the 20% of nothing.
+            c.rate = ZERO
+            c.monthly = [ZERO] * 12
+            continue
         disp = disposals.get(c.asset_id)
         if disp is not None:
             c.disposal_type = disp.type
@@ -500,17 +563,26 @@ def compute_year(data: ClientData, year: int,
     for code in EV_CODES:
         group = sorted(
             (c for c in cards.values() if c.category == code),
-            key=lambda c: (not c.is_legacy_pool, c.inv_no, c.name),
+            # Spent cards sink to the bottom of their group: they are there to
+            # be found, not to be read past on the way to the live ones.
+            key=lambda c: (c.retired, not c.is_legacy_pool, c.inv_no, c.name),
         )
         if not group or code not in priceable:
             continue
+        cat_rate = resolve_rate(code)         # the category default
         cat = CategoryResult(
             code=code,
             name_az=CATEGORY_BY_CODE[code].name_az,
             name_ru=CATEGORY_BY_CODE[code].name_ru,
-            rate=resolve_rate(code),          # the category default
+            rate=cat_rate,
             cards=group,
-            mixed_rates=len({c.rate_info.applied for c in group}) > 1,
+            # Measured against the category rate, not just card against card.
+            # Comparing the cards only to each other missed the case that
+            # matters most -- one asset pulled off the category rate while the
+            # rest follow it -- and the header then printed the category
+            # figure with nothing to say that an asset was not using it.
+            mixed_rates=any(c.rate_info.applied != cat_rate.applied
+                            for c in group if not c.retired),
         )
         for f in ("opening", "acquisition", "addition", "repair_actual",
                   "repair_deductible", "repair_capitalized", "disposed",
@@ -562,6 +634,8 @@ def compute_year(data: ClientData, year: int,
             )
         # (the unused-coefficient notice is raised once below, not per category)
         for c in cat.cards:
+            if c.retired:
+                continue        # a zero row has no rate worth reporting on
             if c.rate_info.source == "asset":
                 result.warnings.append(
                     f"{c.inv_no or c.name}: fərdi dərəcə "
@@ -581,7 +655,8 @@ def compute_year(data: ClientData, year: int,
                             f"{cat.rate.ceiling:.0%} mümkündür)" for cat in unused)
             )
 
-    missing_inv = [c for c in result.cards if not c.is_legacy_pool and not c.inv_no]
+    missing_inv = [c for c in result.cards
+                   if not c.is_legacy_pool and not c.inv_no and not c.retired]
     if missing_inv:
         result.warnings.append(
             "İnventar nömrəsi olmayan ƏV: "
