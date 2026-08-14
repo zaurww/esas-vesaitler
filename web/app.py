@@ -452,7 +452,9 @@ class Handler(BaseHTTPRequestHandler):
                 rates.refresh(ROOT)
                 self._json({"year": year,
                             "rates": rates.table_for(year),
-                            "coefficients": rates.coefficients_for(year)})
+                            "coefficients": rates.coefficients_for(year),
+                            "parameters": rates.parameters_for(year),
+                            "law_reviewed": rates.LAW_REVIEWED})
                 return
 
             if url.path == "/api/export":
@@ -506,9 +508,18 @@ class Handler(BaseHTTPRequestHandler):
 
 class LocalServer(ThreadingHTTPServer):
     """Loopback only -- this is a local tool, it must never be reachable from
-    the network. allow_reuse_address avoids the "port still in TIME_WAIT"
-    failure after a restart."""
-    allow_reuse_address = True
+    the network.
+
+    allow_reuse_address is OFF on purpose. It reads like the fix for "port
+    still in TIME_WAIT", but on Windows SO_REUSEADDR means something else
+    entirely: a second process is allowed to bind a port another process is
+    already listening on. Both instances then sit on 8777 and the OS hands
+    each connection to whichever it likes -- so after an update the old copy
+    keeps answering half the requests with the old engine. Measured here:
+    a freshly started server never got a single request. Without it, bind
+    fails cleanly and serve() steps up to the next port as intended.
+    """
+    allow_reuse_address = False
     daemon_threads = True
 
 

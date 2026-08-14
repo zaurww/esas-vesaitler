@@ -17,10 +17,11 @@ from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional
 
+from . import rates
 from .model import ClientData
 from .rates import (
     CATEGORIES, CATEGORY_BY_CODE, ENGINE_VERSION, EV_CODES, FORMAT_VERSION,
-    STATUS_NAMES, THRESHOLD_ABS, THRESHOLD_PCT, multiplier, statutory,
+    STATUS_NAMES, multiplier, statutory,
 )
 
 D = Decimal
@@ -225,28 +226,41 @@ def split_monthly(annual: Decimal) -> list[Decimal]:
     return out
 
 
-def threshold_test(card: "CardResult", residual: Decimal,
+def threshold_test(card: "CardResult", residual: Decimal, year: int,
                    cost_at: Decimal | None = None) -> tuple[bool, str]:
-    """The 500 AZN / 5%-of-initial-cost test (art. 114).
+    """The one-off write-off test of art. 114.8, as it stood in `year`.
+
+    Both figures come from the parameter table rather than from constants, so
+    an amendment to 114.8 is a row someone types, not a new release of this
+    program. `year` matters for the same reason it matters for a rate: the
+    test that applies is the one in force for the year being computed.
 
     A legacy pool row carries no initial cost of its own, so only the flat
-    500 AZN half of the test applies to it (§6.1).
+    money half of the test applies to it (§6.1).
     """
     if residual <= ZERO:
         return False, ""
+    abs_limit = rates.parameter(year, "threshold_abs")
+    pct_limit = rates.parameter(year, "threshold_pct")
     reasons = []
-    if residual < THRESHOLD_ABS:
-        reasons.append(f"qalıq {residual:.2f} < {THRESHOLD_ABS} AZN")
+    if residual < abs_limit:
+        reasons.append(f"qalıq {residual:.2f} < {abs_limit:g} AZN")
     # Measured against the cost INCLUDING capitalised additions: a laptop
     # that got a component is a more expensive asset than it was.
     base_cost = cost_at if cost_at is not None else card.cost_effective
     if not card.is_legacy_pool and base_cost > ZERO \
-            and residual < base_cost * THRESHOLD_PCT:
+            and residual < base_cost * pct_limit:
         reasons.append(
-            f"qalıq {residual:.2f} < ilkin dəyərin 5%-i "
-            f"({money(base_cost * THRESHOLD_PCT)} AZN)"
+            f"qalıq {residual:.2f} < ilkin dəyərin {pct_limit:.0%}-i "
+            f"({money(base_cost * pct_limit)} AZN)"
         )
     return bool(reasons), "; ".join(reasons)
+
+
+def threshold_label(year: int) -> str:
+    """How the test is named in messages -- "500/5%" is only today's wording."""
+    return (f"{rates.parameter(year, 'threshold_abs'):g}/"
+            f"{rates.parameter(year, 'threshold_pct'):.0%}")
 
 
 def compute_year(data: ClientData, year: int,
@@ -446,10 +460,11 @@ def compute_year(data: ClientData, year: int,
         c.base = (c.opening + c.acquisition + c.addition
                   + c.repair_capitalized)
 
-        # step 5: the 500/5% test runs on the pre-depreciation residual,
+        # step 5: the write-off test runs on the pre-depreciation residual,
         # measured against the asset's initial cost
         c.threshold_hit, c.threshold_reason = threshold_test(
-            c, c.opening, c.cost_prior)     # start of year: before this year's
+            c, c.opening, year,
+            c.cost_prior)                   # start of year: before this year's
                                             # additions existed
 
         if c.threshold_hit and c.asset_id in writeoffs:
@@ -470,8 +485,14 @@ def compute_year(data: ClientData, year: int,
         # year's opening balance, so this is a reliable forecast of which
         # assets will fall under the threshold in the year ahead. It does NOT
         # write anything off now -- see CLAUDE.md §12.6.
+        #
+        # Tested with NEXT year's figures, because that is the year the
+        # write-off would happen. With the threshold hardcoded this could not
+        # go wrong; now that an amendment can move it, forecasting a 2027
+        # write-off against the 2026 threshold would be simply wrong.
         if not c.written_off:
-            c.threshold_next, c.threshold_next_reason = threshold_test(c, c.closing)
+            c.threshold_next, c.threshold_next_reason = threshold_test(
+                c, c.closing, year + 1)
 
     # -- roll the cards up into categories ----------------------------------
     for code in EV_CODES:
@@ -565,21 +586,28 @@ def compute_year(data: ClientData, year: int,
             + ", ".join(c.name for c in missing_inv)
             + " — kartı redaktə edib nömrə verin («növbəti» düyməsi təklif edir)."
         )
+    # The test is named after its own figures rather than a literal "500/5%":
+    # once those can be amended, a hardcoded label would go on describing a
+    # rule the program is no longer applying.
+    label = threshold_label(year)
+    label_next = threshold_label(year + 1)
     for c in result.cards:
         if not c.is_legacy_pool and c.cost == ZERO and c.opening > ZERO:
             result.warnings.append(
-                f"{c.inv_no or c.name}: ilkin dəyər məlum deyil — 500/5% "
-                f"testinin yalnız 500 AZN hissəsi tətbiq oluna bilər."
+                f"{c.inv_no or c.name}: ilkin dəyər məlum deyil — {label} "
+                f"testinin yalnız {rates.parameter(year, 'threshold_abs'):g} AZN "
+                f"hissəsi tətbiq oluna bilər."
             )
     for c in result.threshold_next_cards:
         result.warnings.append(
             f"{c.inv_no or c.name}: il sonuna qalıq {c.closing:.2f} AZN — "
-            f"{year + 1}-ci ildə 500/5% həddinə düşəcək ({c.threshold_next_reason})."
+            f"{year + 1}-ci ildə {label_next} həddinə düşəcək "
+            f"({c.threshold_next_reason})."
         )
     for c in result.threshold_cards:
         if not c.written_off:
             result.warnings.append(
-                f"{c.inv_no or c.name}: 500/5% həddinə düşür ({c.threshold_reason}), "
+                f"{c.inv_no or c.name}: {label} həddinə düşür ({c.threshold_reason}), "
                 f"lakin writeoffs.tsv-də qərar yoxdur — silinmə tətbiq edilmədi."
             )
     for c in result.cards:

@@ -14,9 +14,12 @@ D = Decimal
 ENGINE_VERSION = "0.9.0"
 FORMAT_VERSION = 1
 
-# One-off write-off threshold (art. 114)
-THRESHOLD_ABS = D("500")
-THRESHOLD_PCT = D("0.05")
+# Date this table was last checked against the code. Printed on the norms
+# screen and on reports: the point is not that it is fresh today, but that a
+# user opening the program in three years can SEE how old it is instead of
+# trusting a number nobody has looked at since (§7 -- make staleness visible
+# rather than pretend it cannot happen).
+LAW_REVIEWED = "2026-08-14"
 
 
 class Category(NamedTuple):
@@ -42,11 +45,27 @@ CATEGORY_BY_CODE: Dict[str, Category] = {c.code: c for c in CATEGORIES}
 EV_CODES = [c.code for c in CATEGORIES if c.kind == "ev"]
 
 
+# Where each category comes from in the code, so the table can cite the law
+# instead of a year nobody typed. Kept next to the rates it explains.
+LAW_REF: Dict[str, str] = {
+    "bt": "VM m.114.3.1",
+    "ma": "VM m.114.3.2",
+    "nv": "VM m.114.3.3",
+    "ym": "VM m.114.3.3",       # trucks are not a category of their own
+    "yt": "VM m.114.3.2-1",
+    "dg": "VM m.114.3.7",
+    "it": "VM m.115.3-115.8",
+    "qma-m": "VM m.114.3.6",
+    "qma-n": "VM m.114.3.6",
+}
+
+
 class RateRow(NamedTuple):
     effective_year: int
     category: str
     max_rate: Decimal | None  # None => rate is derived from useful life (FİM)
     repair_limit: Decimal | None
+    note: str = ""
 
 
 # TODO §12.2 -- confirm effective_year against the current tax code wording.
@@ -62,14 +81,22 @@ STATUTORY_RATES: List[RateRow] = [
     RateRow(2001, "bt", D("0.07"), D("0.02")),
     RateRow(2001, "ma", D("0.20"), D("0.05")),
     RateRow(2001, "nv", D("0.25"), D("0.05")),  # corrected from 3%
-    # Art. 115.1 sets the repair limit by referring to article 114.3.x, and
-    # trucks are not a category of their own there -- they are 114.3.3
-    # nəqliyyat vasitələri, so 5%, not the 8% carried over from the source
-    # workbook. The code is kept because client data already uses it.
+
+    # Trucks: 115.1 used to set the limit only by pointing at 114.3.x, where
+    # trucks are not a category of their own (they are 114.3.3), which is why
+    # this said 5%. Law 1033-VIQD of 5 Dec 2023 changed that -- it carved
+    # "yük avtomobilləri istisna olmaqla" out of the 5% group and gave trucks
+    # their own 8%. So the source workbook's 8% was right for current years
+    # and the earlier "correction" to 5% was wrong from 2024 on.
     RateRow(2001, "ym", D("0.25"), D("0.05")),
-    # 114.3.2-1 (high-tech computing) is NOT named in 115.1, so its repair
-    # limit is unresolved -- see §12.3. 3% is the source workbook's figure.
+    RateRow(2024, "ym", D("0.25"), D("0.08"), "1033-VIQD 05.12.2023"),
+
+    # High-tech computing (114.3.2-1) was added to 114.3 in 2017 but was not
+    # named in 115.1, leaving its repair limit unresolved -- 3% below was the
+    # workbook's guess. Law 406-VIQD of 3 Dec 2021 inserted "114.3.2-1-ci"
+    # into 115.1 right after 114.3.2, putting it in the 5% group.
     RateRow(2001, "yt", D("0.25"), D("0.03")),
+    RateRow(2022, "yt", D("0.25"), D("0.05"), "406-VIQD 03.12.2021"),
     RateRow(2001, "dg", D("0.20"), D("0.03")),
     RateRow(2001, "it", None, D("0.03")),       # 1/MAX(FİM;5)
     RateRow(2001, "qma-m", None, None),         # 1/FİM
@@ -81,14 +108,54 @@ class MultiplierRow(NamedTuple):
     effective_year: int
     status: str
     coefficient: Decimal
+    note: str = ""
 
 
-# TODO §12.2/§12.3 -- confirm the start year and the x1.5 coefficient for kicik.
+# ---------------------------------------------------------------------------
+# Numeric parameters of the law that are not per-category rates.
+#
+# These used to be Python constants, which meant a change in the code could
+# only be followed by a new release of this program. That is the wrong
+# dependency for a tool that is handed to people and then has to keep working
+# without its author, so every figure the tax code fixes lives here instead --
+# year-keyed, overridable from parameters.tsv, same as the rates.
+#
+# The registry is deliberately a lookup rather than named constants: when a
+# future amendment introduces another figure, it is one row here plus one use
+# site, with no change to the storage format (§7).
+# ---------------------------------------------------------------------------
+
+class ParamRow(NamedTuple):
+    effective_year: int
+    key: str
+    value: Decimal
+    note: str = ""
+
+
+PARAM_DEFS: Dict[str, tuple] = {
+    # key: (label_az, law_ref, kind) -- kind drives display and validation
+    "threshold_abs": ("Birdəfəlik silinmə həddi — məbləğ",
+                      "VM m.114.8", "money"),
+    "threshold_pct": ("Birdəfəlik silinmə həddi — ilkin dəyərin faizi",
+                      "VM m.114.8", "pct"),
+}
+
+PARAMETERS: List[ParamRow] = [
+    ParamRow(2001, "threshold_abs", D("500")),
+    ParamRow(2001, "threshold_pct", D("0.05")),
+]
+
+
+# Law 1356-VQD of 30 Nov 2018 added the two coefficient articles, published
+# December 2018, so they apply from 2019 -- not 2020, which was a guess.
+# Making them available a year earlier cannot change an existing figure: the
+# coefficient only ever raises the CEILING, and nothing is doubled without an
+# explicit election (§5.2).
 MULTIPLIERS: List[MultiplierRow] = [
-    MultiplierRow(2020, "mikro", D("2.0")),
-    MultiplierRow(2020, "kicik", D("1.5")),
-    MultiplierRow(2020, "orta", D("1.0")),
-    MultiplierRow(2020, "iri", D("1.0")),
+    MultiplierRow(2019, "mikro", D("2.0"), "1356-VQD 30.11.2018"),
+    MultiplierRow(2019, "kicik", D("1.5"), "1356-VQD 30.11.2018"),
+    MultiplierRow(2019, "orta", D("1.0")),
+    MultiplierRow(2019, "iri", D("1.0")),
 ]
 
 STATUS_NAMES = {
@@ -112,10 +179,20 @@ STATUS_NAMES = {
 
 USER_RATES: List[RateRow] = []
 USER_MULTIPLIERS: List[MultiplierRow] = []
+USER_PARAMETERS: List[ParamRow] = []
 USER_SOURCE: set = set()          # keys that came from the files, for the UI
 
 RATES_HEADER = ["effective_year", "category", "max_rate", "repair_limit", "note"]
 COEFF_HEADER = ["effective_year", "status", "coefficient", "note"]
+PARAM_HEADER = ["effective_year", "key", "value", "note"]
+
+# Every file that carries the owner's reading of the law. Named once because
+# it is read in four places -- refresh, archive export, archive inspect,
+# archive import -- and the archive code had already fallen behind: it still
+# listed two files after parameters.tsv appeared, so a changed write-off
+# threshold would not have travelled with the client. That is precisely the
+# silent divergence the archive exists to prevent (§8.2).
+NORM_FILES = ("rates.tsv", "coefficients.tsv", "parameters.tsv")
 
 
 def _num(v: str) -> Decimal | None:
@@ -132,6 +209,7 @@ def refresh(root) -> None:
     root = Path(root)
     USER_RATES.clear()
     USER_MULTIPLIERS.clear()
+    USER_PARAMETERS.clear()
     USER_SOURCE.clear()
 
     for r in read_tsv(root / "rates.tsv"):
@@ -140,7 +218,8 @@ def refresh(root) -> None:
             raise ValueError(f"rates.tsv: naməlum kateqoriya {cat!r}")
         year = int(r["effective_year"])
         USER_RATES.append(RateRow(year, cat, _num(r.get("max_rate", "")),
-                                  _num(r.get("repair_limit", ""))))
+                                  _num(r.get("repair_limit", "")),
+                                  (r.get("note") or "").strip()))
         USER_SOURCE.add(("rate", year, cat))
 
     for r in read_tsv(root / "coefficients.tsv"):
@@ -148,8 +227,19 @@ def refresh(root) -> None:
         if st not in STATUS_NAMES:
             raise ValueError(f"coefficients.tsv: naməlum status {st!r}")
         year = int(r["effective_year"])
-        USER_MULTIPLIERS.append(MultiplierRow(year, st, D(r["coefficient"])))
+        USER_MULTIPLIERS.append(MultiplierRow(year, st, D(r["coefficient"]),
+                                              (r.get("note") or "").strip()))
         USER_SOURCE.add(("coef", year, st))
+
+    for r in read_tsv(root / "parameters.tsv"):
+        key = (r.get("key") or "").strip()
+        if key not in PARAM_DEFS:
+            raise ValueError(f"parameters.tsv: naməlum parametr {key!r}")
+        year = int(r["effective_year"])
+        USER_PARAMETERS.append(ParamRow(year, key, D(str(r["value"]).strip()
+                                                     .replace(",", ".")),
+                                        (r.get("note") or "").strip()))
+        USER_SOURCE.add(("param", year, key))
 
 
 def _latest(rows, year: int, key_fn, key_value):
@@ -174,7 +264,8 @@ def statutory(year: int, category: str) -> RateRow:
         row = RateRow(row.effective_year, category,
                       row.max_rate if row.max_rate is not None else base.max_rate,
                       row.repair_limit if row.repair_limit is not None
-                      else base.repair_limit)
+                      else base.repair_limit,
+                      row.note)
     if row is None:
         raise LookupError(
             f"нет статутной ставки для категории {category!r} на {year} год"
@@ -193,8 +284,49 @@ def multiplier(year: int, status: str) -> MultiplierRow:
     return row
 
 
+def _pct(v: Decimal | None) -> str | None:
+    return None if v is None else f"{v:.4f}"
+
+
+def rate_years(category: str) -> list[int]:
+    """Every year the rate for this category changes, oldest first."""
+    return sorted({r.effective_year for r in STATUTORY_RATES
+                   if r.category == category}
+                  | {r.effective_year for r in USER_RATES
+                     if r.category == category})
+
+
+def history(category: str) -> list[dict]:
+    """The whole life of one category's rate, as ranges rather than start years.
+
+    "2001" on its own answers nothing; "2001-2025" answers the question the
+    user actually has. Built by resolving each change year through statutory(),
+    so it cannot drift from what the calculation uses.
+    """
+    years = rate_years(category)
+    out = []
+    for i, y in enumerate(years):
+        st = statutory(y, category)
+        user = _latest(USER_RATES, y, lambda r: r.category, category)
+        out.append({
+            "since": y,
+            "until": years[i + 1] - 1 if i + 1 < len(years) else None,
+            "max_rate": _pct(st.max_rate),
+            "repair_limit": _pct(st.repair_limit),
+            "source": "user" if user is not None else "engine",
+            "note": (user.note if user is not None else st.note) or "",
+        })
+    return out
+
+
 def table_for(year: int) -> list[dict]:
-    """The effective table for one year, with where each number came from."""
+    """The effective table for one year, with where each number came from.
+
+    `law_ref` and `changes` exist so the UI can stop showing a bare
+    effective_year: with a single row the year is noise (and, until §12.2 is
+    settled, a placeholder nobody verified), while the article reference is
+    the fact the accountant can check.
+    """
     out = []
     for c in CATEGORIES:
         try:
@@ -202,15 +334,81 @@ def table_for(year: int) -> list[dict]:
         except LookupError:
             continue
         user = _latest(USER_RATES, year, lambda r: r.category, c.code)
+        years = rate_years(c.code)
+        i = max((n for n, y in enumerate(years) if y <= year), default=0)
         out.append({
             "code": c.code, "name_az": c.name_az, "name_ru": c.name_ru,
             "effective_year": st.effective_year,
-            "max_rate": None if st.max_rate is None else f"{st.max_rate:.4f}",
-            "repair_limit": None if st.repair_limit is None
-                            else f"{st.repair_limit:.4f}",
+            "until": years[i + 1] - 1 if i + 1 < len(years) else None,
+            "changes": len(years),
+            "law_ref": LAW_REF.get(c.code, ""),
+            "max_rate": _pct(st.max_rate),
+            "repair_limit": _pct(st.repair_limit),
+            "source": "user" if user is not None else "engine",
+            "note": (user.note if user is not None else st.note) or "",
+            "history": history(c.code),
+        })
+    return out
+
+
+def parameter(year: int, key: str) -> Decimal:
+    """A numeric figure the tax code fixes, as it stood in `year`.
+
+    Fails loudly rather than falling back to a plausible number: a missing
+    threshold would otherwise silently write off nothing, or everything.
+    """
+    row = _latest(USER_PARAMETERS, year, lambda r: r.key, key)
+    if row is None:
+        row = _latest(PARAMETERS, year, lambda r: r.key, key)
+    if row is None:
+        raise LookupError(f"{year} ili üçün «{key}» parametri təyin edilməyib")
+    return row.value
+
+
+def param_years(key: str) -> list[int]:
+    return sorted({r.effective_year for r in PARAMETERS if r.key == key}
+                  | {r.effective_year for r in USER_PARAMETERS if r.key == key})
+
+
+def parameters_for(year: int) -> list[dict]:
+    out = []
+    for key, (label, law_ref, kind) in PARAM_DEFS.items():
+        user = _latest(USER_PARAMETERS, year, lambda r: r.key, key)
+        eff = _latest(USER_PARAMETERS, year, lambda r: r.key, key) \
+            or _latest(PARAMETERS, year, lambda r: r.key, key)
+        years = param_years(key)
+        i = max((n for n, y in enumerate(years) if y <= year), default=0)
+        out.append({
+            "key": key, "label": label, "law_ref": law_ref, "kind": kind,
+            "value": str(parameter(year, key)),
+            "effective_year": eff.effective_year if eff else None,
+            "until": years[i + 1] - 1 if i + 1 < len(years) else None,
+            "changes": len(years),
+            "note": (user.note if user is not None else "") or "",
             "source": "user" if user is not None else "engine",
         })
     return out
+
+
+def coef_years(status: str) -> list[int]:
+    return sorted({r.effective_year for r in MULTIPLIERS if r.status == status}
+                  | {r.effective_year for r in USER_MULTIPLIERS
+                     if r.status == status})
+
+
+def coef_law_ref(year: int, status: str) -> str:
+    """Which article grants the coefficient -- which depends on the year.
+
+    Law 297-VIIQD (9 Dec 2025) inserted a new 114.3-1 (useful lives for the
+    straight-line method) and pushed the coefficient articles down one:
+    mikro 114.3-1 -> 114.3-2, kicik 114.3-2 -> 114.3-3. Citing the current
+    numbering on a 2024 report would send the accountant to the wrong text.
+    """
+    if status == "mikro":
+        return "VM m.114.3-2" if year >= 2026 else "VM m.114.3-1"
+    if status == "kicik":
+        return "VM m.114.3-3" if year >= 2026 else "VM m.114.3-2"
+    return ""
 
 
 def coefficients_for(year: int) -> list[dict]:
@@ -220,6 +418,9 @@ def coefficients_for(year: int) -> list[dict]:
         user = _latest(USER_MULTIPLIERS, year, lambda r: r.status, status)
         out.append({"status": status, "name": name,
                     "effective_year": m.effective_year,
+                    "changes": len(coef_years(status)),
+                    "law_ref": coef_law_ref(year, status),
                     "coefficient": str(m.coefficient),
+                    "note": (user.note if user is not None else m.note) or "",
                     "source": "user" if user is not None else "engine"})
     return out

@@ -125,6 +125,17 @@ def _where(r: dict[str, str]) -> str:
 
 
 def load_client(root: Path, slug: str) -> ClientData:
+    # The owner's norms live next to the engine, not in the client folder
+    # (§5.1), so they have to be re-read somewhere. This is the one place both
+    # the web UI and the CLI pass through. Without it `ev.py calc` ignored
+    # rates.tsv entirely and answered differently than the same year on
+    # screen -- silently, which is the failure mode §2.1 exists to prevent.
+    from . import rates as _rates
+    try:
+        _rates.refresh(root)
+    except (ValueError, KeyError, InvalidOperation) as e:
+        raise DataError(f"normalar faylı oxunmadı: {e}") from None
+
     folder = root / "clients" / slug
     if not folder.is_dir():
         raise DataError(f"müştəri tapılmadı: {folder}")
