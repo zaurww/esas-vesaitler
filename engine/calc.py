@@ -178,6 +178,36 @@ class CategoryResult:
     monthly: list[Decimal] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class DeclarationLine:
+    """One figure this program hands to the profit-tax return.
+
+    Everything else the engine produces is working material -- the movement of
+    a card, the base of a category, the split by month. These five figures are
+    the output proper: they are what gets copied into the return, and the whole
+    calculation exists to arrive at them.
+
+    They used to have no single place. Depreciation sat in the headline tiles,
+    the repair deduction on its own tab, the 114.8 write-off in a tile named
+    after the test rather than after what it does, and 114.7/114.9 among the
+    warnings. Every number was on screen and the answer to "what do I put in
+    the return" was still assembled by hand from four screens.
+
+    Named once, here, because three outputs print it -- console, web report,
+    workbook. A list restated in each would drift the way the norm-file list
+    did before it became rates.NORM_FILES (§5.1).
+    """
+    article: str
+    label_az: str
+    amount: Decimal
+    effect: str                       # deduction | income
+
+    @property
+    def signed(self) -> Decimal:
+        """Effect on taxable profit: income raises it, a deduction lowers it."""
+        return self.amount if self.effect == "income" else -self.amount
+
+
 @dataclass
 class YearResult:
     client_name: str
@@ -221,6 +251,45 @@ class YearResult:
     @property
     def threshold_next_cards(self) -> list[CardResult]:
         return [c for c in self.cards if c.threshold_next]
+
+    # -- what goes into the return -----------------------------------------
+    # Derived, never stored (§2). The order is the order of the pipeline that
+    # produced them, not the order of the form: depreciation, then repair,
+    # then the two things that happen when an asset leaves.
+
+    @property
+    def declaration(self) -> list[DeclarationLine]:
+        t = self.totals
+        z = lambda k: t.get(k, ZERO)                            # noqa: E731
+        return [
+            DeclarationLine("m.114", "Amortizasiya ayırmaları",
+                            z("depreciation"), "deduction"),
+            DeclarationLine("m.115.1", "Təmir xərcləri — hədd daxilində",
+                            z("repair_deductible"), "deduction"),
+            DeclarationLine("m.114.8",
+                            f"Birdəfəlik silinmə ({threshold_label(self.year)})",
+                            z("writeoff"), "deduction"),
+            DeclarationLine("m.114.9", "Təqdim edilmədən zərər",
+                            self.disposal_loss, "deduction"),
+            DeclarationLine("m.114.7", "Təqdim edilmədən gəlir",
+                            self.disposal_gain, "income"),
+        ]
+
+    @property
+    def declaration_deducted(self) -> Decimal:
+        return sum((l.amount for l in self.declaration
+                    if l.effect == "deduction"), ZERO)
+
+    @property
+    def declaration_income(self) -> Decimal:
+        return sum((l.amount for l in self.declaration
+                    if l.effect == "income"), ZERO)
+
+    @property
+    def declaration_net(self) -> Decimal:
+        """Net effect on taxable profit. Negative in almost every year: this
+        program's job is mostly to find deductions."""
+        return self.declaration_income - self.declaration_deducted
 
 
 MONTHS_AZ = ["Yanvar", "Fevral", "Mart", "Aprel", "May", "İyun",

@@ -51,6 +51,27 @@ def cmd_calc(slug: str, year: int) -> None:
     print(f"    {'C Ə M İ':<36}{t['opening']:>{w},.2f}{t['acquisition']:>{w},.2f}"
           f"{t['disposed']:>{w},.2f}{t['depreciation']:>{w},.2f}"
           f"{t['writeoff']:>{w},.2f}{t['closing']:>{w},.2f}")
+    # The point of the whole run. Everything above is how these were arrived
+    # at; the console used to stop before saying them, and the disposal
+    # figures in particular appeared nowhere at all (§12.1).
+    print("\n  BƏYANNAMƏYƏ GEDƏN MƏBLƏĞLƏR")
+    for line in r.declaration:
+        effect = "çıxılır" if line.effect == "deduction" else "gəlirə əlavə"
+        print(f"    {line.article:<10}{line.label_az:<42}"
+              f"{line.amount:>{w},.2f}  {effect}")
+    print(f"    {'':<52}{'-' * w}")
+    print(f"    {'Gəlirdən çıxılır':<52}{r.declaration_deducted:>{w},.2f}")
+    print(f"    {'Gəlirə əlavə edilir':<52}{r.declaration_income:>{w},.2f}")
+    print(f"    {'Vergi tutulan gəlirə təsir':<52}{r.declaration_net:>{w},.2f}")
+    if r.disposed_cards:
+        print("\n    Xaricetmə (m.114.6 — qalıq onsuz da bazadan çıxılıb):")
+        for c in r.disposed_cards:
+            when = c.disposal_date.isoformat() if c.disposal_date else "—"
+            print(f"      {c.inv_no or c.name[:10]:<10}{c.name[:22]:<23}"
+                  f"{c.disposal_type:<13}{when:<12}"
+                  f"satış {c.proceeds:>11,.2f}  qalıq {c.disposed:>11,.2f}"
+                  f"  fərq {c.gain_loss:>11,.2f}")
+
     print("\n  Aylıq amortizasiya (illik / 12):")
     for i, mm in enumerate(r.monthly):
         print(f"    {MONTHS_AZ[i]:<10}{mm:>12,.2f}", end="\n" if (i + 1) % 3 == 0 else "")

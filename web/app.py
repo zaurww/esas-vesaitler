@@ -129,6 +129,17 @@ def serialize(r) -> dict:
              "residual": m(c.disposed), "gain_loss": m(c.gain_loss)}
             for c in r.disposed_cards
         ],
+        # The figures that leave this program for the profit return (§12.1).
+        # Built in the engine, not assembled in the page: the console and the
+        # workbook print the same list, and three copies would drift.
+        "declaration": [
+            {"article": ln.article, "label_az": ln.label_az,
+             "amount": m(ln.amount), "effect": ln.effect}
+            for ln in r.declaration
+        ],
+        "declaration_deducted": m(r.declaration_deducted),
+        "declaration_income": m(r.declaration_income),
+        "declaration_net": m(r.declaration_net),
         "monthly": [m(v) for v in r.monthly],
         "warnings": r.warnings,
         "open_questions": r.open_questions,

@@ -274,6 +274,7 @@
   <div class="toolbar">
     <div class="tabs" role="tablist">
       <button role="tab" data-tab="annual" aria-selected="true">İllik hesabat</button>
+      <button role="tab" data-tab="declaration" aria-selected="false">Bəyannamə</button>
       <button role="tab" data-tab="monthly" aria-selected="false">Aylıq</button>
       <button role="tab" data-tab="repair" aria-selected="false">Təmir (m.115)</button>
       <button role="tab" data-tab="norms" aria-selected="false">Normalar</button>
@@ -506,11 +507,13 @@ function render(){
     TAB === 'monthly' ? 'İllik məbləğ / 12 · yuvarlaqlaşdırma qalığı dekabrda'
     : TAB === 'annual' ? 'Sətrə klikləyin — hesablamanın gedişi'
     : TAB === 'threshold' ? 'VM m.114.8 · qərar birdəfəlik, bütün seçilmişlərə'
+    : TAB === 'declaration' ? 'Mənfəət vergisi bəyannaməsinə köçürülən məbləğlər'
     : '';
 
   renderSide(d);
   document.getElementById('view').innerHTML =
     TAB === 'annual' ? viewAnnual(d) : TAB === 'monthly' ? viewMonthly(d)
+    : TAB === 'declaration' ? viewDeclaration(d)
     : TAB === 'repair' ? viewRepair(d)
     : TAB === 'threshold' ? viewThreshold(d)
     : TAB === 'norms' ? '<div class="card" style="padding:16px">yüklənir…</div>'
@@ -1057,18 +1060,46 @@ function viewMonthly(d){
     <th class="num">C Ə M İ</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
 }
 
-function viewNotes(d){
-  let h = '';
-  if (d.warnings.length){
-    h += '<h3>Xəbərdarlıqlar</h3>' +
-      d.warnings.map(w => `<div class="note">${esc(w)}</div>`).join('');
-  }
-  if (d.open_questions.length){
-    h += '<h3>Həll olunmamış suallar (CLAUDE.md §12)</h3>' +
-      d.open_questions.map(w => `<div class="note q">${esc(w)}</div>`).join('');
-  }
+/* Every figure that leaves this program for the profit return, in one place.
+   They all existed before -- depreciation in the headline tiles, the repair
+   deduction on its own tab, the 114.8 write-off in a tile named after the test
+   instead of after what it does, and 114.7/114.9 down among the warnings. The
+   accountant still had to assemble the answer to "what do I put in the return"
+   out of four screens, which is what §12.1 meant by "computed but not filed".
+
+   The list comes from the engine, not from here: the console and the workbook
+   print the same one (§5.1 -- named once, or it drifts). */
+const DECL_TAB = {'m.114':'annual', 'm.115.1':'repair', 'm.114.8':'threshold'};
+
+function viewDeclaration(d){
+  const net = parseFloat(d.declaration_net);
+  const rows = d.declaration.map(ln => {
+    const to = DECL_TAB[ln.article];
+    // The working behind a figure is one click away: a number in a return is
+    // worth exactly as much as the ability to show where it came from (§2).
+    return `<tr${to ? ` class="asset" onclick="TAB='${to}';syncTabs();render()"` : ''}>
+      <td><span class="tag d">${esc(ln.article)}</span></td>
+      <td>${esc(ln.label_az)}${to ? ' <span class="hint">→ hesablanması</span>' : ''}</td>
+      <td class="num"><strong>${money(ln.amount)}</strong></td>
+      <td style="color:${ln.effect === 'income' ? 'var(--neg)' : 'var(--pos)'}">
+        ${ln.effect === 'income' ? 'gəlirə əlavə edilir' : 'gəlirdən çıxılır'}</td></tr>`;
+  }).join('');
+
+  let h = `<div class="kpis">
+      <div class="kpi hi"><div class="k">Gəlirdən çıxılır</div>
+        <div class="v">${fmt.format(parseFloat(d.declaration_deducted))}</div></div>
+      <div class="kpi"><div class="k">Gəlirə əlavə edilir</div>
+        <div class="v">${fmt.format(parseFloat(d.declaration_income))}</div></div>
+      <div class="kpi"><div class="k">Vergi tutulan gəlirə təsir</div>
+        <div class="v" style="color:${net > 0 ? 'var(--neg)' : 'var(--pos)'}">
+          ${net > 0 ? '+' : ''}${fmt.format(net)}</div></div>
+    </div>
+    <div class="card" style="margin-top:12px"><div class="scroll"><table><thead><tr>
+      <th>Maddə</th><th>Nə</th><th class="num">Məbləğ</th><th>Təsir</th>
+      </tr></thead><tbody>${rows}</tbody></table></div></div>`;
+
   if (d.disposals.length){
-    h += `<h3>Təqdim edilmədən gəlir / zərər — m.114.7, m.114.9</h3>
+    h += `<h3>Təqdim edilmə — m.114.7 / m.114.9 üzrə fərq</h3>
       <div class="card"><div class="scroll"><table><thead><tr>
         <th>İnv.№</th><th>Adı</th><th>Tarix</th><th>Növ</th>
         <th class="num">Satış məbləği</th><th class="num">Qalıq dəyər</th>
@@ -1079,19 +1110,34 @@ function viewNotes(d){
             <td class="d">${esc(c.date)}</td><td>${esc(c.type)}</td>
             <td class="num">${money(c.proceeds)}</td>
             <td class="num">${money(c.residual)}</td>
-            <td class="num" style="color:${g>0?'var(--pos)':g<0?'var(--neg)':'inherit'}">
+            <td class="num" style="color:${g>0?'var(--neg)':g<0?'var(--pos)':'inherit'}">
               ${g>0?'+':''}${money(c.gain_loss)}</td></tr>`;
         }).join('')}</tbody></table></div></div>
-      <div class="kpis" style="margin-top:12px">
-        <div class="kpi"><div class="k">m.114.7 — gəlirə əlavə</div>
-          <div class="v">${fmt.format(parseFloat(d.disposal_gain))}</div></div>
-        <div class="kpi"><div class="k">m.114.9 — gəlirdən çıxılır</div>
-          <div class="v">${fmt.format(parseFloat(d.disposal_loss))}</div></div>
-      </div>
-      <div class="note q">Bu məbləğlər amortizasiyaya <strong>daxil deyil</strong> —
-        bəyannamədə ayrıca sətirlərdir. Qalıq dəyər m.114.6-ya görə onsuz da
-        kateqoriyanın bazasından çıxılıb.</div>`;
+      <div class="note q">Fərq amortizasiyaya <strong>daxil deyil</strong> —
+        bəyannamədə ayrıca sətirlərdir. Qalıq dəyərin özü m.114.6-ya görə onsuz da
+        kateqoriyanın amortizasiya bazasından çıxılıb, ona görə burada ikinci dəfə
+        sayılmır.</div>`;
   }
+  h += `<div class="note">Bu siyahı proqramın verdiyi hər şeydir. Yuxarıdakı
+      cədvəllər — həmin rəqəmlərin necə alındığıdır, bəyannaməyə isə bunlar köçürülür.
+      <br>engine ${esc(d.engine_version)} · format v${d.format_version}${
+      d.is_closed ? ' · <strong>il bağlıdır</strong>' : ''}</div>`;
+  return h;
+}
+
+function viewNotes(d){
+  let h = '';
+  if (d.warnings.length){
+    h += '<h3>Xəbərdarlıqlar</h3>' +
+      d.warnings.map(w => `<div class="note">${esc(w)}</div>`).join('');
+  }
+  if (d.open_questions.length){
+    h += '<h3>Həll olunmamış suallar (CLAUDE.md §12)</h3>' +
+      d.open_questions.map(w => `<div class="note q">${esc(w)}</div>`).join('');
+  }
+  // The disposal difference used to be printed here, among the warnings. It is
+  // not a note about the calculation, it is one of its results, so it moved to
+  // the «Bəyannamə» tab with the rest of them.
   const n = k => fmt.format(parseFloat(d.totals[k]));
   h += `<h3>Yoxlama</h3><div class="card" style="padding:14px">
     Balans eyniliyi: qalıq(əvvəl) + daxilolma + dəyər artımı + kapitallaşan təmir
@@ -1508,7 +1554,7 @@ async function showHistory(id){
           <div class="hint">${esc(a.category_name)}
             ${a.in_date ? '· alınıb ' + esc(a.in_date) : ''}
             ${a.counterparty ? '· ' + esc(a.counterparty) : ''}</div></div>
-        <button class="ghost" onclick="TAB='annual';render()">← hesabata qayıt</button>
+        <button class="ghost" onclick="TAB='annual';syncTabs();render()">← hesabata qayıt</button>
       </div>
       <div class="kpis" style="margin:14px 0 0">
         <div class="kpi"><div class="k">İlkin dəyər</div>
@@ -2105,9 +2151,15 @@ function confirmDelete(card){
     d => post('asset.delete', d), 'Sil');
 }
 
+/* The tab strip follows TAB rather than the other way round, so a jump made
+   from inside a view (a declaration line to the table behind it) does not
+   leave the strip pointing at the tab the reader just left. */
+function syncTabs(){
+  document.querySelectorAll('.tabs button').forEach(
+    x => x.setAttribute('aria-selected', String(x.dataset.tab === TAB)));
+}
 document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
-  document.querySelectorAll('.tabs button').forEach(x => x.setAttribute('aria-selected','false'));
-  b.setAttribute('aria-selected','true'); TAB = b.dataset.tab; render();
+  TAB = b.dataset.tab; syncTabs(); render();
 });
 document.getElementById('filter').oninput = e => { FILTER = e.target.value.trim().toLowerCase(); render(); };
 document.addEventListener('keydown', e => {

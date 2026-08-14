@@ -51,6 +51,73 @@ def _widths(ws, widths: list[int]) -> None:
         ws.column_dimensions[get_column_letter(i)].width = w
 
 
+def _sheet_declaration(wb: Workbook, r: YearResult) -> None:
+    """The figures that leave this program for the profit return (§12.1).
+
+    The first sheet in the book on purpose: it is the answer, and every sheet
+    after it is the working behind one of these five lines. The list itself is
+    built in the engine, so this sheet, the console and the web report cannot
+    come to disagree about what the program's output actually is.
+    """
+    ws = wb.create_sheet("Bəyannamə")
+    ws["A1"] = f"{r.client_name} — VÖEN {r.voen}"
+    ws["A1"].font = Font(bold=True, size=14)
+    ws["A2"] = (f"{r.year} ili · mənfəət vergisi bəyannaməsinə köçürülən "
+                f"məbləğlər · engine {r.engine_version} · "
+                f"format v{r.format_version}")
+    ws["A2"].font = Font(size=9, color="5A6B80")
+
+    _header(ws, 4, ["Maddə", "Nə", "Məbləğ", "Təsir"])
+    row = 5
+    for ln in r.declaration:
+        vals = [ln.article, ln.label_az, _f(ln.amount),
+                "gəlirə əlavə edilir" if ln.effect == "income"
+                else "gəlirdən çıxılır"]
+        for i, v in enumerate(vals, start=1):
+            c = ws.cell(row, i, v)
+            c.border = BORDER
+            if i == 3:
+                c.number_format = MONEY
+        row += 1
+
+    row += 1
+    for label, value in (("Gəlirdən çıxılır — cəmi", r.declaration_deducted),
+                         ("Gəlirə əlavə edilir — cəmi", r.declaration_income),
+                         ("Vergi tutulan gəlirə təsir", r.declaration_net)):
+        ws.cell(row, 2, label).font = Font(bold=True)
+        c = ws.cell(row, 3, _f(value))
+        c.number_format, c.fill, c.font = MONEY, TOTAL_FILL, Font(bold=True)
+        row += 1
+
+    if r.disposed_cards:
+        row += 2
+        ws.cell(row, 1, "Təqdim edilmə — m.114.7 / m.114.9 üzrə fərq") \
+          .font = Font(bold=True, size=11)
+        row += 1
+        _header(ws, row, ["İnv.№", "Adı", "Tarix", "Növ", "Satış məbləği",
+                          "Qalıq dəyər", "Fərq"])
+        row += 1
+        for c in r.disposed_cards:
+            vals = [c.inv_no, c.name,
+                    c.disposal_date.isoformat() if c.disposal_date else "",
+                    c.disposal_type, _f(c.proceeds), _f(c.disposed),
+                    _f(c.gain_loss)]
+            for i, v in enumerate(vals, start=1):
+                cell = ws.cell(row, i, v)
+                cell.border = BORDER
+                if i >= 5:
+                    cell.number_format = MONEY
+            row += 1
+        ws.cell(row + 1, 1,
+                "Fərq amortizasiyaya daxil deyil — bəyannamədə ayrıca "
+                "sətirlərdir. Qalıq dəyərin özü m.114.6-ya görə onsuz da "
+                "amortizasiya bazasından çıxılıb.") \
+          .font = Font(italic=True, size=9, color="5A6B80")
+
+    ws.freeze_panes = "A5"
+    _widths(ws, [14, 34, 16, 22, 16, 16, 16])
+
+
 def _sheet_summary(wb: Workbook, r: YearResult) -> None:
     ws = wb.create_sheet("Xülasə")
     ws["A1"] = f"{r.client_name} — VÖEN {r.voen}"
@@ -88,33 +155,9 @@ def _sheet_summary(wb: Workbook, r: YearResult) -> None:
     ws.freeze_panes = "A5"
     _widths(ws, [34, 10, 18, 16, 16, 16, 16, 18, 18])
 
-    if r.disposed_cards:
-        row += 3
-        ws.cell(row, 1, "Təqdim edilmədən gəlir / zərər — m.114.7, m.114.9")             .font = Font(bold=True, size=11)
-        row += 1
-        _header(ws, row, ["İnv.№", "Adı", "Tarix", "Növ", "Satış məbləği",
-                          "Qalıq dəyər", "Fərq"])
-        row += 1
-        for c in r.disposed_cards:
-            vals = [c.inv_no, c.name,
-                    c.disposal_date.isoformat() if c.disposal_date else "",
-                    c.disposal_type, _f(c.proceeds), _f(c.disposed),
-                    _f(c.gain_loss)]
-            for i, v in enumerate(vals, start=1):
-                cell = ws.cell(row, i, v)
-                cell.border = BORDER
-                if i >= 5:
-                    cell.number_format = MONEY
-            row += 1
-        for label, value in (("m.114.7 — gəlirə əlavə edilir", r.disposal_gain),
-                             ("m.114.9 — gəlirdən çıxılır", r.disposal_loss)):
-            ws.cell(row, 1, label).font = Font(bold=True)
-            cell = ws.cell(row, 7, _f(value))
-            cell.number_format, cell.fill, cell.font = MONEY, TOTAL_FILL, Font(bold=True)
-            row += 1
-        ws.cell(row + 1, 1,
-                "Bu məbləğlər amortizasiyaya daxil deyil — bəyannamədə ayrıca "
-                "sətirlərdir.").font = Font(italic=True, size=9, color="5A6B80")
+    # The disposal difference used to be repeated here. It belongs to the
+    # return rather than to the movement of the categories, so it lives on the
+    # «Bəyannamə» sheet now, next to the other four figures that go with it.
 
     row += 3
     ws.cell(row, 1, "Dərəcənin hesablanması").font = Font(bold=True, size=11)
@@ -381,6 +424,7 @@ def _sheet_notes(wb: Workbook, r: YearResult) -> None:
 def build_workbook(r: YearResult, counterparty: dict | None = None) -> bytes:
     wb = Workbook()
     wb.remove(wb.active)
+    _sheet_declaration(wb, r)
     _sheet_summary(wb, r)
     _sheet_cards(wb, r, counterparty)
     _sheet_movement(wb, r)
