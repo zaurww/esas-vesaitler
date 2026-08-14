@@ -1320,6 +1320,21 @@ const catOptions = sel => CTX.categories.filter(c => !c.code.startsWith('qma'))
   .map(c => `<option value="${c.code}" ${c.code === sel ? 'selected' : ''}>
     ${esc(c.name_az)}</option>`).join('');
 
+/* What the batch actually costs, under the field where the count is typed.
+   The accountant knows the invoice total already; showing ours next to it
+   turns "did I type the unit price or the total?" into a glance -- the same
+   reasoning as the totals row under the paste grid (§11.2). */
+function batchTotal(){
+  const box = document.getElementById('batchsum');
+  if (!box) return;
+  const f = document.getElementById('mform');
+  const say = parseInt(f.say && f.say.value, 10);
+  const cost = parseFloat(f.cost && f.cost.value);
+  box.innerHTML = (say > 1 && cost > 0)
+    ? `<strong>${say} × ${fmt.format(cost)} = ${fmt.format(say * cost)}</strong> AZN`
+    : '—';
+}
+
 /* ---- asset: new / carried over / group pool ---- */
 function formAsset(card){
   const edit = !!card;
@@ -1359,6 +1374,22 @@ function formAsset(card){
                 ? 'Məlum deyilsə boş buraxın — onda 500/5% testinin yalnız 500 AZN hissəsi işləyəcək.'
                 : ''});
       h += fld('counterparty','Kontragent',{value:card&&card.counterparty});
+      // Buying the same thing many times over. One card per object is not
+      // tidiness: m.114.8 tests each object separately, so 240 refrigerators
+      // at 400 AZN fall under the threshold one by one, while a single
+      // 96 000 AZN line never would.
+      if (!edit){
+        h += `<div class="row2">
+          <div class="fld"><label>Say</label>
+            <input name="say" type="number" min="1" step="1" value="1">
+            <div class="h">Eyni əşyadan neçə ədəd alınıb. Hər ədəd üçün
+              <strong>ayrıca kart</strong> yaradılır — m.114.8 həddi hər obyekt
+              üzrə ayrıca yoxlanılır.</div></div>
+          <div class="fld"><label>Cəmi</label>
+            <div id="batchsum" class="h" style="font-size:14px;padding-top:9px">—</div>
+            <div class="h">«İlkin dəyər» və «Qalıq dəyər» — bir ədəd üçündür.
+              İnv.№-lər ardıcıl verilir.</div></div></div>`;
+      }
     } else {
       h += fld('name','Adı',{placeholder:'avtomatik: «kateqoriya — qrup qalığı»',
               hint:'Kartsız qrup qalığı: inventar nömrəsi, tarix və ilkin dəyər olmur. '
@@ -1393,6 +1424,10 @@ function formAsset(card){
     openModal(edit ? `ƏV redaktəsi — ${card.inv_no || card.name}` : 'Yeni ƏV', h,
       d => post(edit ? 'asset.update' : 'asset.create', d),
       edit ? 'Yadda saxla' : 'Əlavə et');
+    // Assigned rather than added: render() runs again on every mode switch,
+    // and addEventListener would stack a handler each time.
+    document.getElementById('mbody').oninput = batchTotal;
+    batchTotal();
   };
   window.ASSETMODE = m => { mode = m; render(); };
   render();
