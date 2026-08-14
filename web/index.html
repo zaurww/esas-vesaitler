@@ -104,6 +104,34 @@
   .tag.w{background:var(--warn-bg); color:var(--warn-ink); border:1px solid var(--warn-line)}
   .tag.d{background:#eee; color:#555}
   .zero{color:#b6bfcb}
+  /* paste grid: inputs sit flush in the cells so it reads as a sheet, which
+     is what the user is copying from */
+  .scroll.imp.grid table{table-layout:fixed; min-width:900px}
+  .scroll.imp.grid td{padding:0}
+  .scroll.imp.grid td input,
+  .scroll.imp.grid td select{
+    width:100%; border:0; border-radius:0; padding:6px 8px;
+    font-size:13px; background:transparent;
+  }
+  .scroll.imp.grid td input:focus,
+  .scroll.imp.grid td select:focus{
+    outline:2px solid var(--accent); outline-offset:-2px; background:#fff;
+  }
+  .scroll.imp.grid th:first-child,
+  .scroll.imp.grid td:first-child{width:86px}
+  /* totals stay put while the rows scroll -- the whole point is to compare
+     them against the Excel total without hunting for them */
+  .scroll.imp.grid tfoot td{
+    position:sticky; bottom:0; background:#eceff4; font-weight:700;
+    padding:7px 8px; border-top:2px solid var(--line);
+  }
+  .scroll.imp.grid td input.badnum{background:var(--warn-bg); font-weight:600}
+  .badtag{
+    display:inline-block; font-size:11px; font-weight:600; padding:1px 7px;
+    border-radius:99px; background:var(--warn-bg); color:var(--warn-ink);
+    border:1px solid var(--warn-line);
+  }
+
   /* rate history: only drawn when a category has more than one row, so the
      table stays flat in the normal case */
   tr.hist td{background:#fbfcfe; border-top:0; padding-top:2px; padding-bottom:2px}
@@ -1293,7 +1321,8 @@ const IMP_LABELS = {
 const IMP_REQUIRED = ['name','category'];
 
 function formImport(){
-  IMP = {step:1, header:[], rows:[], map:{}, catmap:{}, year:REPORT.year, fields:[]};
+  IMP = {step:1, header:[], rows:[], map:{}, catmap:{}, year:REPORT.year,
+         fields:[], grid:null, back:null};
   impRender();
 }
 
@@ -1327,7 +1356,15 @@ function impRender(){
       <input type="file" id="impfile" accept=".xlsx,.csv,.tsv,.txt"></div>
     <div class="h">Birinci sətir sütun adları olmalıdır.
       Müştəridə cədvəl yoxdursa —
-      <a href="/api/import-template">hazır şablonu yükləyib</a> ona göndərin.</div>`,
+      <a href="/api/import-template">hazır şablonu yükləyib</a> ona göndərin.</div>
+    <hr style="border:0;border-top:1px solid var(--line);margin:16px 0">
+    <div class="fld"><label>Sütunlar tanınmırsa</label>
+      <div class="h" style="margin:0 0 8px">Cədvəli bütöv gətirmək əvəzinə
+        hazır sütunları <strong>bir-bir doldurun</strong>: Excel-də bir sütunu
+        seçib köçürün və buradakı müvafiq sütuna yapışdırın. Uyğunlaşdırma
+        addımı olmur — hara yapışdırdınız, ora düşür.</div>
+      <button type="button" class="btn" onclick="impGrid()"
+        >⌗ Sütun-sütun doldurun</button></div>`,
     'Davam et');
   MSUBMIT = async () => {
     const f = document.getElementById('impfile').files[0];
@@ -1452,6 +1489,220 @@ const impPayload = () => IMP.rows.map(r => {
 });
 
 /* ---- step 3: plain-language check ---- */
+/* ---- alternative to step 2: fixed columns, filled one paste at a time ----
+
+   The mapping step exists because a client's sheet has whatever columns it
+   has. When that guessing goes wrong it is genuinely hard to recover from --
+   so this offers the other direction: the columns are ours and fixed, and the
+   user says where a column of values belongs by pasting it there. Nothing to
+   map, nothing to guess.
+
+   Excel puts TSV on the clipboard, so a rectangular selection pastes as a
+   rectangle here. The whole grid is just a way of building the same `rows`
+   payload the file import already sends, which is why it can jump straight
+   to the shared preview. */
+const GRID_COLS = ['category','inv_no','name','in_date','cost',
+                   'opening_residual','counterparty'];
+
+function impGrid(rows){
+  IMP.step = 2; IMP.back = impGrid;
+  const data = rows || IMP.grid || [];
+  while (data.length < 15) data.push(GRID_COLS.map(() => ''));
+  IMP.grid = data;
+
+  const cell = (r, c) => GRID_COLS[c] === 'category'
+    ? `<select data-r="${r}" data-c="${c}">${
+        impCats().map(k => `<option value="${k.code}"
+          ${data[r][c] === k.code ? 'selected' : ''}>${esc(k.code)}</option>`).join('')
+      }</select>`
+    : `<input data-r="${r}" data-c="${c}" value="${val(data[r][c])}"
+        ${GRID_COLS[c] === 'in_date' ? 'placeholder="GG.AA.YYYY"' : ''}>`;
+
+  impBox(2, `
+    <div class="note">Excel-də <strong>bir sütunu</strong> seçin →
+      <kbd>Ctrl+C</kbd> → burada həmin sütunun birinci xanasına
+      <kbd>Ctrl+V</kbd>. Bir neçə sütunu birdən də yapışdıra bilərsiniz.
+      Boş sətirlər nəzərə alınmır.</div>
+    <div style="display:flex;gap:10px;align-items:flex-end;margin-bottom:10px">
+      <div class="fld" style="margin:0">
+        <label>Bütün sətirlərin kateqoriyası</label>
+        <select onchange="impGridAllCats(this.value)">
+          <option value="">— dəyişmə —</option>
+          ${impCats().map(k => `<option value="${k.code}">${esc(k.code)} · ${esc(k.name_az)}</option>`).join('')}
+        </select></div>
+      <div class="fld" style="margin:0;max-width:150px">
+        <label>Qalıq hansı ilin əvvəlinə</label>
+        <input id="gridyear" type="number" value="${IMP.year}"
+          onchange="IMP.year = parseInt(this.value,10) || IMP.year"></div>
+      <button type="button" class="ghost" style="padding:9px 14px"
+        onclick="impGridAdd(20)">+ 20 sətir</button>
+    </div>
+    <div class="scroll imp grid" style="max-height:40vh" id="gridwrap"
+      onpaste="return impGridPaste(event)" oninput="impGridTotals()">
+      <table><thead><tr><th>Kat.</th><th>İnv.№</th><th>Adı *</th>
+        <th>Alış tarixi</th><th class="num">İlkin dəyər</th>
+        <th class="num">Qalıq (${IMP.year} əvvəlinə)</th>
+        <th>Kontragent</th></tr></thead><tbody id="gridbody">${
+        data.map((row, r) => `<tr>${row.map((_, c) =>
+          `<td>${cell(r, c)}</td>`).join('')}</tr>`).join('')}</tbody>
+      <tfoot><tr>
+        <td colspan="4" id="gridcount"></td>
+        <td class="num" id="gridsumcost"></td>
+        <td class="num" id="gridsumres"></td>
+        <td id="gridbad"></td></tr></tfoot></table></div>
+    <div class="h">«Adı» məcburidir. «İlkin dəyər» olmadan 500/5% testinin
+      yalnız məbləğ hissəsi işləyəcək — bilirsinizsə, yazın.<br>
+      Cəmi sətri Excel-dəki cəmi ilə tutuşdurun — sütun düz düşübsə,
+      rəqəmlər üst-üstə düşməlidir.</div>`,
+    'Baxış', () => impRender());
+  impGridTotals();
+
+  MSUBMIT = async () => {
+    impGridRead();
+    if (!IMP.grid.some(impGridFilled))
+      throw new Error('Heç bir sətir doldurulmayıb');
+    IMP.rows = IMP.grid.filter(impGridFilled);
+    IMP.map = {}; GRID_COLS.forEach((f, i) => { IMP.map[f] = i; });
+    IMP.catmap = {};
+    await impPreview();
+    throw new Error(STAY);
+  };
+}
+
+/* The point of pasting a whole column is that you already know its total from
+   Excel. Showing ours under the column turns "did it land right?" into a
+   glance instead of a scroll.
+
+   These rules mirror mutate._normalise_number deliberately, including its
+   refusal to guess at "1,234". The engine stays the authority -- the preview
+   step re-parses everything server-side before anything is written -- so if
+   the two ever disagree, the cell is marked here rather than quietly dropped
+   from the sum, which is the only way a wrong total could look right. */
+function impGridNum(raw){
+  let s = String(raw == null ? '' : raw)
+    .replace(/[\s  '`]/g, '').replace(/AZN|azn|₼/g, '');
+  if (!s) return null;                       // empty is not an error
+  const neg = s.startsWith('-');
+  s = s.replace(/^[+-]/, '');
+  const commas = (s.match(/,/g) || []).length;
+  const dots = (s.match(/\./g) || []).length;
+  if (commas && dots){
+    s = s.lastIndexOf(',') > s.lastIndexOf('.')
+      ? s.replace(/\./g, '').replace(',', '.')
+      : s.replace(/,/g, '');
+  } else if (commas > 1){
+    s = s.replace(/,/g, '');
+  } else if (commas === 1){
+    const head = s.slice(0, s.indexOf(','));
+    const tail = s.slice(s.indexOf(',') + 1);
+    if (tail.length === 3 && /\d$/.test(head)) return NaN;     // ambiguous
+    s = s.replace(',', '.');
+  } else if (dots > 1){
+    s = s.replace(/\./g, '');
+  }
+  if (!/^\d+(\.\d+)?$/.test(s)) return NaN;
+  // A negative cost or residual is refused by the engine, so it must not be
+  // quietly folded into a total the user is about to trust.
+  if (neg) return NaN;
+  return parseFloat(s);
+}
+
+/* A row counts as filled only on its own content. The category column never
+   qualifies: it is a dropdown, so it always holds a value, and "apply to all
+   rows" would otherwise turn every blank line into a row. The engine draws
+   the same line -- it skips a line with neither name nor inv_no. */
+const GRID_SELF = GRID_COLS.map((f, i) => i).filter(i => GRID_COLS[i] !== 'category');
+const impGridFilled = row => GRID_SELF.some(i => String(row[i] ?? '').trim());
+
+function impGridTotals(){
+  if (!document.getElementById('gridcount')) return;
+  impGridRead();
+  const ci = GRID_COLS.indexOf('cost'), ri = GRID_COLS.indexOf('opening_residual');
+  const ni = GRID_COLS.indexOf('name');
+  let rows = 0, noName = 0, sum = {[ci]: 0, [ri]: 0}, bad = {[ci]: 0, [ri]: 0};
+  IMP.grid.forEach((row, r) => {
+    if (!impGridFilled(row)) return;
+    rows++;
+    if (!String(row[ni]).trim()) noName++;
+    for (const c of [ci, ri]){
+      const v = impGridNum(row[c]);
+      if (v === null) continue;
+      if (Number.isNaN(v)) bad[c]++; else sum[c] += v;
+      const el = document.querySelector(`#gridbody [data-r="${r}"][data-c="${c}"]`);
+      if (el) el.classList.toggle('badnum', Number.isNaN(v));
+    }
+  });
+  const cell = (id, c) => {
+    document.getElementById(id).innerHTML = rows
+      ? fmt.format(sum[c]) + (bad[c] ? ` <span class="badtag">+${bad[c]}?</span>` : '')
+      : '';
+  };
+  document.getElementById('gridcount').textContent =
+    rows ? `Cəmi: ${rows} sətir` : '';
+  cell('gridsumcost', ci);
+  cell('gridsumres', ri);
+  const problems = [];
+  if (noName) problems.push(`${noName} sətirdə ad yoxdur`);
+  if (bad[ci] + bad[ri]) problems.push(`${bad[ci] + bad[ri]} rəqəm oxunmur`);
+  document.getElementById('gridbad').innerHTML = problems.length
+    ? `<span class="badtag">${esc(problems.join('; '))}</span>` : '';
+}
+
+/* Read the DOM back into IMP.grid so edits survive a re-render or a trip to
+   the preview and back. */
+function impGridRead(){
+  for (const el of document.querySelectorAll('#gridbody [data-r]'))
+    IMP.grid[+el.dataset.r][+el.dataset.c] = el.value;
+}
+
+function impGridAdd(n){
+  impGridRead();
+  for (let i = 0; i < n; i++) IMP.grid.push(GRID_COLS.map(() => ''));
+  impGrid(IMP.grid);
+}
+
+function impGridAllCats(code){
+  if (!code) return;
+  impGridRead();
+  const c = GRID_COLS.indexOf('category');
+  IMP.grid.forEach(r => { r[c] = code; });
+  impGrid(IMP.grid);
+}
+
+function impGridPaste(e){
+  const el = e.target;
+  if (!el.dataset || el.dataset.r == null) return true;
+  const text = (e.clipboardData || window.clipboardData).getData('text');
+  if (!text) return true;
+  const block = text.replace(/\r\n?/g, '\n').replace(/\n+$/, '')
+                    .split('\n').map(l => l.split('\t'));
+  // A single value is an ordinary paste -- let the browser do it.
+  if (block.length === 1 && block[0].length === 1) return true;
+  e.preventDefault();
+
+  impGridRead();
+  const r0 = +el.dataset.r, c0 = +el.dataset.c;
+  while (IMP.grid.length < r0 + block.length)
+    IMP.grid.push(GRID_COLS.map(() => ''));
+  block.forEach((line, i) => line.forEach((v, j) => {
+    const c = c0 + j;
+    if (c >= GRID_COLS.length) return;          // wider than the grid: ignore
+    IMP.grid[r0 + i][c] = GRID_COLS[c] === 'category'
+      ? impGridCat(v) : v.trim();
+  }));
+  impGrid(IMP.grid);
+  return false;
+}
+
+/* A pasted category may be our code, or the Azerbaijani name from their
+   sheet. Anything else is left for the preview to reject by name. */
+function impGridCat(v){
+  const s = String(v).trim().toLowerCase();
+  const hit = impCats().find(k => k.code.toLowerCase() === s
+                              || k.name_az.toLowerCase() === s);
+  return hit ? hit.code : s;
+}
+
 async function impPreview(){
   IMP.step = 3;
   const rep = (await post('asset.import',
@@ -1483,11 +1734,12 @@ async function impPreview(){
         <td class="num">${r.cost ? money(r.cost) : ''}</td>
         <td class="num">${r.residual ? money(r.residual) : ''}</td>
         <td>${r.ok ? '✓' : esc(r.message)}</td></tr>`).join('')}</tbody></table></div>`,
-    bad ? 'Sütunlara qayıt' : `Bəli, ${rep.created} ƏV idxal et`,
-    () => impColumns());
+    bad ? (IMP.back === impGrid ? 'Cədvələ qayıt' : 'Sütunlara qayıt')
+        : `Bəli, ${rep.created} ƏV idxal et`,
+    () => (IMP.back || impColumns)());
 
   MSUBMIT = async () => {
-    if (bad){ impColumns(); throw new Error(STAY); }
+    if (bad){ (IMP.back || impColumns)(); throw new Error(STAY); }
     await post('asset.import', {rows: impPayload(), opening_year: IMP.year});
   };
 }

@@ -49,8 +49,23 @@ HEADERS: dict[str, list[str]] = {
 }
 
 
+def one_segment(slug: str) -> str:
+    """A client slug names ONE folder under clients/ and nothing else.
+
+    Every action carries the slug in from the request, so without this a
+    crafted value ("../..") would address a path outside the store. Only
+    traversal is refused here, not slug shape: folders created before
+    slugify was applied on import are odd-looking but harmless, and
+    breaking access to an existing client is worse than an ugly name.
+    """
+    s = str(slug or "").strip()
+    if not s or s in (".", "..") or "/" in s or "\\" in s or Path(s).is_absolute():
+        raise DataError(f"müştəri adı yolverilməzdir: {slug!r}")
+    return s
+
+
 def mutate_folder(root: Path, slug: str) -> Path:
-    f = root / "clients" / slug
+    f = root / "clients" / one_segment(slug)
     if not f.is_dir():
         raise DataError(f"müştəri tapılmadı: {slug}")
     return f
@@ -132,14 +147,70 @@ def guard_open_year(root: Path, slug: str, year: int) -> None:
         )
 
 
-def dec(value: Any, field: str, *, allow_zero: bool = True) -> str:
+_NUM_NOISE = re.compile(r"[\s  '`]|AZN|azn|₼")
+
+
+def _normalise_number(raw: str, field: str) -> str:
+    """Turn what Excel puts on the clipboard into something Decimal accepts.
+
+    A pasted money column arrives as the user SEES it -- "1 234,56" here,
+    "1,234.56" on an English machine, with non-breaking spaces for grouping.
+    Rejecting all of that would make pasting useless, but guessing is worse:
+    "1,234" is 1234 in one locale and 1.234 in the other, and quietly picking
+    one would store a number a thousand times off. So the unambiguous shapes
+    are accepted and the one genuinely ambiguous shape is refused out loud
+    (§2.1).
+    """
+    s = _NUM_NOISE.sub("", raw)
+    if not s:
+        return "0"
+    neg = s.startswith("-")
+    s = s.lstrip("+-")
+    commas, dots = s.count(","), s.count(".")
+
+    if commas and dots:
+        # Both present: whichever comes last is the decimal separator.
+        if s.rfind(",") > s.rfind("."):
+            s = s.replace(".", "").replace(",", ".")
+        else:
+            s = s.replace(",", "")
+    elif commas > 1:
+        s = s.replace(",", "")                     # 1,234,567 -- grouping
+    elif commas == 1:
+        head, _, tail = s.partition(",")
+        if len(tail) == 3 and head[-1:].isdigit():
+            raise DataError(
+                f"{field}: {raw.strip()!r} birmənalı deyil — «,» burada həm "
+                f"onluq ayırıcı (1,234 = 1.234), həm də minlik ayırıcı "
+                f"(1,234 = 1234) ola bilər. Onluq hissəni nöqtə ilə yazın."
+            )
+        s = s.replace(",", ".")
+    elif dots > 1:
+        s = s.replace(".", "")                     # 1.234.567 -- grouping
+
     try:
-        d = D(str(value).replace(",", ".").strip() or "0")
+        d = D(("-" if neg else "") + s)
+    except InvalidOperation:
+        raise DataError(f"{field}: rəqəm deyil — {raw.strip()!r}") from None
+    return str(d)
+
+
+def dec(value: Any, field: str, *, allow_zero: bool = True) -> str:
+    raw = str(value).strip()
+    try:
+        d = D(_normalise_number(raw, field) if raw else "0")
     except InvalidOperation:
         raise DataError(f"{field}: rəqəm deyil — {value!r}") from None
     if d < 0 or (not allow_zero and d == 0):
         raise DataError(f"{field}: mənfi və ya sıfır ola bilməz — {d}")
     return f"{d:.2f}"
+
+
+# Day first, because that is how the date is written here and in the source
+# workbooks. Deliberately NOT accepting %m/%d/%Y: "03/05/2023" would then be
+# two different dates depending on which pattern matched first, and nothing in
+# the cell says which was meant.
+_DATE_FORMATS = ("%Y-%m-%d", "%d.%m.%Y", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d")
 
 
 def iso_date(value: Any, field: str, *, required: bool = True) -> str:
@@ -148,10 +219,21 @@ def iso_date(value: Any, field: str, *, required: bool = True) -> str:
         if required:
             raise DataError(f"{field}: tarix tələb olunur")
         return ""
-    try:
-        d = datetime.strptime(v, "%Y-%m-%d").date()
-    except ValueError:
-        raise DataError(f"{field}: tarix YYYY-MM-DD formatında olmalıdır") from None
+    # Excel hands over a datetime as "15.02.2023 0:00" -- drop the time.
+    v = v.split()[0] if " " in v else v
+    v = v.replace("T", " ").split()[0]
+    d = None
+    for fmt in _DATE_FORMATS:
+        try:
+            d = datetime.strptime(v, fmt).date()
+            break
+        except ValueError:
+            continue
+    if d is None:
+        raise DataError(
+            f"{field}: tarix anlaşılmadı — {value!r}. "
+            f"YYYY-MM-DD və ya GG.AA.YYYY yazın."
+        )
     if d > date.today():
         raise DataError(f"{field}: gələcək tarix ola bilməz — {d}")
     return d.isoformat()
@@ -647,8 +729,14 @@ def import_client(root: Path, _slug: str, p: dict) -> Any:
 
     z = zipfile.ZipFile(io.BytesIO(blob))
     man = info["manifest"]
-    slug = str(p.get("slug") or man["slug"])
-    folder = root / "clients" / slug
+    # Through slugify, not raw: this is the one place a folder is CREATED from
+    # a name the request supplies. Taking it verbatim both broke the ASCII rule
+    # of §4 (a Cyrillic "е" produced a folder no URL could carry) and let the
+    # path point outside clients/ entirely.
+    slug = slugify(p.get("slug") or man["slug"])
+    if not slug:
+        raise DataError("Qovluq adı boşdur")
+    folder = root / "clients" / one_segment(slug)
     if folder.exists():
         raise DataError(f"«{slug}» qovluğu artıq mövcuddur")
     folder.mkdir(parents=True)
