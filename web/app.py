@@ -32,6 +32,7 @@ from engine.rates import CATEGORIES, CATEGORY_BY_CODE, ENGINE_VERSION  # noqa: E
 from engine.storage import DataError, list_clients, load_client  # noqa: E402
 
 INDEX = Path(__file__).resolve().parent / "index.html"
+STATIC = Path(__file__).resolve().parent / "static"
 
 _STATE_LOCK = threading.RLock()
 _closed_cache: set = set()
@@ -492,12 +493,32 @@ class Handler(BaseHTTPRequestHandler):
         with _STATE_LOCK:
             self._post()
 
+    # The page's own stylesheet and scripts. A whitelist of suffixes and a
+    # containment check rather than "join the path and hope": this server
+    # answers on localhost, but a request is still a string from outside, and
+    # `/static/../../clients/x/config.toml` must not resolve to a file.
+    STATIC_TYPES = {".js": "text/javascript; charset=utf-8",
+                    ".css": "text/css; charset=utf-8"}
+
+    def _static(self, name: str) -> None:
+        path = (STATIC / name).resolve()
+        if (path.suffix not in self.STATIC_TYPES
+                or STATIC not in path.parents
+                or not path.is_file()):
+            self._json({"error": "not found"}, 404)
+            return
+        self._send(200, path.read_bytes(), self.STATIC_TYPES[path.suffix])
+
     def _get(self):
         url = urlparse(self.path)
         q = parse_qs(url.query)
         try:
             if url.path in ("/", "/index.html"):
                 self._send(200, INDEX.read_bytes(), "text/html; charset=utf-8")
+                return
+
+            if url.path.startswith("/static/"):
+                self._static(url.path[len("/static/"):])
                 return
 
             if url.path == "/api/context":

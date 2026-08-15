@@ -1,0 +1,259 @@
+  :root{
+    --bg:#f5f7fa; --panel:#fff; --ink:#15202e; --muted:#6a7a90; --line:#e3e8ef;
+    --accent:#1f3a5f; --accent-soft:#eef2f7; --warn-bg:#fff6e0; --warn-ink:#8a5b00;
+    --warn-line:#e8c977; --neg:#b3261e; --pos:#1a7a4c; --radius:10px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--ink);
+    font:14px/1.45 "Segoe UI",system-ui,-apple-system,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .num{font-variant-numeric:tabular-nums; text-align:right; white-space:nowrap}
+  button,select,input{font:inherit;color:inherit}
+
+  /* ---------- top bar ---------- */
+  header{
+    position:sticky; top:0; z-index:20; background:var(--accent); color:#fff;
+    display:flex; align-items:center; gap:14px; padding:10px 18px; flex-wrap:wrap;
+  }
+  header .brand{font-weight:600; letter-spacing:.2px; margin-right:4px}
+  header .brand small{display:block;font-weight:400;font-size:11px;opacity:.7}
+  /* the status sits in the header as plain text until you notice it is
+     clickable -- a button box there would compete with the real buttons */
+  .linkish{
+    background:none; border:0; padding:0; font:inherit; color:inherit;
+    cursor:pointer; border-bottom:1px dotted rgba(255,255,255,.55);
+  }
+  .linkish:hover{border-bottom-style:solid}
+  header select{
+    background:rgba(255,255,255,.12); border:1px solid rgba(255,255,255,.25);
+    color:#fff; border-radius:6px; padding:6px 10px; cursor:pointer;
+  }
+  header select option{color:#15202e}
+  header .spacer{flex:1}
+  .btn{
+    background:#fff; color:var(--accent); border:0; border-radius:6px;
+    padding:7px 14px; font-weight:600; cursor:pointer; text-decoration:none;
+    display:inline-flex; align-items:center; gap:7px;
+  }
+  .btn:hover{background:#e9eef5}
+  .ver{font-size:11px; opacity:.65}
+
+  main{padding:18px; max-width:1500px; margin:0 auto}
+
+  /* ---------- kpi ---------- */
+  .kpis{display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin-bottom:16px}
+  .kpi{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:12px 14px}
+  .kpi .k{font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:var(--muted)}
+  .kpi .v{font-size:20px; font-weight:600; margin-top:4px; font-variant-numeric:tabular-nums}
+  .kpi.hi{background:var(--accent); color:#fff; border-color:var(--accent)}
+  .kpi.hi .k{color:rgba(255,255,255,.75)}
+
+  /* ---------- tabs / toolbar ---------- */
+  .toolbar{display:flex; gap:10px; align-items:center; margin-bottom:12px; flex-wrap:wrap}
+  .tabs{display:flex; background:var(--panel); border:1px solid var(--line); border-radius:8px; overflow:hidden}
+  .tabs button{background:none;border:0;padding:8px 16px;cursor:pointer;color:var(--muted);font-weight:500}
+  .tabs button[aria-selected=true]{background:var(--accent); color:#fff}
+  .filter{
+    flex:1; min-width:180px; max-width:340px; background:var(--panel);
+    border:1px solid var(--line); border-radius:8px; padding:8px 12px;
+  }
+  .filter:focus{outline:2px solid var(--accent); outline-offset:-1px}
+  .hint{font-size:12px;color:var(--muted)}
+
+  /* ---------- category sidebar ---------- */
+  .layout{display:grid; grid-template-columns:212px minmax(0,1fr); gap:14px; align-items:start}
+  @media (max-width:900px){ .layout{grid-template-columns:1fr} }
+  .side{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius);
+        padding:6px; position:sticky; top:70px}
+  .side button{
+    display:block; width:100%; text-align:left; background:none; border:0;
+    border-radius:7px; padding:8px 10px; cursor:pointer; color:var(--ink);
+  }
+  .side button:hover{background:var(--accent-soft)}
+  .side button[aria-current=true]{background:var(--accent); color:#fff}
+  .side .n{display:block; font-size:11px; opacity:.7; font-variant-numeric:tabular-nums}
+  .side hr{border:0; border-top:1px solid var(--line); margin:6px 4px}
+
+  /* ---------- tables ---------- */
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); overflow:hidden; margin-bottom:14px}
+  /* Own scroll context so the header pins predictably and the page body
+     never scrolls sideways. */
+  .scroll{overflow:auto; max-height:calc(100vh - 250px)}
+  table{border-collapse:collapse; width:100%; font-size:13px}
+  th,td{padding:8px 10px; border-bottom:1px solid var(--line); text-align:left}
+  td.d{white-space:nowrap}          /* dates must never wrap onto two lines */
+  thead th{
+    position:sticky; top:0; background:var(--accent-soft); color:var(--accent);
+    font-size:11px; text-transform:uppercase; letter-spacing:.4px; z-index:5;
+    box-shadow:inset 0 -1px 0 var(--line);
+  }
+  tbody tr.asset{cursor:pointer}
+  tbody tr.asset:hover{background:#f0f4f9}
+  tr.cat td{background:#f7f9fc; font-weight:600; border-top:2px solid var(--line)}
+  tr.cat .rate{font-weight:400; color:var(--muted); font-size:12px; margin-left:10px}
+  tr.total td{background:#eceff4; font-weight:700}
+  tr.warn td{background:var(--warn-bg)}          /* trips 500/5% this year */
+  tr.next td{background:#eaf2fb}                 /* will trip it next year */
+  .tag{
+    display:inline-block; font-size:11px; padding:1px 7px; border-radius:99px;
+    background:var(--accent-soft); color:var(--accent); margin-left:6px;
+  }
+  .tag.w{background:var(--warn-bg); color:var(--warn-ink); border:1px solid var(--warn-line)}
+  .tag.d{background:#eee; color:#555}
+  /* the entrepreneur coefficient, carried by this row -- deliberately the
+     loudest thing in a column of quiet ×1, because scanning for who has it is
+     the whole reason the column exists */
+  .tag.c{background:#e7f3ea; color:#1f6b3a; border:1px solid #b6d8c2; margin-left:0}
+  /* an asset whose life is over: still listed, visibly not part of the year */
+  tr.retired td{background:#fafbfc; color:#98a3b3}
+  tr.retired td a, tr.retired strong{color:inherit; font-weight:400}
+  .zero{color:#b6bfcb}
+  /* paste grid: inputs sit flush in the cells so it reads as a sheet, which
+     is what the user is copying from */
+  .scroll.imp.grid table{table-layout:fixed; min-width:900px}
+  .scroll.imp.grid td{padding:0}
+  .scroll.imp.grid td input,
+  .scroll.imp.grid td select{
+    width:100%; border:0; border-radius:0; padding:6px 8px;
+    font-size:13px; background:transparent;
+  }
+  .scroll.imp.grid td input:focus,
+  .scroll.imp.grid td select:focus{
+    outline:2px solid var(--accent); outline-offset:-2px; background:#fff;
+  }
+  .scroll.imp.grid th:first-child,
+  .scroll.imp.grid td:first-child{width:86px}
+  /* totals stay put while the rows scroll -- the whole point is to compare
+     them against the Excel total without hunting for them */
+  .scroll.imp.grid tfoot td{
+    position:sticky; bottom:0; background:#eceff4; font-weight:700;
+    padding:7px 8px; border-top:2px solid var(--line);
+  }
+  .scroll.imp.grid td input.badnum{background:var(--warn-bg); font-weight:600}
+  .badtag{
+    display:inline-block; font-size:11px; font-weight:600; padding:1px 7px;
+    border-radius:99px; background:var(--warn-bg); color:var(--warn-ink);
+    border:1px solid var(--warn-line);
+  }
+
+  /* rate history: only drawn when a category has more than one row, so the
+     table stays flat in the normal case */
+  tr.hist td{background:#fbfcfe; border-top:0; padding-top:2px; padding-bottom:2px}
+  tr.hist.on td{background:#eaf2fb; font-weight:600}
+
+  /* ---------- column picker ---------- */
+  .tbar{display:flex; gap:14px; align-items:center; flex-wrap:wrap; margin:0 0 8px}
+  .colpick{display:flex; flex-wrap:wrap; gap:6px 16px; align-items:center;
+           padding:10px 12px; margin:0 0 10px; background:var(--panel);
+           border:1px solid var(--line); border-radius:var(--radius)}
+  .colpick label{display:inline-flex; gap:6px; align-items:center;
+                 font-size:12px; cursor:pointer; white-space:nowrap}
+  .colpick input{width:auto}
+
+  /* ---------- rates across years ----------
+     A grid whose whole job is to be read ACROSS a row: the applied rate is
+     large, everything that explains it is small underneath, and the only
+     colour in the table marks the cell where the figure stopped matching the
+     year before it. */
+  .mx td.y{text-align:center; white-space:nowrap; min-width:92px; padding:7px 10px}
+  .mx .r{font-variant-numeric:tabular-nums; font-size:15px; font-weight:600}
+  .mx .u{font-size:10.5px; color:var(--muted); margin-top:2px; line-height:1.35}
+  .mx td.chg{background:var(--warn-bg)}
+  .mx td.chg .r{color:var(--warn-ink)}
+  .mx td.chg .r::before{content:"▸ "; font-size:11px; vertical-align:1px}
+  .mx td.off{color:#b6bfcb; text-align:center}
+  .mx td.bad{background:#fdecec}
+  .mx td.bad .r{color:#9d2727; font-size:12px; font-weight:500}
+  .mx tr.sub td{background:#fbfcfe; border-top:0}
+  .mx tr.sub td:first-child{padding-left:26px}
+  .mx tr.head td{font-weight:600}
+  .mx .flag{display:inline-block; font-size:10px; padding:0 5px; border-radius:99px;
+            border:1px solid var(--line); color:var(--muted); margin-left:4px}
+  .mx .flag.w{background:var(--warn-bg); color:var(--warn-ink); border-color:var(--warn-line)}
+  .rng{display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:12px}
+  .rng select{padding:5px 8px; border:1px solid var(--line); border-radius:7px; background:#fff}
+
+  /* ---------- notes ---------- */
+  .note{padding:11px 14px; border-left:3px solid var(--warn-line); background:var(--warn-bg);
+        color:var(--warn-ink); border-radius:0 8px 8px 0; margin-bottom:9px}
+  .note.q{border-color:#8fa8c8; background:#eef3f9; color:#2c4straight}
+  .note.q{color:#2c4a70}
+  h3{margin:18px 0 8px; font-size:13px; text-transform:uppercase; letter-spacing:.5px; color:var(--muted)}
+
+  /* ---------- drawer ---------- */
+  .drawer{
+    position:fixed; top:0; right:0; height:100%; width:min(420px,92vw); background:var(--panel);
+    border-left:1px solid var(--line); box-shadow:-12px 0 34px rgba(20,35,60,.14);
+    transform:translateX(102%); z-index:40; display:flex; flex-direction:column;
+    /* visibility keeps the closed drawer out of layout entirely, so it can
+       never nudge the page sideways */
+    visibility:hidden; transition:transform .18s ease, visibility 0s .18s;
+  }
+  .drawer.open{transform:none; visibility:visible; transition:transform .18s ease}
+  .drawer header{background:var(--accent); position:static}
+  .drawer .body{padding:16px; overflow:auto}
+  .step{display:flex; justify-content:space-between; gap:12px; padding:7px 0; border-bottom:1px dashed var(--line)}
+  .step .l{color:var(--muted)}
+  .step.res{border-bottom:0; border-top:2px solid var(--accent); font-weight:700; margin-top:4px; padding-top:9px}
+  /* Indented breakdown of how a rate was derived. */
+  .sub{margin:0 0 4px 14px; padding-left:12px; border-left:2px solid var(--line)}
+  .sub .step{padding:5px 0; font-size:12.5px; border-bottom:0}
+  .closebtn{background:rgba(255,255,255,.15); border:0; color:#fff; border-radius:6px; padding:5px 11px; cursor:pointer}
+  .err{background:#fdecea; border:1px solid #f3b7b1; color:#8b1a12; padding:14px; border-radius:var(--radius)}
+  .acts{display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px}
+  .acts button{background:var(--accent-soft); color:var(--accent); border:1px solid var(--line);
+                border-radius:7px; padding:6px 12px; cursor:pointer; font-size:12.5px}
+  .acts button:hover{background:#dde6f1}
+  .acts button.danger{color:var(--neg)}
+  .tagbtn{background:none; border:1px solid var(--line); border-radius:99px;
+          font-size:11px; padding:1px 9px; margin-left:8px; cursor:pointer; color:var(--accent)}
+  .tagbtn:hover{background:var(--accent-soft)}
+
+  /* ---------- modal form ---------- */
+  .modal{position:fixed; inset:0; background:rgba(16,26,42,.45); z-index:60;
+         display:none; align-items:flex-start; justify-content:center; padding:6vh 16px}
+  .modal.open{display:flex}
+  .modal .box{background:var(--panel); border-radius:12px; width:min(560px,100%);
+              max-height:88vh; overflow:auto; box-shadow:0 24px 60px rgba(10,20,40,.3)}
+  .modal h2{margin:0; padding:16px 20px; font-size:15px; background:var(--accent); color:#fff;
+            border-radius:12px 12px 0 0; display:flex; justify-content:space-between}
+  .modal form{padding:18px 20px 20px}
+  .fld{margin-bottom:13px}
+  .fld label{display:block; font-size:12px; color:var(--muted); margin-bottom:4px}
+  .fld input,.fld select,.fld textarea{
+    width:100%; padding:8px 11px; border:1px solid var(--line); border-radius:7px;
+    background:#fdfdfe;
+  }
+  .fld input:focus,.fld select:focus{outline:2px solid var(--accent); outline-offset:-1px}
+  .fld .h{font-size:11.5px; color:var(--muted); margin-top:4px}
+  .row2{display:grid; grid-template-columns:1fr 1fr; gap:12px}
+  .modes{display:flex; gap:6px; margin-bottom:16px; flex-wrap:wrap}
+  .modes button{flex:1; min-width:120px; background:var(--accent-soft); border:1px solid var(--line);
+                border-radius:8px; padding:9px 8px; cursor:pointer; font-size:12.5px; text-align:left}
+  .modes button[aria-pressed=true]{background:var(--accent); color:#fff; border-color:var(--accent)}
+  .modes small{display:block; opacity:.75; font-size:11px; font-weight:400}
+  .modal .foot{display:flex; gap:9px; justify-content:flex-end; margin-top:6px}
+  .primary{background:var(--accent); color:#fff; border:0; border-radius:7px;
+           padding:9px 20px; cursor:pointer; font-weight:600}
+  .ghost{background:none; border:1px solid var(--line); border-radius:7px;
+         padding:9px 16px; cursor:pointer}
+  .modal .box.wide{width:min(1100px,100%)}
+  .imp-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:8px}
+  .imp-grid .fld{margin:0}
+  .imp table{font-size:12px}
+  .imp .bad td{background:#fdecea}
+  .imp .good td{background:#f2f9f4}
+  kbd{background:var(--accent-soft); border:1px solid var(--line);
+      border-radius:4px; padding:1px 6px; font:inherit; font-size:12px}
+  .imp thead select{width:100%; padding:5px 7px; border:1px solid var(--line);
+      border-radius:6px; background:#fff}
+  .paste{width:100%; min-height:150px; font-family:Consolas,monospace; font-size:12px;
+         border:1px solid var(--line); border-radius:8px; padding:10px}
+  .stepbar{display:flex; gap:8px; margin-bottom:14px; font-size:12px; color:var(--muted)}
+  .stepbar span{padding:4px 10px; border-radius:99px; background:var(--accent-soft)}
+  .stepbar span.on{background:var(--accent); color:#fff}
+  .ferr{background:#fdecea; border:1px solid #f3b7b1; color:#8b1a12;
+        padding:10px 12px; border-radius:8px; margin-bottom:12px; display:none}

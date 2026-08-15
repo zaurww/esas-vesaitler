@@ -8,7 +8,8 @@ wrong by a factor of a thousand or by several months.
 
 from tests.support import EngineTest
 
-from engine.mutate import _normalise_number, dec, iso_date
+from engine.mutate import dec, iso_date
+from engine.mutate.parse import _normalise_number
 from engine.storage import DataError
 
 
