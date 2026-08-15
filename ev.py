@@ -6,6 +6,7 @@
     python ev.py export <client> <year>   write an .xlsx next to the client folder
     python ev.py close <client> <year>    close the year -> opening balances for year+1
     python ev.py verify <client>          recompute closed years, diff against stored
+    python ev.py test                     run the engine's control examples
 """
 
 from __future__ import annotations
@@ -121,6 +122,20 @@ def cmd_verify(slug: str) -> None:
     print("  ✓ bütün bağlı illər uyğundur" if not bad else f"  {bad} uyğunsuzluq")
 
 
+def cmd_test() -> int:
+    """The control examples §5.6 asks for, as one command.
+
+    Separate from `verify`, which checks THIS installation's closed years
+    against their seals. These check the engine itself, and they run without
+    any client data.
+    """
+    import unittest
+    suite = unittest.defaultTestLoader.discover(str(ROOT / "tests"),
+                                                top_level_dir=str(ROOT))
+    result = unittest.TextTestRunner(verbosity=2).run(suite)
+    return 0 if result.wasSuccessful() else 1
+
+
 def main(argv: list[str]) -> int:
     if not argv or argv[0] in ("serve", "ui"):
         from web.app import serve
@@ -139,6 +154,8 @@ def main(argv: list[str]) -> int:
             cmd_close(argv[1], int(argv[2]))
         elif cmd == "verify":
             cmd_verify(argv[1])
+        elif cmd == "test":
+            return cmd_test()
         else:
             print(__doc__)
             return 2

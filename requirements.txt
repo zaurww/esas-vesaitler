@@ -1,0 +1,20 @@
+# Runtime dependencies.
+#
+# The engine, the storage layer and the web UI use the standard library only
+# (CLAUDE.md §11): no framework, no server, no ORM. The single exception is
+# reading and writing .xlsx, which is not something to hand-roll.
+#
+# Until this file existed the dependency was implicit, and a fresh machine
+# would have run everything up to the moment somebody pressed "Excel-ə ixrac"
+# and then failed on an import. It also has to be declared for the packaging
+# step (§9), which cannot bundle what nobody named.
+#
+#   python -m pip install -r requirements.txt
+#
+# Python 3.11 or newer is required: the code uses tomllib (3.11) and
+# X | None annotations at runtime. Developed on 3.13.
+
+openpyxl>=3.1,<4
+
+# Tests are stdlib unittest on purpose -- `python ev.py test` needs nothing
+# installed beyond the above.

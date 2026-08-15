@@ -33,6 +33,7 @@ from engine.storage import DataError, list_clients, load_client  # noqa: E402
 
 INDEX = Path(__file__).resolve().parent / "index.html"
 
+_STATE_LOCK = threading.RLock()
 _closed_cache: set = set()
 _has_opening = False
 # Card fields the calculation never reads -- counterparty, e-invoice, serial.
@@ -472,7 +473,26 @@ class Handler(BaseHTTPRequestHandler):
         self._send(code, json.dumps(obj, ensure_ascii=False).encode("utf-8"),
                    "application/json; charset=utf-8")
 
+    # One request at a time. The server is threaded, and two things it touches
+    # are process-wide: the rate tables re-read by rates.refresh(), and the
+    # per-request globals above that serialize() reads. Interleave two
+    # requests and a report can be built from another request's client, or
+    # computed while the rate table is being replaced.
+    #
+    # A lock rather than a redesign because the redesign is real work (pass
+    # the rate table into the calculation instead of parking it in a module)
+    # and this is a local single-user program: serialising requests costs
+    # nothing here. A `compute_year` on a 5 000-card client takes under a
+    # second, and nobody else is waiting.
     def do_GET(self):
+        with _STATE_LOCK:
+            self._get()
+
+    def do_POST(self):
+        with _STATE_LOCK:
+            self._post()
+
+    def _get(self):
         url = urlparse(self.path)
         q = parse_qs(url.query)
         try:
@@ -602,7 +622,7 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:  # noqa: BLE001
             self._json({"error": f"{type(e).__name__}: {e}", "kind": "internal"}, 500)
 
-    def do_POST(self):
+    def _post(self):
         """Every write goes through engine.mutate, which backs up, applies,
         re-validates the whole store and rolls back if it no longer parses."""
         url = urlparse(self.path)

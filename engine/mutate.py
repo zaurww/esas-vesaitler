@@ -442,6 +442,16 @@ def create_asset(root: Path, slug: str, p: dict) -> str:
                                  count)
         ids = asset_id_series(assets, len(numbers))
 
+        # An acquisition dated inside a closed year is a fact OF that year and
+        # changes its depreciation, so it is refused like any other change to
+        # a filed return (§6.2). This used to be checked only for the opening
+        # balance below, which left the hole open: the asset went in, the
+        # closed year no longer matched its seal, and the only sign was
+        # `ev.py verify` reporting a discrepancy later. Deliberately adding one
+        # is still possible -- reopen the year, which is what that act is for.
+        if in_date:
+            guard_open_year(root, slug, int(in_date[:4]))
+
         year = 0
         ob: list[dict[str, str]] = []
         if residual:
@@ -507,6 +517,22 @@ def update_asset(root: Path, slug: str, p: dict) -> str:
             raise DataError(f"inv_no {new['inv_no']!r} artıq mövcuddur")
         if not new["name"]:
             raise DataError("Adı boş ola bilməz")
+
+        # Only the fields that reach the calculation are frozen by a closed
+        # year. A closed year seals the RETURN, not the card: correcting a
+        # misspelt name or filling in the serial of an asset bought in 2024
+        # changes no figure and must stay possible. Cost, date and category do
+        # change one, in the year the asset was acquired and in every year
+        # after it, so they are refused for both the old and the new year --
+        # moving an asset OUT of a closed year rewrites it just as much as
+        # moving one in.
+        for field in ("cost", "in_date", "category"):
+            if row[field] == new[field]:
+                continue
+            for value in (row["in_date"], new["in_date"]):
+                if value:
+                    guard_open_year(root, slug, int(value[:4]))
+
         for field, value in new.items():
             if row[field] != value:
                 tx.log(aid, field, row[field], value)
@@ -1469,19 +1495,39 @@ def _fold2(text: object) -> str:
 
 def guess_columns(header: list[str]) -> dict[str, int]:
     """Best-effort mapping of source columns to our fields. The user corrects
-    it in the UI; guessing only removes the boring part."""
+    it in the UI; guessing only removes the boring part.
+
+    Exact matches are claimed before loose ones, and that ordering is load-
+    bearing rather than tidy. Matching is substring-based, so a short alias
+    swallows a longer header that happens to contain it: `inv_no` lists
+    "nömrə", "Seriya nömrəsi" contains it, and `inv_no` is declared first --
+    so the serial column was being imported as the inventory number. Whichever
+    field is written first in IMPORT_ALIASES should not decide that.
+    """
     norm = [_fold(h) for h in header]
     norm2 = [_fold2(h) for h in header]
+    folded = {f: {_fold(a) for a in aliases} | {_fold2(a) for a in aliases}
+              for f, aliases in IMPORT_ALIASES.items()}
     out: dict[str, int] = {}
-    for field, aliases in IMPORT_ALIASES.items():
-        folded = {_fold(a) for a in aliases} | {_fold2(a) for a in aliases}
-        for i, (h, h2) in enumerate(zip(norm, norm2)):
-            if i in out.values() or not h:
+    taken: set[int] = set()
+
+    def claim(field: str, i: int) -> None:
+        out[field] = i
+        taken.add(i)
+
+    for exact in (True, False):
+        for field, aliases in folded.items():
+            if field in out:
                 continue
-            if any(x in folded or any(a and (x.startswith(a) or a in x) for a in folded)
-                   for x in (h, h2)):
-                out[field] = i
-                break
+            for i, (h, h2) in enumerate(zip(norm, norm2)):
+                if i in taken or not h:
+                    continue
+                hit = (h in aliases or h2 in aliases) if exact else any(
+                    a and (x.startswith(a) or a in x)
+                    for a in aliases for x in (h, h2))
+                if hit:
+                    claim(field, i)
+                    break
     return out
 
 

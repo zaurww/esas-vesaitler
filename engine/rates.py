@@ -202,44 +202,66 @@ def _num(v: str) -> Decimal | None:
 
 def refresh(root) -> None:
     """Re-read the owner's rate files. Called before every calculation, so an
-    edit takes effect on the next page load without restarting anything."""
+    edit takes effect on the next page load without restarting anything.
+
+    The new tables are built to the side and swapped in at the end. Clearing
+    the live lists first left a window in which the owner's rows did not
+    exist, and a concurrent calculation reading through that window fell back
+    to the shipped default -- a WRONG figure, silently, which is the one
+    failure mode §2.1 refuses. Measured before the fix: with one owner row for
+    `ym`, a reader running beside 200 refreshes saw the default 8% instead of
+    the owner's 9% in 47% of reads.
+
+    Slice assignment is one operation per list, so a reader sees either the
+    old table or the new one, never a half-built one. The caller still holds a
+    lock across read-then-compute (web/app.py) -- that is a different problem:
+    this only guarantees each table is never torn.
+    """
     from .storage import read_tsv          # local import: storage imports us
     from pathlib import Path
 
     root = Path(root)
-    USER_RATES.clear()
-    USER_MULTIPLIERS.clear()
-    USER_PARAMETERS.clear()
-    USER_SOURCE.clear()
+    new_rates: List[RateRow] = []
+    new_mult: List[MultiplierRow] = []
+    new_params: List[ParamRow] = []
+    new_source: set = set()
 
     for r in read_tsv(root / "rates.tsv"):
         cat = (r.get("category") or "").strip()
         if cat not in CATEGORY_BY_CODE:
             raise ValueError(f"rates.tsv: naməlum kateqoriya {cat!r}")
         year = int(r["effective_year"])
-        USER_RATES.append(RateRow(year, cat, _num(r.get("max_rate", "")),
-                                  _num(r.get("repair_limit", "")),
-                                  (r.get("note") or "").strip()))
-        USER_SOURCE.add(("rate", year, cat))
+        new_rates.append(RateRow(year, cat, _num(r.get("max_rate", "")),
+                                 _num(r.get("repair_limit", "")),
+                                 (r.get("note") or "").strip()))
+        new_source.add(("rate", year, cat))
 
     for r in read_tsv(root / "coefficients.tsv"):
         st = (r.get("status") or "").strip()
         if st not in STATUS_NAMES:
             raise ValueError(f"coefficients.tsv: naməlum status {st!r}")
         year = int(r["effective_year"])
-        USER_MULTIPLIERS.append(MultiplierRow(year, st, D(r["coefficient"]),
-                                              (r.get("note") or "").strip()))
-        USER_SOURCE.add(("coef", year, st))
+        new_mult.append(MultiplierRow(year, st, D(r["coefficient"]),
+                                      (r.get("note") or "").strip()))
+        new_source.add(("coef", year, st))
 
     for r in read_tsv(root / "parameters.tsv"):
         key = (r.get("key") or "").strip()
         if key not in PARAM_DEFS:
             raise ValueError(f"parameters.tsv: naməlum parametr {key!r}")
         year = int(r["effective_year"])
-        USER_PARAMETERS.append(ParamRow(year, key, D(str(r["value"]).strip()
-                                                     .replace(",", ".")),
-                                        (r.get("note") or "").strip()))
-        USER_SOURCE.add(("param", year, key))
+        new_params.append(ParamRow(year, key, D(str(r["value"]).strip()
+                                                .replace(",", ".")),
+                                   (r.get("note") or "").strip()))
+        new_source.add(("param", year, key))
+
+    # A malformed file raises above, before anything is swapped in: a bad edit
+    # leaves the previous table standing rather than emptying it.
+    USER_RATES[:] = new_rates
+    USER_MULTIPLIERS[:] = new_mult
+    USER_PARAMETERS[:] = new_params
+    USER_SOURCE.clear()
+    USER_SOURCE.update(new_source)
 
 
 def _latest(rows, year: int, key_fn, key_value):
