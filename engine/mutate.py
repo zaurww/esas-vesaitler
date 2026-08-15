@@ -35,8 +35,13 @@ from .storage import DataError, load_client, read_tsv, write_tsv
 D = Decimal
 
 HEADERS: dict[str, list[str]] = {
+    # e_qaime / serial_no were appended, never inserted: a new optional column
+    # leaves format_version alone (§7), and an older engine reading this file
+    # simply ignores it -- which is safe here precisely because neither figure
+    # enters the calculation.
     "assets.tsv": ["asset_id", "inv_no", "name", "category", "in_date", "cost",
-                   "counterparty", "useful_life", "is_legacy_pool", "note"],
+                   "counterparty", "useful_life", "is_legacy_pool", "note",
+                   "e_qaime", "serial_no"],
     "opening_balances.tsv": ["year", "asset_id", "category", "residual", "source",
                              "engine_version", "closed_at"],
     "disposals.tsv": ["asset_id", "date", "type", "proceeds"],
@@ -454,6 +459,13 @@ def create_asset(root: Path, slug: str, p: dict) -> str:
                 "useful_life": str(p.get("useful_life", "")).strip(),
                 "is_legacy_pool": "1" if mode == "pool" else "",
                 "note": str(p.get("note", "")).strip(),
+                "e_qaime": str(p.get("e_qaime", "")).strip(),
+                # A batch is N units of one purchase (§4), so they share the
+                # e-invoice but NOT the serial number -- serials are what tells
+                # the units apart. Filling one serial onto forty cards would
+                # state something false about thirty-nine of them.
+                "serial_no": (str(p.get("serial_no", "")).strip()
+                              if count == 1 else ""),
             })
             # One changelog line per object even though the act was one. The
             # grouping was for the person doing the work, not an excuse to
@@ -487,6 +499,8 @@ def update_asset(root: Path, slug: str, p: dict) -> str:
             "cost": dec(p.get("cost"), "İlkin dəyər"),
             "counterparty": str(p.get("counterparty", "")).strip(),
             "note": str(p.get("note", "")).strip(),
+            "e_qaime": str(p.get("e_qaime", "")).strip(),
+            "serial_no": str(p.get("serial_no", "")).strip(),
         }
         if new["inv_no"] and any(
                 r["inv_no"] == new["inv_no"] and r["asset_id"] != aid for r in assets):
@@ -1397,7 +1411,8 @@ class _DryRun(Exception):
 
 
 IMPORT_FIELDS = ("inv_no", "name", "category", "in_date", "cost",
-                 "opening_residual", "counterparty", "note")
+                 "opening_residual", "counterparty", "e_qaime", "serial_no",
+                 "note")
 
 # Header names seen in the wild: the source workbook, 1C exports, and the
 # obvious Russian/English equivalents. Matching is case- and space-insensitive.
@@ -1415,6 +1430,12 @@ IMPORT_ALIASES = {
     "opening_residual": ["qalıq dəyər", "qaliq deyer", "qalıq", "остаточная стоимость",
                          "остаток", "residual", "qalıq (il əvvəli)"],
     "counterparty": ["kontragent", "контрагент", "təchizatçı", "поставщик", "supplier"],
+    "e_qaime": ["e-qaimə", "e qaimə", "eqaime", "qaimə", "qaime", "e-qaime",
+                "hesab-faktura", "faktura", "накладная", "э-накладная",
+                "счёт-фактура", "счет-фактура", "invoice"],
+    "serial_no": ["seriya nömrəsi", "seriya", "serial", "serial no", "serial number",
+                  "s/n", "sn", "vin", "zavod nömrəsi", "заводской номер",
+                  "серийный номер", "серийный", "серия"],
     "note": ["qeyd", "примечание", "note", "комментарий"],
 }
 
@@ -1512,6 +1533,8 @@ def import_assets(root: Path, slug: str, p: dict) -> Any:
                         "counterparty": str(raw.get("counterparty", "")).strip(),
                         "useful_life": "", "is_legacy_pool": "",
                         "note": str(raw.get("note", "")).strip(),
+                        "e_qaime": str(raw.get("e_qaime", "")).strip(),
+                        "serial_no": str(raw.get("serial_no", "")).strip(),
                     })
                     if inv:
                         seen_inv.add(inv)

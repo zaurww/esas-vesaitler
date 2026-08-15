@@ -782,3 +782,166 @@ def compute_year(data: ClientData, year: int,
             f"{year} ili BAĞLIDIR — hesabat arxivdir, dəyişiklik qəbul edilmir (§6)."
         )
     return result
+
+
+# ---------------------------------------------------------------------------
+# The rate each category was actually depreciated at, year after year.
+#
+# One year at a time answers "what did we apply"; it cannot answer "did we
+# apply the same thing we applied last year", and that is where the mistakes
+# are. Read across a row -- 20%, 20%, 20%, 18% -- and a year that broke step
+# announces itself, without opening four reports and remembering three
+# numbers.
+#
+# Note what such a row is NOT: the norm for that category was 20% in all four
+# years. The 18% is an election (§5.2), a decision to accrue below the
+# ceiling, so no amount of care with the rate table would have surfaced it.
+# The statutory figure is carried alongside for the opposite case -- when the
+# LAW moved and the applied rate merely followed.
+#
+# Derived, never stored (§2): every cell is the same pipeline run again.
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class RateCell:
+    year: int
+    computed: bool = False            # the year could be calculated at all
+    on_books: bool = False            # this category/asset existed that year
+    note: str = ""                    # why the cell is empty, when it is
+    statutory: Decimal = ZERO         # m.114.3 norm
+    coefficient: Decimal = D("1")
+    ceiling: Decimal = ZERO
+    applied: Decimal = ZERO
+    source: str = "norm"              # norm | category | asset
+    below_statutory: bool = False     # accruing under the plain norm
+    below_ceiling: bool = False       # a coefficient was available, unused
+    coefficient_used: bool = False
+    law_changed: bool = False         # the norm differs from the year before
+    rate_changed: bool = False        # the applied rate differs from the year before
+    cards: int = 0                    # live cards behind the figure
+
+
+@dataclass
+class RateSeries:
+    key: str
+    kind: str                         # category | asset
+    name: str
+    subtitle: str = ""
+    law_ref: str = ""
+    category: str = ""
+    cells: list[RateCell] = field(default_factory=list)
+    rate_changed: bool = False        # the applied rate is not constant
+    law_changed: bool = False         # the norm is not constant
+    assets: list["RateSeries"] = field(default_factory=list)
+
+
+@dataclass
+class RateMatrix:
+    years: list[int] = field(default_factory=list)
+    closed: list[int] = field(default_factory=list)
+    rows: list[RateSeries] = field(default_factory=list)
+    failed: dict[int, str] = field(default_factory=dict)
+
+
+def _cell_from(info: "RateInfo", year: int) -> RateCell:
+    return RateCell(
+        year=year, computed=True, on_books=True,
+        statutory=info.statutory_max, coefficient=info.coefficient,
+        ceiling=info.ceiling, applied=info.applied, source=info.source,
+        below_statutory=info.below_statutory, below_ceiling=info.below_ceiling,
+        coefficient_used=info.coefficient_used,
+    )
+
+
+def _mark_changes(series: RateSeries) -> None:
+    """Flag every cell whose figures moved since the previous year on the books.
+
+    Compared against the previous cell that HAS figures, not the previous
+    column: an asset that sat off the books for a year would otherwise report
+    a change on its return that never happened.
+    """
+    prev = None
+    for cell in series.cells:
+        if not cell.on_books:
+            continue
+        if prev is not None:
+            cell.rate_changed = cell.applied != prev.applied
+            cell.law_changed = cell.statutory != prev.statutory
+            series.rate_changed |= cell.rate_changed
+            series.law_changed |= cell.law_changed
+        prev = cell
+
+
+def rate_matrix(data: ClientData, years: list[int]) -> RateMatrix:
+    """Applied rates across several years, by category and by deviating asset.
+
+    A year that cannot be computed (no taxpayer status yet, an election above
+    the ceiling) is reported as such and does not take the rest of the table
+    down with it -- the point of the report is to find exactly that kind of
+    thing.
+    """
+    years = sorted(years)
+    out = RateMatrix(years=years, closed=sorted(data.closed_years() & set(years)))
+    cache: dict[int, YearResult] = {}
+    per_year: dict[int, YearResult] = {}
+    for y in years:
+        try:
+            per_year[y] = compute_year(data, y, cache)
+        except (CalcError, LookupError) as e:
+            out.failed[y] = str(e)
+
+    # An asset earns its own row once it has ever been pulled off the category
+    # rate. Showing every card would bury the answer: on a batch of 240
+    # identical fridges (§4) the interesting row is the one that differs.
+    deviating: dict[str, tuple[str, str, str]] = {}      # aid -> (cat, inv, name)
+    for res in per_year.values():
+        for card in res.cards:
+            info = card.rate_info
+            if info is not None and info.source == "asset":
+                deviating.setdefault(card.asset_id,
+                                     (card.category, card.inv_no, card.name))
+
+    for code in EV_CODES:
+        cat_name = CATEGORY_BY_CODE[code].name_az
+        series = RateSeries(key=code, kind="category", name=cat_name,
+                            law_ref=rates.LAW_REF.get(code, ""), category=code)
+        seen = False
+        for y in years:
+            res = per_year.get(y)
+            if res is None:
+                series.cells.append(RateCell(year=y, note=out.failed.get(y, "")))
+                continue
+            cat = next((c for c in res.categories if c.code == code), None)
+            if cat is None:
+                series.cells.append(RateCell(year=y, computed=True))
+                continue
+            seen = True
+            cell = _cell_from(cat.rate, y)
+            cell.cards = sum(1 for c in cat.cards if not c.retired)
+            series.cells.append(cell)
+        if not seen:
+            continue
+        _mark_changes(series)
+
+        for aid, (acat, inv, name) in deviating.items():
+            if acat != code:
+                continue
+            sub = RateSeries(key=aid, kind="asset", name=name,
+                             subtitle=inv, category=code)
+            for y in years:
+                res = per_year.get(y)
+                if res is None:
+                    sub.cells.append(RateCell(year=y, note=out.failed.get(y, "")))
+                    continue
+                card = next((c for c in res.cards if c.asset_id == aid), None)
+                if card is None or card.rate_info is None or card.retired:
+                    sub.cells.append(RateCell(year=y, computed=True))
+                    continue
+                sub.cells.append(_cell_from(card.rate_info, y))
+            _mark_changes(sub)
+            series.assets.append(sub)
+        series.assets.sort(key=lambda s: (s.subtitle, s.name))
+        out.rows.append(series)
+
+    return out

@@ -183,6 +183,8 @@ def load_client(root: Path, slug: str) -> ClientData:
             in_date=in_date,
             cost=cost,
             counterparty=r.get("counterparty", "").strip(),
+            e_qaime=r.get("e_qaime", "").strip(),
+            serial_no=r.get("serial_no", "").strip(),
             useful_life=int(life) if life else None,
             is_legacy_pool=r.get("is_legacy_pool", "").strip() in ("1", "true", "yes"),
             note=r.get("note", "").strip(),

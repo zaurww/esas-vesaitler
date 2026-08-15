@@ -19,7 +19,9 @@ from urllib.parse import parse_qs, urlparse
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from engine.calc import MONTHS_AZ, CalcError, compute_year  # noqa: E402
+from engine.calc import (  # noqa: E402
+    MONTHS_AZ, CalcError, compute_year, rate_matrix,
+)
 from engine.excel import build_import_template, build_workbook  # noqa: E402
 from engine.mutate import (  # noqa: E402
     ACTIONS, IMPORT_FIELDS, export_client, guess_columns, rows_of,
@@ -33,7 +35,10 @@ INDEX = Path(__file__).resolve().parent / "index.html"
 
 _closed_cache: set = set()
 _has_opening = False
-_counterparty: dict = {}
+# Card fields the calculation never reads -- counterparty, e-invoice, serial.
+# One dict rather than one global per field: they are all "what the card says
+# about itself", and three parallel lookups was two too many.
+_card_meta: dict = {}
 
 
 def m(x: Decimal) -> str:
@@ -183,7 +188,12 @@ def serialize(r) -> dict:
                         "in_date": k.in_date.isoformat() if k.in_date else "",
                         "cost": m(k.cost),
                         "is_legacy_pool": k.is_legacy_pool,
-                        "counterparty": _counterparty.get(k.asset_id, ""),
+                        "counterparty": _card_meta.get(k.asset_id, {})
+                                                  .get("counterparty", ""),
+                        "e_qaime": _card_meta.get(k.asset_id, {})
+                                             .get("e_qaime", ""),
+                        "serial_no": _card_meta.get(k.asset_id, {})
+                                               .get("serial_no", ""),
                         "opening": m(k.opening),
                         "opening_source": k.opening_source,
                         "acquisition": m(k.acquisition),
@@ -382,11 +392,63 @@ def asset_history(root: Path, slug: str, asset_id: str) -> dict:
             "category_name": CATEGORY_BY_CODE[asset.category].name_az,
             "in_date": asset.in_date.isoformat() if asset.in_date else "",
             "cost": m(asset.cost), "counterparty": asset.counterparty,
+            "e_qaime": asset.e_qaime, "serial_no": asset.serial_no,
             "is_legacy_pool": asset.is_legacy_pool, "note": asset.note,
         },
         "years": rows,
         "events": events,
         "months": MONTHS_AZ,
+    }
+
+
+def rate_report(root: Path, slug: str, first: int = 0, last: int = 0) -> dict:
+    """Applied rates across years -- the cross-year control (§5.6.7).
+
+    Every other report answers for one year. This one exists because a rate
+    that is wrong is almost never wrong in a way a single year can show: it
+    looks perfectly legal on its own and only stands out beside the years
+    around it.
+    """
+    rates.refresh(ROOT)
+    data = load_client(root, slug)
+    years = available_years(data)
+    if first:
+        years = [y for y in years if y >= first]
+    if last:
+        years = [y for y in years if y <= last]
+    mx = rate_matrix(data, years)
+
+    def cell(c) -> dict:
+        return {
+            "year": c.year, "computed": c.computed, "on_books": c.on_books,
+            "note": c.note,
+            "statutory": rate(c.statutory), "coefficient": rate(c.coefficient),
+            "ceiling": rate(c.ceiling), "applied": rate(c.applied),
+            "source": c.source,
+            "below_statutory": c.below_statutory,
+            "below_ceiling": c.below_ceiling,
+            "coefficient_used": c.coefficient_used,
+            "law_changed": c.law_changed, "rate_changed": c.rate_changed,
+            "cards": c.cards,
+        }
+
+    def series(s) -> dict:
+        return {
+            "key": s.key, "kind": s.kind, "name": s.name,
+            "subtitle": s.subtitle, "law_ref": s.law_ref,
+            "category": s.category,
+            "rate_changed": s.rate_changed, "law_changed": s.law_changed,
+            "cells": [cell(c) for c in s.cells],
+            "assets": [series(a) for a in s.assets],
+        }
+
+    return {
+        "client": slug,
+        "years": mx.years,
+        "all_years": available_years(data),
+        "closed": mx.closed,
+        "failed": {str(k): v for k, v in mx.failed.items()},
+        "rows": [series(s) for s in mx.rows],
     }
 
 
@@ -452,8 +514,8 @@ class Handler(BaseHTTPRequestHandler):
                 rates.refresh(ROOT)      # pick up edits without a restart
                 data = load_client(ROOT, slug)
                 global _closed_cache, _has_opening
-                global _counterparty
-                _counterparty = {a.asset_id: a.counterparty for a in data.assets}
+                global _card_meta
+                _card_meta = data.card_meta()
                 _closed_cache = data.closed_years()
                 _has_opening = any(ob.year == year for ob in data.opening_balances)
                 if data.status_for(year) is None:
@@ -466,6 +528,13 @@ class Handler(BaseHTTPRequestHandler):
                     }, 400)
                     return
                 self._json(serialize(compute_year(data, year)))
+                return
+
+            if url.path == "/api/rate-matrix":
+                self._json(rate_report(
+                    ROOT, q.get("client", [""])[0],
+                    int(q.get("from", ["0"])[0] or 0),
+                    int(q.get("to", ["0"])[0] or 0)))
                 return
 
             if url.path == "/api/asset-history":
@@ -515,8 +584,8 @@ class Handler(BaseHTTPRequestHandler):
                 slug = q.get("client", [""])[0]
                 year = int(q.get("year", ["0"])[0])
                 data = load_client(ROOT, slug)
-                cp = {a.asset_id: a.counterparty for a in data.assets}
-                blob = build_workbook(compute_year(data, year), cp)
+                blob = build_workbook(compute_year(data, year),
+                                      data.card_meta())
                 fname = f"{slug}-{year}-amortizasiya.xlsx"
                 self._send(
                     200, blob,

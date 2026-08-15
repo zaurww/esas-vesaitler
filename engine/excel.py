@@ -179,7 +179,7 @@ def _sheet_summary(wb: Workbook, r: YearResult) -> None:
 
 
 def _sheet_cards(wb: Workbook, r: YearResult,
-                 counterparty: dict | None = None) -> None:
+                 meta: dict | None = None) -> None:
     """Flat card list: one row per asset, category as a COLUMN.
 
     Category headers used to sit as merged banner rows above each group. That
@@ -187,17 +187,31 @@ def _sheet_cards(wb: Workbook, r: YearResult,
     across banner rows. Flat plus an autofilter lets the accountant slice it
     any way they need.
     """
-    counterparty = counterparty or {}
+    meta = meta or {}
     ws = wb.create_sheet("Kartlar")
     # The rate is split into the norm and the factor applied to it, so that
     # "which assets carry the entrepreneur coefficient" is a column you can
     # sort and filter on rather than a figure you have to decompose in your
     # head. Norm x factor = rate, which is why the rate itself stays.
-    _header(ws, 1, ["⚠", "Kod", "Kateqoriya", "İnv.№", "Adı", "Kontragent",
-                    "Alış tarixi", "İlkin dəyər", "Qalıq (il əvvəli)",
-                    "Daxilolma", "Dəyər artımı", "Kapital. təmir", "Xaricetmə",
-                    "Norma (m.114.3)", "Əmsal", "Dərəcə",
-                    "Amortizasiya", "Silinmə", "Qalıq (il sonu)"])
+    #
+    # Column formats are looked up BY NAME below. They used to be written as
+    # index literals ("i >= 8 is money"), which silently means "everything
+    # after this point" -- so inserting a text column ahead of the figures
+    # formatted an invoice number as currency.
+    head = ["⚠", "Kod", "Kateqoriya", "İnv.№", "Adı", "Kontragent",
+            "E-qaimə", "Seriya №",
+            "Alış tarixi", "İlkin dəyər", "Qalıq (il əvvəli)",
+            "Daxilolma", "Dəyər artımı", "Kapital. təmir", "Xaricetmə",
+            "Norma (m.114.3)", "Əmsal", "Dərəcə",
+            "Amortizasiya", "Silinmə", "Qalıq (il sonu)"]
+    _header(ws, 1, head)
+    col = {name: i for i, name in enumerate(head, start=1)}
+    pct_cols = {col["Norma (m.114.3)"], col["Dərəcə"]}
+    factor_col = col["Əmsal"]
+    money_cols = {col[n] for n in (
+        "İlkin dəyər", "Qalıq (il əvvəli)", "Daxilolma", "Dəyər artımı",
+        "Kapital. təmir", "Xaricetmə", "Amortizasiya", "Silinmə",
+        "Qalıq (il sonu)")}
     row = 2
     for cat in r.categories:
         for card in cat.cards:
@@ -220,9 +234,11 @@ def _sheet_cards(wb: Workbook, r: YearResult,
             elif card.retired:
                 suffix = (f" ({RETIRED_AZ.get(card.retired_kind, 'balansdan çıxıb')}"
                           f"{', ' + str(card.retired_year) if card.retired_year else ''})")
+            info = meta.get(card.asset_id, {})
             vals = [flag, card.category, cat.name_az, card.inv_no,
                     card.name + suffix,
-                    counterparty.get(card.asset_id, ""),
+                    info.get("counterparty", ""),
+                    info.get("e_qaime", ""), info.get("serial_no", ""),
                     card.in_date.isoformat() if card.in_date else "",
                     _f(card.cost), _f(card.opening), _f(card.acquisition),
                     _f(card.addition), _f(card.repair_capitalized),
@@ -232,20 +248,21 @@ def _sheet_cards(wb: Workbook, r: YearResult,
             for i, v in enumerate(vals, start=1):
                 cell = ws.cell(row, i, v)
                 cell.border = BORDER
-                if i in (14, 16):
+                if i in pct_cols:
                     cell.number_format = PCT
-                elif i == 15:
+                elif i == factor_col:
                     cell.number_format = "0.##\\x"
-                elif i >= 8:
+                elif i in money_cols:
                     cell.number_format = MONEY
                 if card.threshold_hit:
                     cell.fill = WARN_FILL
                 elif card.threshold_next:
                     cell.fill = NEXT_FILL
             row += 1
-    ws.auto_filter.ref = f"A1:S{max(row - 1, 1)}"
+    ws.auto_filter.ref = \
+        f"A1:{get_column_letter(len(head))}{max(row - 1, 1)}"
     ws.freeze_panes = "A2"
-    _widths(ws, [4, 7, 26, 12, 32, 26, 13, 15, 17, 14, 14, 14, 14,
+    _widths(ws, [4, 7, 26, 12, 32, 26, 16, 20, 13, 15, 17, 14, 14, 14, 14,
                  14, 8, 9, 15, 13, 17])
 
 
@@ -421,12 +438,14 @@ def _sheet_notes(wb: Workbook, r: YearResult) -> None:
     _widths(ws, [130])
 
 
-def build_workbook(r: YearResult, counterparty: dict | None = None) -> bytes:
+def build_workbook(r: YearResult, meta: dict | None = None) -> bytes:
+    """`meta` carries the card fields the calculation has no use for --
+    counterparty, e-invoice, serial -- keyed by asset_id."""
     wb = Workbook()
     wb.remove(wb.active)
     _sheet_declaration(wb, r)
     _sheet_summary(wb, r)
-    _sheet_cards(wb, r, counterparty)
+    _sheet_cards(wb, r, meta)
     _sheet_movement(wb, r)
     _sheet_monthly(wb, r)
     _sheet_repair(wb, r)
@@ -451,15 +470,19 @@ TEMPLATE_LABELS = {
     "opening_residual": ("Qalıq dəyər", "İlin əvvəlinə. Doldurulubsa — "
                                         "ƏV əvvəlki illərdən gəlir"),
     "counterparty": ("Kontragent", "Satıcı / təchizatçı"),
+    "e_qaime": ("E-qaimə №", "İxtiyari — alışın elektron qaiməsi"),
+    "serial_no": ("Seriya №", "İxtiyari — zavod / VIN nömrəsi"),
     "note": ("Qeyd", "İxtiyari"),
 }
 
 TEMPLATE_EXAMPLES = [
     ["NV-0001", "Toyota Camry 2.5", "nv", "2026-02-14", "45000", "",
-     "Toyota Center Baku", "bu il alınıb"],
+     "Toyota Center Baku", "EQ-2026-004512", "JTNBE46K873012345",
+     "bu il alınıb"],
     ["MA-0007", "Kompressor", "ma", "2023-05-10", "12000", "4800",
-     "Aqro Texnika", "əvvəlki illərdən — qalıq dəyər son bəyannamədən"],
-    ["", "Ofis mebeli", "dg", "2024-11-02", "3200", "1900", "Embawood",
+     "Aqro Texnika", "", "",
+     "əvvəlki illərdən — qalıq dəyər son bəyannamədən"],
+    ["", "Ofis mebeli", "dg", "2024-11-02", "3200", "1900", "Embawood", "", "",
      "inv.№ boşdur — proqram özü verəcək"],
 ]
 

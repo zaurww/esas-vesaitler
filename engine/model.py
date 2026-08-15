@@ -18,6 +18,13 @@ class Asset:
     in_date: Optional[date]
     cost: Decimal
     counterparty: str = ""
+    # Identifiers the tax calculation never touches, kept because the card is
+    # also the place an accountant comes to ANSWER things: which e-invoice this
+    # was bought on, which physical unit of forty identical ones this is. Both
+    # optional -- plenty of clients keep neither, and a blank column is not a
+    # missing fact.
+    e_qaime: str = ""                       # e-qaimə (electronic invoice) no.
+    serial_no: str = ""                     # serial / VIN / factory number
     useful_life: Optional[int] = None       # FİM, for category `it`
     is_legacy_pool: bool = False            # group residual carried without a card (§6.1)
     note: str = ""
@@ -122,6 +129,20 @@ class ClientData:
     statuses: list[TaxpayerStatus] = field(default_factory=list)
     elections: list[RateElection] = field(default_factory=list)
     writeoffs: list[WriteOff] = field(default_factory=list)
+
+    def card_meta(self) -> dict[str, dict[str, str]]:
+        """Card fields the calculation never reads, keyed by asset_id.
+
+        `CardResult` deliberately carries only what the pipeline works on, so
+        the counterparty, the e-invoice and the serial have to travel beside
+        it. One lookup for all of them: they are the same kind of thing --
+        what the card says about itself -- and a separate dict per field meant
+        a new field touched every caller.
+        """
+        return {a.asset_id: {"counterparty": a.counterparty,
+                             "e_qaime": a.e_qaime,
+                             "serial_no": a.serial_no}
+                for a in self.assets}
 
     def status_for(self, year: int) -> Optional[TaxpayerStatus]:
         rows = [s for s in self.statuses if s.year == year]

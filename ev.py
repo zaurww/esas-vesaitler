@@ -85,9 +85,8 @@ def cmd_calc(slug: str, year: int) -> None:
 def cmd_export(slug: str, year: int) -> None:
     data = load_client(ROOT, slug)
     r = compute_year(data, year)
-    cp = {a.asset_id: a.counterparty for a in data.assets}
     out = ROOT / "clients" / slug / f"{slug}-{year}-amortizasiya.xlsx"
-    out.write_bytes(build_workbook(r, cp))
+    out.write_bytes(build_workbook(r, data.card_meta()))
     print(f"yazıldı: {out}")
 
 
