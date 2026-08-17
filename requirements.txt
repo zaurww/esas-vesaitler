@@ -12,7 +12,9 @@
 #   python -m pip install -r requirements.txt
 #
 # Python 3.11 or newer is required: the code uses tomllib (3.11) and
-# X | None annotations at runtime. Developed on 3.13.
+# X | None annotations at runtime. Developed on 3.13, and the floor is now
+# a fact rather than a claim -- CI runs the suite on 3.11 too (CLAUDE.md
+# §11.5). The first such run found that ev.py did not even parse there.
 
 openpyxl>=3.1,<4
 
