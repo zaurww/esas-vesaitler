@@ -36,7 +36,8 @@ something narrower it can import the submodule directly; both work.
 """
 
 from .core import (
-    HEADERS, Tx, guard_open_year, mutate_folder, one_segment, rows_of,
+    BACKUP_KEEP_ALWAYS, BACKUP_KEEP_COUNT, BACKUP_KEEP_DAYS, HEADERS, Tx,
+    guard_open_year, mutate_folder, one_segment, prune_backups, rows_of,
     save_rows, transaction,
 )
 from .parse import category_of, dec, iso_date
@@ -83,13 +84,15 @@ ACTIONS = {
 }
 
 __all__ = [
-    "ACTIONS", "BATCH_MAX", "HEADERS", "IMPORT_ALIASES", "IMPORT_FIELDS",
+    "ACTIONS", "BACKUP_KEEP_ALWAYS", "BACKUP_KEEP_COUNT", "BACKUP_KEEP_DAYS",
+    "BATCH_MAX", "HEADERS", "IMPORT_ALIASES", "IMPORT_FIELDS",
     "MODES", "Tx", "add_addition", "add_repair", "asset_id_series",
     "batch_count", "category_of", "close_year", "create_asset",
     "create_client", "dec", "delete_asset", "export_client", "guard_open_year",
     "guess_columns", "import_assets", "import_client", "inspect_archive",
     "inv_series", "iso_date", "mutate_folder", "next_asset_id", "one_segment",
-    "remove_addition", "remove_repair", "reopen_year", "rows_of", "save_rows",
+    "prune_backups", "remove_addition", "remove_repair", "reopen_year",
+    "rows_of", "save_rows",
     "set_coefficient_row", "set_disposal", "set_election", "set_opening",
     "set_parameter_row", "set_rate_row", "set_status", "set_writeoff",
     "slugify", "suggest_inv_no", "transaction", "update_asset",

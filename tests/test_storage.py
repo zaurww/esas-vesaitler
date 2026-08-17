@@ -8,14 +8,15 @@ clients/ folder.
 import shutil
 import tempfile
 import unittest
+from datetime import datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
 from tests.support import EngineTest, rates
 
 from engine import mutate
-from engine.calc import compute_year
-from engine.storage import DataError, load_client
+from engine.calc import CalcError, compute_year
+from engine.storage import DataError, load_client, read_tsv
 
 
 class TempRoot(EngineTest):
@@ -232,12 +233,118 @@ class WriteProtection(TempRoot):
         mutate.create_asset(self.root, self.slug, {
             "mode": "new", "category": "dg", "name": "Soyuducu",
             "cost": "400", "in_date": "2024-05-01", "say": "50"})
-        snapshots = list((self.root / "backups" / self.slug).iterdir())
+        snapshots = [p for p in (self.root / "backups" / self.slug).iterdir()
+                     if p.is_dir()]
         self.assertEqual(len(snapshots), 1)
         # ... and still one changelog line per object.
         rows = [r for r in mutate.rows_of(self.root, self.slug, "changelog.tsv")
                 if r["field"] == "asset"]
         self.assertEqual(len(rows), 50)
+
+
+class Backups(TempRoot):
+    """§13.4: the folder used to grow without limit on a machine whose owner
+    is not in the loop. It is bounded now -- but only where bounding it cannot
+    cost somebody the single copy of what they deleted by mistake."""
+
+    def snap(self, days_ago: float, action: str = "asset.update") -> Path:
+        when = datetime.now() - timedelta(days=days_ago)
+        p = (self.root / "backups" / self.slug /
+             f"{when.strftime('%Y%m%d-%H%M%S-%f')}-{action}")
+        p.mkdir(parents=True)
+        return p
+
+    def snaps(self) -> list[str]:
+        folder = self.root / "backups" / self.slug
+        return sorted(p.name for p in folder.iterdir() if p.is_dir())
+
+    def many(self, n: int, days_ago: float) -> None:
+        for i in range(n):
+            self.snap(days_ago + i / 1440)
+
+    def test_a_snapshot_is_named_after_the_action_it_preceded(self):
+        """The keep-always rule has nothing else to read, and neither has the
+        person hunting for the state before a particular change."""
+        mutate.create_asset(self.root, self.slug, {
+            "mode": "new", "category": "ma", "name": "A", "cost": "1000",
+            "in_date": "2024-01-01"})
+        self.assertTrue(self.snaps()[0].endswith("-asset.create"))
+
+    def test_recent_snapshots_survive_however_many_there_are(self):
+        self.many(mutate.BACKUP_KEEP_COUNT + 20, days_ago=1)
+        self.assertEqual(mutate.prune_backups(self.root, self.slug), 0)
+
+    def test_old_snapshots_survive_while_they_are_among_the_last_kept(self):
+        self.many(mutate.BACKUP_KEEP_COUNT, days_ago=400)
+        self.assertEqual(mutate.prune_backups(self.root, self.slug), 0)
+
+    def test_old_AND_beyond_the_count_is_what_goes(self):
+        self.many(mutate.BACKUP_KEEP_COUNT + 3, days_ago=400)
+        self.assertEqual(mutate.prune_backups(self.root, self.slug), 3)
+        self.assertEqual(len(self.snaps()), mutate.BACKUP_KEEP_COUNT)
+
+    def test_the_snapshot_before_a_close_is_never_deleted(self):
+        """§13.4: closing a year is the one act coming back from is expensive,
+        so that snapshot outweighs any N and M."""
+        sealed = self.snap(500, action="year.close")
+        self.many(mutate.BACKUP_KEEP_COUNT + 5, days_ago=400)
+        mutate.prune_backups(self.root, self.slug)
+        self.assertTrue(sealed.is_dir())
+
+    def test_a_folder_we_did_not_write_is_left_alone(self):
+        """Only what this program created is this program's to delete."""
+        mine = self.root / "backups" / self.slug / "əl ilə saxlanılıb"
+        mine.mkdir(parents=True)
+        self.many(mutate.BACKUP_KEEP_COUNT + 5, days_ago=400)
+        mutate.prune_backups(self.root, self.slug)
+        self.assertTrue(mine.is_dir())
+
+    def test_the_cleanup_says_where_the_backups_went(self):
+        """Nobody would otherwise be able to answer that question, and
+        changelog.tsv is for the client's facts, not the program's."""
+        self.many(mutate.BACKUP_KEEP_COUNT + 2, days_ago=400)
+        mutate.prune_backups(self.root, self.slug)
+        rows = read_tsv(self.root / "backups" / self.slug / "_cleanup.tsv")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["removed"], "2")
+        self.assertEqual(rows[0]["kept"], str(mutate.BACKUP_KEEP_COUNT))
+
+    def test_a_write_never_prunes_its_own_backup(self):
+        """The rollback restores from the snapshot this transaction just took;
+        cleaning runs before the copy so it can never be a candidate."""
+        self.many(mutate.BACKUP_KEEP_COUNT + 5, days_ago=400)
+        mutate.create_asset(self.root, self.slug, {
+            "mode": "new", "category": "ma", "name": "A", "cost": "1000",
+            "in_date": "2024-01-01"})
+        self.assertTrue(self.snaps()[-1].endswith("-asset.create"))
+        self.assertEqual(len(self.snaps()), mutate.BACKUP_KEEP_COUNT + 1)
+
+
+class OwnerNorms(TempRoot):
+    """§5.1: the owner's rate rows live in the installation root and touch
+    every client, so writing one recomputes all of them."""
+
+    def test_an_owner_rate_row_reaches_the_table(self):
+        """This path raised ModuleNotFoundError for as long as the suite did
+        not walk it: splitting mutate.py into a package turned an intra-file
+        `from .storage import` into a reference to engine.mutate.storage."""
+        mutate.set_rate_row(self.root, self.slug, {
+            "effective_year": 2030, "category": "ma", "max_rate": "0.15"})
+        self.assertEqual(rates.statutory(2030, "ma").max_rate, Decimal("0.15"))
+
+    def test_a_rate_that_breaks_a_client_is_rolled_back(self):
+        """§8.1 for the norms: an election legal under 20% is not legal under
+        5%, and the client it breaks is not necessarily the one on screen."""
+        mutate.create_asset(self.root, self.slug, {
+            "mode": "new", "category": "ma", "name": "A", "cost": "1000",
+            "in_date": "2024-01-01"})
+        mutate.set_election(self.root, self.slug, {
+            "year": 2024, "category": "ma", "applied_rate": "0.20"})
+        with self.assertRaises(CalcError):
+            mutate.set_rate_row(self.root, self.slug, {
+                "effective_year": 2024, "category": "ma", "max_rate": "0.05",
+                "allow_past": True})
+        self.assertEqual(rates.statutory(2024, "ma").max_rate, Decimal("0.20"))
 
 
 class PathSafety(EngineTest):

@@ -1,0 +1,50 @@
+# Run the engine's control examples on every push (CLAUDE.md §13.5).
+#
+# The point of the matrix is not thoroughness for its own sake:
+#
+#   windows-latest  everything this project has actually tripped over is a
+#                   Windows thing -- console codepage, CRLF on checkout, the
+#                   BOM, how Excel opens a file. A Linux runner catches none
+#                   of them, and Windows is where the program is used (§9).
+#   ubuntu-latest   the cheap, fast half; it fails first when the break has
+#                   nothing to do with the platform.
+#   3.11            requirements.txt claims 3.11 as the floor, but everything
+#                   was only ever run on 3.13 -- until this job that floor was
+#                   a claim, not a fact.
+#
+# PYTHONIOENCODING is deliberately NOT set here. Başlat.bat sets it for the
+# UI, and that is exactly how `ev.py calc` came to die on an ANSI codepage
+# without anyone noticing (see test_the_console_report_survives_an_ansi_codepage).
+# A runner that quietly fixes the environment cannot find that class of bug.
+
+name: test
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false     # a Windows-only break must not hide a real one
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+        python: ["3.11", "3.13"]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - run: python -m pip install -r requirements.txt
+
+      - run: python ev.py test
+
+      # clients/demo-avto is committed on purpose and the control examples
+      # read it (§13.5). Reading is all they may do: a test that writes into
+      # the repository's own client would make the next run's numbers depend
+      # on the previous one.
+      - name: the committed client is unchanged
+        run: git diff --exit-code

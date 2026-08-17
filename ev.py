@@ -136,7 +136,38 @@ def cmd_test() -> int:
     return 0 if result.wasSuccessful() else 1
 
 
+def _utf8_console() -> None:
+    """Make the console able to print Azerbaijani before anything prints.
+
+    Every report here is in Azerbaijani, and a Windows console starts on the
+    ANSI codepage, where `ə ğ ı ş` simply do not exist. `python ev.py calc`
+    from an ordinary cmd window therefore died on UnicodeEncodeError halfway
+    through the first category -- not with a wrong number, but with a
+    traceback where a report should be. Başlat.bat sets `chcp 65001` and
+    PYTHONIOENCODING, so the UI never showed this; the CLI is reached
+    without it.
+
+    Both halves are needed: reconfiguring the stream alone writes UTF-8 bytes
+    into a cp866 console and produces mojibake, and setting the codepage
+    alone leaves Python encoding to the old one. `backslashreplace` is the
+    last resort -- a garbled letter is a bad report, a traceback is no
+    report at all, and §2.1 is about substituted numbers, not letters.
+    """
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            ctypes.windll.kernel32.SetConsoleOutputCP(65001)
+        except Exception:
+            pass
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="backslashreplace")
+        except (AttributeError, ValueError):
+            pass
+
+
 def main(argv: list[str]) -> int:
+    _utf8_console()
     if not argv or argv[0] in ("serve", "ui"):
         from web.app import serve
         serve()

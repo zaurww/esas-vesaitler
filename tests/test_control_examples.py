@@ -9,6 +9,7 @@ remembers to look. Here they run.
 .gitignore); the others are the owner's real data and are skipped when absent.
 """
 
+import sys
 import unittest
 from decimal import Decimal
 
@@ -103,6 +104,23 @@ class DemoAvto(EngineTest):
         for cat in r.categories:
             self.assertTrue(cat.rate.statutory_year > 1900)
             self.assertLessEqual(cat.rate.applied, cat.rate.ceiling)
+
+    def test_the_console_report_survives_an_ansi_codepage(self):
+        """A Windows console starts on the ANSI codepage, where `ə ğ ı ş` do
+        not exist, and `ev.py calc` used to die on UnicodeEncodeError partway
+        through the first category. Başlat.bat hid it (it sets chcp 65001);
+        the CLI is reached without the launcher.
+
+        Run as a subprocess on purpose: the failure was in what the process
+        does to its own streams at startup, which is not observable from
+        inside this one."""
+        import os
+        import subprocess
+        env = dict(os.environ, PYTHONIOENCODING="cp1252")
+        p = subprocess.run([sys.executable, "ev.py", "calc", "demo-avto", "2025"],
+                           cwd=str(ROOT), env=env, capture_output=True)
+        self.assertEqual(p.returncode, 0, p.stderr.decode("utf-8", "replace"))
+        self.assertIn("Amortizasiya", p.stdout.decode("utf-8", "replace"))
 
 
 if __name__ == "__main__":
