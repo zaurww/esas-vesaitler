@@ -10,8 +10,9 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from ..storage import DataError
+from ..storage import DataError, check_qma
 
+from .assets import life_of
 from .core import guard_open_year, rows_of, save_rows, transaction
 from .groups import find_group, next_group_id
 from .numbering import next_asset_id, suggest_inv_no
@@ -43,7 +44,7 @@ def resolve_group(groups: list[dict[str, str]], name) -> str:
 
 IMPORT_FIELDS = ("inv_no", "name", "category", "in_date", "cost",
                  "opening_residual", "counterparty", "e_qaime", "serial_no",
-                 "group", "note")
+                 "group", "useful_life", "note")
 
 # Header names seen in the wild: the source workbook, 1C exports, and the
 # obvious Russian/English equivalents. Matching is case- and space-insensitive.
@@ -77,6 +78,12 @@ IMPORT_ALIASES = {
     # no figure. Losing the tax category is the expensive half of that trade.
     "group": ["növ", "növü", "nov", "qrup adı", "qrup adi", "group name",
               "тип", "вид", "növ (qrup)"],
+    # Only a QMA with a known term uses it (m.114.3.6). Left out of a
+    # client's sheet it is simply empty, like the serial next to it.
+    "useful_life": ["fim", "istifadə müddəti", "istifade muddeti", "müddət",
+                    "muddet", "faydalı istifadə müddəti", "срок",
+                    "срок использования", "срок полезного использования",
+                    "useful life", "life"],
     "note": ["qeyd", "примечание", "note", "комментарий"],
 }
 
@@ -173,13 +180,22 @@ def import_assets(root: Path, slug: str, p: dict) -> Any:
                     # asking the accountant to key the list in twice. The
                     # preview says how many will be created before anything is
                     # written.
+                    # A term arriving from the sheet goes through the same
+                    # check as one typed into the form: whether it is required,
+                    # forbidden or ignored depends on the category, and an
+                    # import that quietly disagreed with the form would be the
+                    # worse of the two paths to trust (§11.2).
+                    life = life_of(raw.get("useful_life"))
+                    life_str = "" if life is None else str(life)
+                    check_qma(category, in_date=in_date or None,
+                              useful_life=life, is_legacy_pool=False)
                     gid = resolve_group(groups, raw.get("group"))
                     aid = next_asset_id(assets)
                     assets.append({
                         "asset_id": aid, "inv_no": inv, "name": name,
                         "category": category, "in_date": in_date, "cost": cost,
                         "counterparty": str(raw.get("counterparty", "")).strip(),
-                        "useful_life": "", "is_legacy_pool": "",
+                        "useful_life": life_str, "is_legacy_pool": "",
                         "note": str(raw.get("note", "")).strip(),
                         "e_qaime": str(raw.get("e_qaime", "")).strip(),
                         "serial_no": str(raw.get("serial_no", "")).strip(),

@@ -43,6 +43,7 @@ CATEGORIES: List[Category] = [
 
 CATEGORY_BY_CODE: Dict[str, Category] = {c.code: c for c in CATEGORIES}
 EV_CODES = [c.code for c in CATEGORIES if c.kind == "ev"]
+QMA_CODES = [c.code for c in CATEGORIES if c.kind == "qma"]
 
 
 # Where each category comes from in the code, so the table can cite the law
@@ -66,6 +67,15 @@ class RateRow(NamedTuple):
     max_rate: Decimal | None  # None => rate is derived from useful life (FİM)
     repair_limit: Decimal | None
     note: str = ""
+    # WHAT the norm is applied to, which for one category the law changed
+    # rather than merely renumbering:
+    #   "azalan"  declining balance -- norm x residual, art. 114.4
+    #   "duz"     straight line     -- the cost spread over a term, 114.3.6
+    # It sits in the table beside the rate because it moves with a year the
+    # same way a rate does (qma-n, 2026), so a past year must keep computing
+    # the way it was filed. It is NOT in rates.tsv: the owner edits NUMBERS of
+    # the law (§5.1-bis), and a method is a form of formula, i.e. code.
+    method: str = "azalan"
 
 
 # TODO §12.2 -- confirm effective_year against the current tax code wording.
@@ -99,8 +109,24 @@ STATUTORY_RATES: List[RateRow] = [
     RateRow(2022, "yt", D("0.25"), D("0.05"), "406-VIQD 03.12.2021"),
     RateRow(2001, "dg", D("0.20"), D("0.03")),
     RateRow(2001, "it", None, D("0.03")),       # 1/MAX(FİM;5)
-    RateRow(2001, "qma-m", None, None),         # 1/FİM
-    RateRow(2001, "qma-n", D("0.10"), None),
+
+    # -- Qeyri-maddi aktivlər, 114.3.6 -------------------------------------
+    # A known term has always been straight line: "illər üzrə istifadə
+    # müddətinə mütənasib məbləğlərlə" -- amounts proportional to the years of
+    # the term, which is a schedule and not a rate on a residual.
+    #
+    # An unknown term was "10 faizədək", a NORM, and a norm goes on the
+    # residual (114.4) -- declining balance, with a tail that nothing ever
+    # ends: art. 114.8 cuts short a small residual only for `əsas vəsait`, and
+    # a QMA is not one (art. 118). Law 297-VIIQD of 9 Dec 2025 closed that: it
+    # put "(bu Məcəllənin 114.3.6-cı maddəsinə münasibətdə düz xətt metodu)"
+    # into 114.3 -- addressed to the WHOLE of 114.3.6, both halves -- and gave
+    # the unknown term a length in 114.3-1.10: ten years. Ten years and ten
+    # per cent are the same number, which is what makes the reading hold.
+    RateRow(2001, "qma-m", None, None, "", "duz"),          # 1/FİM
+    RateRow(2001, "qma-n", D("0.10"), None, "", "azalan"),
+    RateRow(2026, "qma-n", D("0.10"), None,
+            "297-VIIQD 09.12.2025", "duz"),
 ]
 
 
@@ -138,11 +164,20 @@ PARAM_DEFS: Dict[str, tuple] = {
                       "VM m.114.8", "money"),
     "threshold_pct": ("Birdəfəlik silinmə həddi — ilkin dəyərin faizi",
                       "VM m.114.8", "pct"),
+    # Straight line needs a length, and for a QMA whose term is unknown the
+    # law supplies one. A number, therefore data (§5.1-bis) -- the method that
+    # consumes it stays in the engine.
+    "qma_term_unknown": ("QMA — istifadə müddəti məlum olmayanlar üçün müddət",
+                         "VM m.114.3-1.10", "years"),
 }
 
 PARAMETERS: List[ParamRow] = [
     ParamRow(2001, "threshold_abs", D("500")),
     ParamRow(2001, "threshold_pct", D("0.05")),
+    # No row before 2026 on purpose: until then an unknown term had no length,
+    # it had a rate on the residual. Asking for one earlier is a bug, and
+    # `parameter()` says so instead of inventing ten years (§2.1).
+    ParamRow(2026, "qma_term_unknown", D("10"), "297-VIIQD 09.12.2025"),
 ]
 
 
@@ -287,7 +322,11 @@ def statutory(year: int, category: str) -> RateRow:
                       row.max_rate if row.max_rate is not None else base.max_rate,
                       row.repair_limit if row.repair_limit is not None
                       else base.repair_limit,
-                      row.note)
+                      row.note,
+                      # rates.tsv has no method column, so an owner row would
+                      # otherwise fall to the field default and quietly move a
+                      # QMA back onto the declining balance.
+                      base.method)
     if row is None:
         raise LookupError(
             f"нет статутной ставки для категории {category!r} на {year} год"
@@ -335,6 +374,7 @@ def history(category: str) -> list[dict]:
             "until": years[i + 1] - 1 if i + 1 < len(years) else None,
             "max_rate": _pct(st.max_rate),
             "repair_limit": _pct(st.repair_limit),
+            "method": st.method,
             "source": "user" if user is not None else "engine",
             "note": (user.note if user is not None else st.note) or "",
         })
@@ -366,6 +406,11 @@ def table_for(year: int) -> list[dict]:
             "law_ref": LAW_REF.get(c.code, ""),
             "max_rate": _pct(st.max_rate),
             "repair_limit": _pct(st.repair_limit),
+            # Printed beside the rate rather than left implicit: for `qma-n`
+            # the same 10% means two different calculations depending on the
+            # year, and a screen that shows only "10%" cannot say which.
+            "method": st.method,
+            "kind": c.kind,
             "source": "user" if user is not None else "engine",
             "note": (user.note if user is not None else st.note) or "",
             "history": history(c.code),

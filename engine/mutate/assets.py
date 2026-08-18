@@ -11,7 +11,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from ..rates import CATEGORY_BY_CODE
-from ..storage import DataError
+from ..storage import DataError, check_qma
 
 from .core import Tx, guard_open_year, rows_of, save_rows, transaction
 from .groups import group_ref
@@ -21,6 +21,24 @@ from .parse import category_of, dec, iso_date
 D = Decimal
 
 MODES = ("new", "carried", "pool")
+
+
+def life_of(value) -> int | None:
+    """The FİM in whole years, or None when the field was left empty.
+
+    Years, not a date: 114.3.6 spreads the cost "illər üzrə", and half a year
+    is not a thing the schedule can express.
+    """
+    v = str(value or "").strip()
+    if not v:
+        return None
+    try:
+        n = int(v)
+    except ValueError:
+        raise DataError(f"İstifadə müddəti tam illə göstərilməlidir: {v!r}")
+    if n < 1:
+        raise DataError("İstifadə müddəti 1 ildən kiçik ola bilməz")
+    return n
 
 
 def create_asset(root: Path, slug: str, p: dict) -> str:
@@ -45,6 +63,8 @@ def create_asset(root: Path, slug: str, p: dict) -> str:
     if mode not in MODES:
         raise DataError(f"naməlum rejim: {mode!r}")
     category = category_of(p.get("category"))
+    is_qma = CATEGORY_BY_CODE[category].kind == "qma"
+    life = life_of(p.get("useful_life"))
     residual = str(p.get("opening_residual", "")).strip()
     count = batch_count(p.get("say"))
     if mode == "pool" and count > 1:
@@ -69,8 +89,12 @@ def create_asset(root: Path, slug: str, p: dict) -> str:
             name = str(p.get("name", "")).strip()
             if not name:
                 raise DataError("Adı boş ola bilməz")
+            # A QMA needs its date in every mode, `carried` included: the
+            # straight line has to know which year is year zero, and a card
+            # brought over from the client's last return has one just the
+            # same (§5.3, the `duz` branch).
             in_date = iso_date(p.get("in_date"), "Alış tarixi",
-                               required=(mode == "new"))
+                               required=(mode == "new" or is_qma))
             cost = dec(p.get("cost"), "İlkin dəyər",
                        allow_zero=(mode == "carried"))
             if mode == "new" and D(cost) == 0:
@@ -78,6 +102,9 @@ def create_asset(root: Path, slug: str, p: dict) -> str:
             if mode == "carried" and not residual:
                 raise DataError("Əvvəlki illərdən gələn ƏV üçün qalıq dəyər "
                                 "tələb olunur")
+
+        check_qma(category, in_date=in_date or None, useful_life=life,
+                  is_legacy_pool=(mode == "pool"))
 
         if mode == "pool":
             numbers = [""]
@@ -114,7 +141,7 @@ def create_asset(root: Path, slug: str, p: dict) -> str:
                 "asset_id": aid, "inv_no": number, "name": name,
                 "category": category, "in_date": in_date, "cost": cost,
                 "counterparty": str(p.get("counterparty", "")).strip(),
-                "useful_life": str(p.get("useful_life", "")).strip(),
+                "useful_life": "" if life is None else str(life),
                 "is_legacy_pool": "1" if mode == "pool" else "",
                 "note": str(p.get("note", "")).strip(),
                 "e_qaime": str(p.get("e_qaime", "")).strip(),
@@ -147,6 +174,7 @@ def create_asset(root: Path, slug: str, p: dict) -> str:
 
 def update_asset(root: Path, slug: str, p: dict) -> str:
     aid = str(p["asset_id"])
+    life = life_of(p.get("useful_life"))
     with transaction(root, slug, "asset.update") as tx:
         assets = rows_of(root, slug, "assets.tsv")
         row = next((r for r in assets if r["asset_id"] == aid), None)
@@ -158,6 +186,7 @@ def update_asset(root: Path, slug: str, p: dict) -> str:
             "category": category_of(p.get("category")),
             "in_date": iso_date(p.get("in_date"), "Alış tarixi"),
             "cost": dec(p.get("cost"), "İlkin dəyər"),
+            "useful_life": ("" if life is None else str(life)),
             "counterparty": str(p.get("counterparty", "")).strip(),
             "note": str(p.get("note", "")).strip(),
             "e_qaime": str(p.get("e_qaime", "")).strip(),
@@ -169,6 +198,10 @@ def update_asset(root: Path, slug: str, p: dict) -> str:
             raise DataError(f"inv_no {new['inv_no']!r} artıq mövcuddur")
         if not new["name"]:
             raise DataError("Adı boş ola bilməz")
+        check_qma(new["category"], in_date=new["in_date"] or None,
+                  useful_life=life,
+                  is_legacy_pool=row.get("is_legacy_pool", "").strip()
+                  in ("1", "true", "yes"))
 
         # Only the fields that reach the calculation are frozen by a closed
         # year. A closed year seals the RETURN, not the card: correcting a
@@ -178,7 +211,9 @@ def update_asset(root: Path, slug: str, p: dict) -> str:
         # after it, so they are refused for both the old and the new year --
         # moving an asset OUT of a closed year rewrites it just as much as
         # moving one in.
-        for field in ("cost", "in_date", "category"):
+        # The FİM joins them: it IS the rate for a straight-line card, so
+        # changing it rewrites every year the card was in.
+        for field in ("cost", "in_date", "category", "useful_life"):
             if row[field] == new[field]:
                 continue
             for value in (row["in_date"], new["in_date"]):

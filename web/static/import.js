@@ -40,7 +40,7 @@ function impBox(step, body, foot, back, sheet){
 }
 
 const STAY = '__stay__';
-const impCats = () => CTX.categories.filter(c => !c.code.startsWith('qma'));
+const impCats = () => cardCats();
 
 /* ---- step 1: get the sheet in ---- */
 function impRender(){
@@ -216,6 +216,10 @@ const GRID_COLS = [
   {f:'name',             t:'Adı *',             w:180},
   {f:'in_date',          t:'Alış tarixi',       w:100, ph:'GG.AA.YYYY'},
   {f:'cost',             t:'İlkin dəyər',       w:118, num:true},
+  // Only a QMA with a known term uses it (m.114.3.6), and for everything else
+  // it stays empty -- but it must be HERE, because the grid and the form are
+  // one and the same act of creating a card (§11.2).
+  {f:'useful_life',      t:'FİM (il)',          w: 84},
   // The heading is uppercased by the stylesheet, so it needs the room its
   // own lower-case text does not suggest.
   {f:'opening_residual', t:() => `Qalıq (${IMP.year} əvv.)`,

@@ -13,6 +13,25 @@ function batchTotal(){
     : '—';
 }
 
+/* The term of a QMA, shown only where it means something.
+
+   `qma-m` IS the category "term known", so the field is required there and
+   the card cannot be saved without it -- the engine has no schedule otherwise
+   (§5.3, the `duz` branch). `qma-n` is the opposite claim, so a term typed
+   there is refused rather than kept: it would say the term is known and
+   unknown at once. Everything else never sees the field at all. */
+function qmaToggle(){
+  const f = document.getElementById('mform');
+  const box = document.getElementById('fimbox');
+  if (!f || !box || !f.category) return;
+  const cat = f.category.value;
+  box.hidden = cat !== 'qma-m';
+  const inp = box.querySelector('input');
+  if (inp) inp.required = (cat === 'qma-m');
+  const note = document.getElementById('qmanote');
+  if (note) note.hidden = cat !== 'qma-n';
+}
+
 /* ---- asset: new / carried over / group pool ---- */
 function formAsset(card){
   const edit = !!card;
@@ -55,6 +74,20 @@ function formAsset(card){
               hint: mode==='carried'
                 ? 'Məlum deyilsə boş buraxın — onda 500/5% testinin yalnız 500 AZN hissəsi işləyəcək.'
                 : ''});
+      // The term sits with the cost, because together they ARE the schedule:
+      // m.114.3.6 spreads the one over the other. Hidden until the category
+      // asks for it -- see qmaToggle().
+      h += `<div id="fimbox" hidden>` + fld('useful_life','İstifadə müddəti — FİM (il)',
+              {type:'number',min:'1',step:'1',
+               value:card&&card.rate_info&&card.rate_info.term_years,
+               hint:'m.114.3.6: müddəti məlum olan QMA ilkin dəyəri bu illər '
+                  + 'üzrə bərabər hissələrlə gəlirdən çıxılır. Sahibkarlıq '
+                  + 'əmsalı (×2 / ×1,5) QMA-ya tətbiq olunmur — m.114.3-2 '
+                  + 'yalnız əsas vəsaitlərə aiddir.'}) + `</div>
+        <div id="qmanote" class="fld" hidden><div class="h">Müddəti məlum
+          olmayan QMA: <strong>2026-cı ildən düz xətt metodu ilə 10 il</strong>
+          (m.114.3-1.10, 297-VIIQD), ondan əvvəlki illər üçün 10% azalan qalıq
+          dəyəri. Müddət kartda göstərilmir — qanun özü verir.</div></div>`;
       // Neither figure enters the calculation; both are here because the card
       // is also where an accountant comes to answer "which invoice was this
       // on" and "which of the forty units is it". Optional on purpose --
@@ -117,14 +150,18 @@ function formAsset(card){
         onu əl ilə təyin etmək lazımdırsa: «Açılış qalığı».</div></div>`;
     }
     h += fld('note','Qeyd',{value:card&&card.note});
-    openModal(edit ? `ƏV redaktəsi — ${card.inv_no || card.name}` : 'Yeni ƏV', h,
+    openModal(edit ? `Kart redaktəsi — ${card.inv_no || card.name}`
+                   : 'Yeni ƏV / QMA', h,
       async d => post(edit ? 'asset.update' : 'asset.create',
                       await groupResolve(d)),
       edit ? 'Yadda saxla' : 'Əlavə et');
     // Assigned rather than added: render() runs again on every mode switch,
     // and addEventListener would stack a handler each time.
-    document.getElementById('mbody').oninput = batchTotal;
+    // One handler for both: the category select decides whether the term
+    // field is on screen, and the count decides what the batch costs.
+    document.getElementById('mbody').oninput = () => { batchTotal(); qmaToggle(); };
     batchTotal();
+    qmaToggle();
   };
   window.ASSETMODE = m => { mode = m; render(); };
   render();
@@ -264,12 +301,15 @@ async function showHistory(id){
     <td class="num">${money(y.repair_capitalized)}</td>
     <td class="num">${money(y.disposed)}</td>
     <td class="num">${money(y.base)}</td>
-    ${(parseFloat(y.rate)
+    ${(y.method === 'duz'
+        ? [`1/${y.term_years}`, '<span class="zero">—</span>']
+        : parseFloat(y.rate)
         ? rateSplit(y.rate, y.rate_statutory, y.coefficient)
         : ['<span class="zero">—</span>', '<span class="zero">—</span>'])
       .map(v => `<td class="num">${v}</td>`).join('')}
-    <td class="num">${parseFloat(y.rate) ? pct(y.rate)
-      : '<span class="zero">—</span>'}</td>
+    <td class="num">${y.method === 'duz'
+      ? `${y.term_years} il <span class="tag">qalan ${y.remaining_years}</span>`
+      : parseFloat(y.rate) ? pct(y.rate) : '<span class="zero">—</span>'}</td>
     <td class="num"><strong>${money(y.depreciation)}</strong></td>
     <td class="num">${money(y.writeoff)}</td>
     <td class="num">${money(y.closing)}</td>

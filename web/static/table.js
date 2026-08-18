@@ -30,7 +30,7 @@ const ANN_COLS = [
   {k:'factor',   h:'Əmsal',
    cell:(c,cat) => annRate(c,cat)[1],          tot:() => null},
   {k:'rate',     h:'Dərəcə',
-   cell:c => parseFloat(c.rate) ? pct(c.rate) : '<span class="zero">—</span>',
+   cell:c => rateCell(c),
    tot:() => null},
   {k:'depreciation', h:'Amortizasiya',
    cell:c => `<strong>${money(c.depreciation)}</strong>`,
@@ -45,8 +45,29 @@ const ANN_COLS = [
 // how this person works, not a click to be repeated every morning.
 let HIDECOLS = new Set(JSON.parse(localStorage.getItem('ev.hidecols') || '[]'));
 
+/* A straight-line card states a TERM, never a bare percentage.
+
+   The charge is base / years remaining, so a cell reading "20%" beside a base
+   of 800 invites the reader to arrive at 160 when the row says 200. Printing
+   what it actually is -- five years, three of them left -- makes the amount
+   reproducible from the columns next to it, which is the whole point of
+   showing a rate at all (§5.2). */
+function rateCell(c){
+  const ri = c.rate_info;
+  if (ri && ri.method === 'duz' && ri.remaining_years)
+    return `<span title="düz xətt: baza ÷ qalan il">${ri.term_years} il
+      <span class="tag">qalan ${ri.remaining_years}</span></span>`;
+  return parseFloat(c.rate) ? pct(c.rate) : '<span class="zero">—</span>';
+}
+
 function annRate(c, cat){
   const ri = c.rate_info || cat.rate;
+  // Straight line: the norm is a fraction of the term and no coefficient can
+  // reach it (114.3-2 and 114.3-3 speak of fixed assets), so the factor
+  // column has nothing to say rather than a misleading x1.
+  if (ri && ri.method === 'duz')
+    return [ri.term_years ? `1/${ri.term_years}` : 'FİM üzrə',
+            '<span class="zero">—</span>'];
   if (!parseFloat(c.rate))
     return ['<span class="zero">—</span>', '<span class="zero">—</span>'];
   const [norm, factor] = rateSplit(c.rate, ri.statutory_max, ri.coefficient);
@@ -115,14 +136,23 @@ function viewAnnual(d){
     const cards = cat.cards.filter(match);
     if (!cards.length) continue;
     const r = cat.rate;
-    rows += `<tr class="cat"><td colspan="${span}">${esc(cat.name_az)}
-      <span class="rate">${pct(r.statutory_max)} × ${r.coefficient} (${esc(d.status)})
+    // A straight-line category has no ceiling to state and no rate to change:
+    // the schedule comes from a term, per card where the card carries it. The
+    // old header would have printed "0% x 1 = 0% hədd" for `qma-m` -- true of
+    // nothing, and it invites the reader to look for the missing rate.
+    const headRate = r.method === 'duz'
+      ? `<span class="rate">düz xətt (m.114.3.6) · ${r.per_card
+          ? 'müddət hər kartda — FİM'
+          : r.term_years + ' il'} · sahibkar əmsalı tətbiq olunmur</span>`
+      : `<span class="rate">${pct(r.statutory_max)} × ${r.coefficient} (${esc(d.status)})
       = ${pct(r.ceiling)} hədd · tətbiq <strong>${pct(r.applied)}</strong>
       ${cat.mixed_rates ? '<span class="tag">fərdi dərəcələr var</span>'
         : r.below_ceiling ? '<span class="tag w">həddən aşağı</span>' : ''}
       ${d.is_closed ? '' : `<button class="tagbtn"
         onclick="event.stopPropagation();formElection(REPORT.categories.find(x=>x.code==='${cat.code}'))"
-        >dərəcəni dəyiş</button>`}</span></td></tr>`;
+        >dərəcəni dəyiş</button>`}</span>`;
+    rows += `<tr class="cat"><td colspan="${span}">${esc(cat.name_az)}
+      ${headRate}</td></tr>`;
     for (const c of cardOrder(cards)){
       // A group header, printed when the run of cards changes group. The rows
       // are already ordered by group, so this is a fold, not a second pass.

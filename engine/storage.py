@@ -59,6 +59,53 @@ def _int(value: str, where: str) -> int:
         raise DataError(f"{where}: tam ədəd deyil — {value!r}") from None
 
 
+def check_qma(category: str, *, in_date, useful_life, is_legacy_pool,
+              where: str = "") -> None:
+    """What a QMA card must carry, checked on the way in AND on the way out.
+
+    A straight line is a schedule, and a schedule needs two things a rate
+    never did: where it starts and how long it runs. Both are therefore facts
+    of the card rather than defaults the engine could supply --
+
+    * `in_date` -- with no start there is no year zero, and the engine cannot
+      tell a first year from a fifth;
+    * the FİM on `qma-m` -- that IS what "istifadə müddəti məlum" means, so a
+      card without it is not a known-term intangible, it is an unfinished one.
+
+    The mirror check matters as much: a FİM written on `qma-n` says the term
+    is known and unknown at once. Refused rather than ignored, because the
+    figure it silently costs is large -- ten years against three.
+
+    A group pool is refused outright: it stands for a category with no cards
+    (§6.1), so it has neither a date nor a term, and 10% of a residual is the
+    one thing a straight line will not do.
+
+    Raising from both sides is deliberate (§8): the files are plain text and
+    people edit them.
+    """
+    if CATEGORY_BY_CODE[category].kind != "qma":
+        return
+    w = f"{where}: " if where else ""
+    name = CATEGORY_BY_CODE[category].name_az
+    if is_legacy_pool:
+        raise DataError(
+            f"{w}qeyri-maddi aktiv üçün qrup qalığı tətbiq olunmur — "
+            f"QMA hər kart üzrə ayrıca amortizasiya olunur (m.114.5)")
+    if in_date is None:
+        raise DataError(
+            f"{w}{name}: alış tarixi tələb olunur — düz xətt metodu üçün "
+            f"amortizasiya cədvəlinin başlanğıcı məlum olmalıdır")
+    if category == "qma-m":
+        if useful_life is None or int(useful_life) < 1:
+            raise DataError(
+                f"{w}{name}: istifadə müddəti (FİM, il) tələb olunur və 1-dən "
+                f"kiçik ola bilməz (m.114.3.6)")
+    elif useful_life is not None:
+        raise DataError(
+            f"{w}{name}: istifadə müddəti göstərilib — müddət məlumdursa, "
+            f"kateqoriya «QMA — FİM məlum» olmalıdır")
+
+
 def _category(value: str, where: str) -> str:
     v = (value or "").strip()
     if v not in CATEGORY_BY_CODE:
@@ -203,11 +250,16 @@ def load_client(root: Path, slug: str) -> ClientData:
         gid = r.get("group_id", "").strip()
         if gid and gid not in seen_groups:
             raise DataError(f"{w}: mövcud olmayan qrupa istinad — {gid!r}")
+        cat = _category(r.get("category", ""), w)
+        is_pool = r.get("is_legacy_pool", "").strip() in ("1", "true", "yes")
+        check_qma(cat, in_date=in_date,
+                  useful_life=int(life) if life else None,
+                  is_legacy_pool=is_pool, where=w)
         data.assets.append(Asset(
             asset_id=aid,
             inv_no=inv,
             name=r.get("name", "").strip(),
-            category=_category(r.get("category", ""), w),
+            category=cat,
             in_date=in_date,
             cost=cost,
             counterparty=r.get("counterparty", "").strip(),
@@ -215,7 +267,7 @@ def load_client(root: Path, slug: str) -> ClientData:
             serial_no=r.get("serial_no", "").strip(),
             group_id=gid,
             useful_life=int(life) if life else None,
-            is_legacy_pool=r.get("is_legacy_pool", "").strip() in ("1", "true", "yes"),
+            is_legacy_pool=is_pool,
             note=r.get("note", "").strip(),
         ))
 

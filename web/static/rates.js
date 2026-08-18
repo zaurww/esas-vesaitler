@@ -27,6 +27,10 @@ async function loadNorms(){
     ? `${since}-dən indiyədək` : `${since}–${until}`;
 
   let rows = '';
+  const methodAz = r => r.method === 'duz'
+    ? '<span title="ilkin dəyər müddət üzrə bərabər bölünür">düz xətt</span>'
+    : '<span class="h">azalan qalıq</span>';
+
   for (const r of NORMS.rates){
     // One row = the rate has never changed, so a year would be noise.
     const basis = r.changes > 1
@@ -34,7 +38,8 @@ async function loadNorms(){
       : esc(r.law_ref);
     rows += `<tr>
       <td>${esc(r.code)}</td><td>${esc(r.name_az)}</td>
-      <td class="num">${pc(r.max_rate)}</td>
+      <td class="num">${r.max_rate ? pc(r.max_rate) : 'FİM üzrə'}</td>
+      <td class="num">${methodAz(r)}</td>
       <td class="num">${pc(r.repair_limit)}</td>
       <td>${basis}</td><td>${src(r.source)}</td></tr>`;
     if (r.changes > 1) for (const h of r.history){
@@ -42,7 +47,8 @@ async function loadNorms(){
       rows += `<tr class="hist${now ? ' on' : ''}">
         <td></td><td class="h">${now ? '▸ ' : ''}${span(h.since, h.until)}
           ${h.note ? '· ' + esc(h.note) : ''}</td>
-        <td class="num h">${pc(h.max_rate)}</td>
+        <td class="num h">${h.max_rate ? pc(h.max_rate) : 'FİM üzrə'}</td>
+        <td class="num h">${methodAz(h)}</td>
         <td class="num h">${pc(h.repair_limit)}</td>
         <td colspan="2">${h.source === 'user' ? src(h.source) : ''}</td></tr>`;
     }
@@ -84,6 +90,7 @@ async function loadNorms(){
       qanun dəyişibsə, aşağıdakı düymələrlə yeni sətir əlavə edin.` : ''}</div>
     <div class="card"><div class="scroll"><table><thead><tr>
       <th>Kod</th><th>Kateqoriya</th><th class="num">Norma (maks)</th>
+      <th class="num">Metod</th>
       <th class="num">Təmir limiti (m.115)</th><th>Əsas</th>
       <th>Mənbə</th></tr></thead><tbody>${rows}</tbody></table></div></div>
     <h3>Sahibkarlıq əmsalları</h3>
@@ -183,6 +190,15 @@ function mxCell(c){
   if (!c.computed) return `<td class="y bad" title="${esc(c.note)}">
       <div class="r">hesablanmadı</div></td>`;
   if (!c.on_books) return `<td class="y off">—</td>`;
+  // A straight-line cell states a term. Printing 1/term as a percentage
+  // beside the others would read as a rate on a residual, and the year the
+  // METHOD moved -- 10% declining in 2025, ten years straight from 2026 --
+  // would be the one break this table failed to show (§5.6-bis).
+  if (c.method === 'duz')
+    return `<td class="y${c.rate_changed ? ' chg' : ''}"
+        title="düz xətt: ilkin dəyər müddət üzrə bölünür">
+      <div class="r">${c.per_card ? 'FİM üzrə' : c.term_years + ' il'}</div>
+      <div class="u">düz xətt${c.cards ? ' · ' + c.cards + ' kart' : ''}</div></td>`;
   const marks = [];
   if (c.source === 'asset') marks.push('obyekt üzrə');
   else if (c.source === 'category') marks.push('seçilib');

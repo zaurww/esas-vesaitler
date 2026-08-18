@@ -131,14 +131,26 @@ def _sheet_summary(wb: Workbook, r: YearResult) -> None:
                     "Silinmə (500/5%)", "Qalıq (il sonu)"])
     row = 5
     for cat in r.categories:
-        vals = [cat.name_az, _f(cat.rate.applied), _f(cat.opening), _f(cat.acquisition),
+        # A straight-line category states its term, not a percentage: the
+        # charge is the base divided by the years left, so a per-cent figure
+        # in this column would be one nobody can multiply back. `qma-m` has
+        # not even that -- the term is on each card.
+        if cat.rate.method == "duz":
+            rate_cell = ("FİM üzrə" if cat.rate.per_card
+                         else f"{cat.rate.term_years} il")
+        else:
+            rate_cell = _f(cat.rate.applied)
+        vals = [cat.name_az, rate_cell, _f(cat.opening), _f(cat.acquisition),
                 _f(cat.repair_capitalized), _f(cat.disposed), _f(cat.depreciation),
                 _f(cat.writeoff), _f(cat.closing)]
         for i, v in enumerate(vals, start=1):
             c = ws.cell(row, i, v)
             c.border = BORDER
             if i == 2:
-                c.number_format = PCT
+                if isinstance(v, str):
+                    c.alignment = Alignment(horizontal="right")
+                else:
+                    c.number_format = PCT
             elif i > 2:
                 c.number_format = MONEY
         row += 1
@@ -162,10 +174,26 @@ def _sheet_summary(wb: Workbook, r: YearResult) -> None:
     row += 3
     ws.cell(row, 1, "Dərəcənin hesablanması").font = Font(bold=True, size=11)
     row += 1
-    _header(ws, row, ["Kateqoriya", "Norma (maks)", "Əmsal", "Hədd", "Tətbiq olunan"])
+    _header(ws, row, ["Kateqoriya", "Norma (maks)", "Əmsal", "Hədd",
+                      "Tətbiq olunan"])
     row += 1
     for cat in r.categories:
         ri = cat.rate
+        if ri.method == "duz":
+            # Norm x factor = ceiling does not describe this category at all.
+            # Saying so is the only honest row: the coefficient is not merely
+            # unused here, art. 114.3-2 does not reach a QMA.
+            vals = [cat.name_az,
+                    "FİM üzrə" if ri.per_card else f"1/{ri.term_years}",
+                    "tətbiq olunmur", "düz xətt (m.114.3.6)",
+                    "müddət üzrə" if ri.per_card else f"{ri.term_years} il"]
+            for i, v in enumerate(vals, start=1):
+                c = ws.cell(row, i, v)
+                c.border = BORDER
+                if i > 1:
+                    c.alignment = Alignment(horizontal="right")
+            row += 1
+            continue
         vals = [cat.name_az, _f(ri.statutory_max), _f(ri.coefficient),
                 _f(ri.ceiling), _f(ri.applied)]
         for i, v in enumerate(vals, start=1):
@@ -206,7 +234,7 @@ def _sheet_cards(wb: Workbook, r: YearResult,
             "E-qaimə", "Seriya №",
             "Alış tarixi", "İlkin dəyər", "Qalıq (il əvvəli)",
             "Daxilolma", "Dəyər artımı", "Kapital. təmir", "Xaricetmə",
-            "Norma (m.114.3)", "Əmsal", "Dərəcə",
+            "Norma (m.114.3)", "Əmsal", "Dərəcə", "Metod",
             "Amortizasiya", "Silinmə", "Qalıq (il sonu)"]
     _header(ws, 1, head)
     col = {name: i for i, name in enumerate(head, start=1)}
@@ -227,6 +255,12 @@ def _sheet_cards(wb: Workbook, r: YearResult,
             # A retired row states no rate: there is no base for one to act on.
             if card.retired or not norm:
                 norm_out, factor = None, None
+            elif ri.method == "duz":
+                # The norm is a fraction of the term and stays; the factor
+                # does not exist (no coefficient reaches a QMA) and neither
+                # does an "applied rate" to multiply the base by -- that is
+                # what the «Metod» column says instead.
+                norm_out, factor = _f(norm), None
             else:
                 norm_out, factor = _f(norm), float(card.rate / norm)
             RETIRED_AZ = {"writeoff": "500/5% silinib", "realizasiya": "satılıb",
@@ -239,6 +273,19 @@ def _sheet_cards(wb: Workbook, r: YearResult,
                 suffix = (f" ({RETIRED_AZ.get(card.retired_kind, 'balansdan çıxıb')}"
                           f"{', ' + str(card.retired_year) if card.retired_year else ''})")
             info = meta.get(card.asset_id, {})
+            # Straight line: the charge is the base divided by the years
+            # left, so the percentage beside it is the norm and NOT a factor
+            # anyone should multiply the base by. The column says which.
+            if ri.method == "duz":
+                method = "düz xətt"
+                if ri.term_years:
+                    method += f" · {ri.term_years} il"
+                if ri.remaining_years:
+                    method += f" (qalan {ri.remaining_years})"
+            else:
+                method = "azalan qalıq"
+            if card.retired:
+                method = ""
             vals = [flag, card.category, cat.name_az, info.get("group", ""),
                     card.inv_no,
                     card.name + suffix,
@@ -248,7 +295,8 @@ def _sheet_cards(wb: Workbook, r: YearResult,
                     _f(card.cost), _f(card.opening), _f(card.acquisition),
                     _f(card.addition), _f(card.repair_capitalized),
                     _f(card.disposed), norm_out, factor,
-                    None if card.retired else _f(card.rate),
+                    None if card.retired or ri.method == "duz"
+                    else _f(card.rate), method,
                     _f(card.depreciation), _f(card.writeoff), _f(card.closing)]
             for i, v in enumerate(vals, start=1):
                 cell = ws.cell(row, i, v)
@@ -479,18 +527,33 @@ TEMPLATE_LABELS = {
     "serial_no": ("Seriya №", "İxtiyari — zavod / VIN nömrəsi"),
     "group": ("Növ", "İxtiyari — müştərinin öz bölgüsü; hesabata təsir edir, "
                      "hesablamaya yox"),
+    "useful_life": ("FİM (il)", "Yalnız «QMA — FİM məlum» üçün, tam illə"),
     "note": ("Qeyd", "İxtiyari"),
 }
 
+# Keyed by field, not positional. As a list of cells it silently depended on
+# the order of IMPORT_FIELDS, so adding a column shifted every example one
+# place to the left -- the same positional coupling §11.3 took out of the
+# annual table and §11.2 out of the paste grid.
 TEMPLATE_EXAMPLES = [
-    ["NV-0001", "Toyota Camry 2.5", "nv", "2026-02-14", "45000", "",
-     "Toyota Center Baku", "EQ-2026-004512", "JTNBE46K873012345",
-     "Minik avtomobilləri", "bu il alınıb"],
-    ["MA-0007", "Kompressor", "ma", "2023-05-10", "12000", "4800",
-     "Aqro Texnika", "", "", "Sex avadanlığı",
-     "əvvəlki illərdən — qalıq dəyər son bəyannamədən"],
-    ["", "Ofis mebeli", "dg", "2024-11-02", "3200", "1900", "Embawood", "", "",
-     "", "inv.№ boşdur — proqram özü verəcək"],
+    {"inv_no": "NV-0001", "name": "Toyota Camry 2.5", "category": "nv",
+     "in_date": "2026-02-14", "cost": "45000",
+     "counterparty": "Toyota Center Baku", "e_qaime": "EQ-2026-004512",
+     "serial_no": "JTNBE46K873012345", "group": "Minik avtomobilləri",
+     "note": "bu il alınıb"},
+    {"inv_no": "MA-0007", "name": "Kompressor", "category": "ma",
+     "in_date": "2023-05-10", "cost": "12000", "opening_residual": "4800",
+     "counterparty": "Aqro Texnika", "group": "Sex avadanlığı",
+     "note": "əvvəlki illərdən — qalıq dəyər son bəyannamədən"},
+    {"name": "Ofis mebeli", "category": "dg", "in_date": "2024-11-02",
+     "cost": "3200", "opening_residual": "1900", "counterparty": "Embawood",
+     "note": "inv.№ boşdur — proqram özü verəcək"},
+    # A QMA, because the template is also where someone finds out the program
+    # keeps them at all -- and that a known term is a column, not a category
+    # note (m.114.3.6).
+    {"inv_no": "QMA-0001", "name": "1C mühasibat proqramı", "category": "qma-m",
+     "in_date": "2025-03-01", "cost": "6000", "useful_life": "5",
+     "counterparty": "Soft Baku", "note": "FİM məlumdur — 5 il, düz xətt"},
 ]
 
 
@@ -504,7 +567,9 @@ def build_import_template(fields: list[str]) -> bytes:
     ws.freeze_panes = "A2"
     _widths(ws, [14, 34, 16, 14, 15, 16, 26, 30])
 
-    cats = [c for c in CATEGORIES if not c.code.startswith("qma")]
+    # QMA belongs in the dropdown; `it` does not, because the engine has no
+    # schedule for it yet and a card in it stops the year computing (§12.5).
+    cats = [c for c in CATEGORIES if c.code != "it"]
 
     ref = wb.create_sheet("Kateqoriyalar")
     _header(ref, 1, ["Kod", "Kateqoriya", "Amortizasiya norması (maks)"])
@@ -530,7 +595,8 @@ def build_import_template(fields: list[str]) -> bytes:
 
     ex = wb.create_sheet("Nümunə")
     _header(ex, 1, [TEMPLATE_LABELS[f][0] for f in fields])
-    for i, row in enumerate(TEMPLATE_EXAMPLES, start=2):
+    for i, row in enumerate([[ex.get(f, "") for f in fields]
+                             for ex in TEMPLATE_EXAMPLES], start=2):
         for j, v in enumerate(row[:len(fields)], start=1):
             ex.cell(i, j, v).border = BORDER
     r = len(TEMPLATE_EXAMPLES) + 3

@@ -5,6 +5,13 @@ function openCard(id){
     if (x.asset_id === id){ card = x; cat = k; }
   if (!card) return;
   CARD = card; CAT = cat;
+  // Two exclusions, and they do not coincide. Art. 115 sets no repair limit
+  // for an intangible at all; a rate election is refused only where a
+  // schedule replaced the rate -- a `qma-n` in 2025 is still a norm on a
+  // residual and may still be accrued below it.
+  const rinf = card.rate_info || cat.rate;
+  const qma = isQma(card.category);
+  const straight = rinf.method === 'duz';
   document.getElementById('dtitle').textContent = (card.inv_no ? card.inv_no + ' · ' : '') + card.name;
   const step = (l, v, extra='') =>
     `<div class="step ${extra}"><span class="l">${l}</span><span class="num">${
@@ -16,9 +23,9 @@ function openCard(id){
       <button onclick="formAsset(CARD)">Redaktə</button>
       <button onclick="formOpening(CARD)">Açılış qalığı</button>
       <button onclick="formDisposal(CARD)">Xaricetmə</button>
-      <button onclick="formRepair(CARD)">Təmir xərci</button>
+      ${qma ? '' : `<button onclick="formRepair(CARD)">Təmir xərci</button>`}
       <button onclick="formAddition(CARD)">Dəyər artımı</button>
-      <button onclick="formElection(CAT, CARD)">Fərdi dərəcə</button>
+      ${straight ? '' : `<button onclick="formElection(CAT, CARD)">Fərdi dərəcə</button>`}
       ${card.threshold_hit ? `<button onclick="toggleWriteoff(CARD, ${!card.written_off})">
         ${card.written_off ? 'Silinməni ləğv et' : '500/5% silinməsi'}</button>` : ''}
       <button class="danger" onclick="confirmDelete(CARD)">Sil</button>
@@ -48,7 +55,8 @@ function openCard(id){
   h += step('4 · Xaricetmə', card.disposed);
   h += step('= Amortizasiya bazası', card.base);
   h += `<div class="step"><span class="l">5 · 500/5% həddi</span><span>${
-    card.threshold_hit ? '⚠ düşür' : 'düşmür'}</span></div>`;
+    qma ? 'tətbiq olunmur (m.114.8 — əsas vəsait)'
+        : card.threshold_hit ? '⚠ düşür' : 'düşmür'}</span></div>`;
   if (card.threshold_hit)
     h += `<div class="note" style="margin:8px 0">${esc(card.threshold_reason)}<br>
       ${card.written_off ? 'writeoffs.tsv-də qərar var → tam silinmə'
@@ -60,6 +68,30 @@ function openCard(id){
   const r6 = card.rate_info || cat.rate;
   const SRC = {asset: 'bu ƏV üçün fərdi seçim', category: 'kateqoriya üzrə seçim',
                norm: 'seçim yoxdur — m.114.3 norması'};
+  // A straight line has no "norm x factor = ceiling" to walk through: the
+  // amount comes from a length. The two questions this block owes the reader
+  // are therefore different ones -- how many years are left, and why the
+  // entrepreneur coefficient is not among the factors.
+  if (straight){
+    h += `<div class="step"><span class="l"><strong>6 · Amortizasiya cədvəli</strong>
+        — düz xətt (m.114.3.6)</span>
+        <span><strong>${money(card.depreciation)}</strong></span></div>
+      <div class="sub">
+        <div class="step"><span class="l">İstifadə müddəti${
+          card.category === 'qma-n' ? ' — qanunla (m.114.3-1.10)'
+                                    : ' — FİM, kartda göstərilib'}</span>
+          <span class="num">${r6.term_years} il</span></div>
+        <div class="step"><span class="l">Bu ilin əvvəlinə qalan müddət</span>
+          <span class="num">${r6.remaining_years} il</span></div>
+        <div class="step"><span class="l">Baza ÷ qalan müddət</span>
+          <span class="num">${money(card.base)} ÷ ${r6.remaining_years}</span></div>
+        <div class="step"><span class="l">Sahibkar əmsalı — ${esc(REPORT.status_name)}</span>
+          <span>tətbiq olunmur</span></div>
+      </div>
+      <div class="note" style="margin:8px 0">m.114.3-2 və m.114.3-3 əmsalı
+        <strong>əsas vəsaitlərə</strong> verir, qeyri-maddi aktiv isə m.118-ə
+        görə əsas vəsait deyil. m.114.8 (500/5%) də bu kartda yoxlanılmır.</div>`;
+  } else {
   h += `<div class="step"><span class="l"><strong>6 · Amortizasiya dərəcəsi</strong></span>
         <span><strong>${pct(r6.applied)}</strong></span></div>
     <div class="sub">
@@ -77,6 +109,7 @@ function openCard(id){
     </div>
     ${r6.below_ceiling ? `<div class="note" style="margin:8px 0">Hədddən aşağı dərəcə
       seçilib — qanunidir, lakin məntiqli qərar olmalıdır.</div>` : ''}`;
+  }
   h += step('Amortizasiya', card.depreciation);
   if (parseFloat(card.writeoff)) h += step('Silinmə', card.writeoff);
   h += step('7 · Qalıq (il sonu)', card.closing, 'res');
@@ -84,8 +117,8 @@ function openCard(id){
     h += `<h3>Xaricetmə</h3>` + step('Tarix', card.disposal_date) +
          step('Növ', card.disposal_type) + step('Satış', card.proceeds) +
          step('Qalıq', card.disposed) + step('Fərq', card.gain_loss) +
-         `<div class="note q" style="margin-top:8px">Satışdan gəlir/zərərin bəyannamədə
-          əks etdirilməsi həll olunmayıb — CLAUDE.md §12.1</div>`;
+         `<div class="note" style="margin-top:8px">Fərq bəyannamədə ayrıca sətirdir:
+          gəlir üçün m.114.7, zərər üçün m.114.9 — «Bəyannamə» bölməsinə baxın.</div>`;
   }
   if (parseFloat(card.depreciation)){
     h += '<h3>Aylıq bölgü</h3><div class="scroll"><table>' +

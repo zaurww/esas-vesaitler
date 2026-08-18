@@ -184,9 +184,24 @@ const fld = (name, label, o = {}) => `<div class="fld">
         ${o.placeholder ? `placeholder="${o.placeholder}"` : ''}>`}
   ${o.hint ? `<div class="h">${o.hint}</div>` : ''}</div>`;
 
-const catOptions = sel => CTX.categories.filter(c => !c.code.startsWith('qma'))
+/* Categories a card may be created in: every one the engine has a schedule
+   for. QMA belongs here -- art. 118.2 deducts it as amortisation under art.
+   114, so it is entered, carried and disposed of like any other card (§4).
+
+   `it` is the one left out, and deliberately: its term is the lease contract
+   (§12.5) and the engine has no schedule for it yet. It used to be offered
+   all the same, and picking it stopped the WHOLE year from computing -- every
+   other card with it. An option that cannot be honoured is not an option. */
+const cardCats = () => CTX.categories.filter(c => c.code !== 'it');
+
+const catOptions = sel => cardCats()
   .map(c => `<option value="${c.code}" ${c.code === sel ? 'selected' : ''}>
     ${esc(c.name_az)}</option>`).join('');
+
+/* Is this code a qeyri-maddi aktiv? Asked in several places, so the answer
+   comes from the engine's own classification rather than from the shape of
+   the code string. */
+const isQma = code => (CTX.categories.find(c => c.code === code) || {}).kind === 'qma';
 
 /* The tab strip follows TAB rather than the other way round, so a jump made
    from inside a view (a declaration line to the table behind it) does not

@@ -8,6 +8,16 @@
     5. threshold_test          against step 1, BEFORE any depreciation
     6. x applied_rate          depreciation for the year
     7. = closing_residual
+
+Step 6 has two forms, and which one applies is a fact about the year, not
+about the asset (§5.1, RateRow.method):
+
+    azalan   base x rate             declining balance, art. 114.4
+    duz      base / remaining term   straight line, art. 114.3.6 for QMA
+
+Everything around step 6 is shared, which is why a QMA is an ordinary card in
+assets.tsv and not a parallel world: it is acquired, carried, disposed of and
+sealed exactly like a fixed asset (§4).
 """
 
 from __future__ import annotations
@@ -21,7 +31,7 @@ from . import rates
 from .model import ClientData
 from .rates import (
     CATEGORIES, CATEGORY_BY_CODE, ENGINE_VERSION, EV_CODES, FORMAT_VERSION,
-    STATUS_NAMES, multiplier, statutory,
+    QMA_CODES, STATUS_NAMES, multiplier, statutory,
 )
 
 D = Decimal
@@ -152,6 +162,18 @@ class RateInfo:
     below_statutory: bool = False     # deliberately under the plain 114.3 norm
     coefficient_used: bool = False    # the entrepreneur right is being exercised
     source: str = "norm"              # asset | category | norm
+
+    # -- straight line -----------------------------------------------------
+    # `applied` is still the norm (1/term), because that is the figure that
+    # stays put year after year and therefore the one the rate matrix can
+    # compare (§5.6-bis). It is NOT the fraction of this year's base: the
+    # charge is base / remaining, so a report that prints a bare percentage
+    # next to the base would invite a multiplication that does not reproduce
+    # the number. Whoever prints these prints the term and what is left of it.
+    method: str = "azalan"            # azalan | duz
+    term_years: Optional[int] = None
+    remaining_years: Optional[int] = None
+    per_card: bool = False            # the term lives on the card, not here
 
 
 @dataclass
@@ -418,6 +440,19 @@ def compute_year(data: ClientData, year: int,
     for r in data.repairs:
         if r.year == year:
             repairs[r.asset_id] = repairs.get(r.asset_id, ZERO) + r.amount
+    # Art. 115 sets its limit per CATEGORY OF FIXED ASSET; a QMA belongs to
+    # none of them, so the repair loop below (EV_CODES) would step straight
+    # over such a row and the money would disappear without a word -- the one
+    # failure §2.1 rules out. Refused here instead, where the row can be named.
+    for aid in repairs:
+        a = assets.get(aid)
+        if a is not None and CATEGORY_BY_CODE[a.category].kind == "qma":
+            raise CalcError(
+                f"{a.inv_no or aid}: qeyri-maddi aktiv üçün təmir xərci "
+                f"yazılıb ({year}), lakin m.115 təmir həddi yalnız əsas "
+                f"vəsait kateqoriyaları üçün müəyyən edilir. "
+                f"repairs.tsv-dəki sətri silin."
+            )
     additions: dict[str, Decimal] = {}
     additions_prior: dict[str, Decimal] = {}
     for a in data.additions:
@@ -433,37 +468,127 @@ def compute_year(data: ClientData, year: int,
     # article 114.3 norm applies -- the engine must not decide to double a
     # client's depreciation for them.
     # The most specific election wins: the asset's own, then the category's.
-    def resolve_rate(code: str, asset_id: str = "") -> RateInfo:
+    def straight_term(code: str, asset) -> Optional[int]:
+        """How many years a straight-line schedule runs for.
+
+        `qma-m` reads it off the card -- that is what "istifadə müddəti məlum"
+        means, and it is why the FİM is required there. `qma-n` reads it from
+        the parameter table, because for an unknown term the law supplies the
+        length itself (114.3-1.10: ten years).
+
+        None means the category has no single term to state -- the term is per
+        card, so the category header cannot print one.
+        """
+        if code == "qma-m":
+            if asset is None:
+                return None
+            life = asset.useful_life
+            if not life or life < 1:
+                raise CalcError(
+                    f"{asset.inv_no or asset.asset_id}: istifadə müddəti (FİM) "
+                    f"göstərilməyib — m.114.3.6 üzrə düz xətt metodu müddət "
+                    f"olmadan hesablana bilmir. Kartı redaktə edib FİM yazın."
+                )
+            return int(life)
+        if code == "qma-n":
+            return int(rates.parameter(year, "qma_term_unknown"))
+        raise CalcError(
+            f"{code}: düz xətt metodu üçün müddət mənbəyi müəyyən edilməyib"
+        )
+
+    def resolve_rate(code: str, asset_id: str = "", asset=None) -> RateInfo:
         st = statutory(year, code)
+        # 114.3-2 and 114.3-3 grant the coefficient "əsas vəsaitlərə
+        # münasibətdə" -- with respect to FIXED assets. A QMA is not one
+        # (art. 118), so its ceiling is the plain norm and the taxpayer's
+        # status moves nothing.
+        is_qma = CATEGORY_BY_CODE[code].kind == "qma"
+        coefficient = D("1") if is_qma else mult.coefficient
+        election = data.election_for(year, code, asset_id)
+
+        if st.method == "duz":
+            # No election under a straight line. "10 faizədək" was a ceiling
+            # while the norm ran against a residual; once the law fixes a
+            # SCHEDULE ("mütənasib məbləğlərlə", plus a term in 114.3-1.10),
+            # there is no lower rate to choose -- there is a length. A stored
+            # election is refused rather than ignored (§2.1): it would
+            # otherwise sit in the file looking as though it applied.
+            if election is not None:
+                raise CalcError(
+                    f"{code}: düz xətt metodu ilə hesablanır — dərəcə seçimi "
+                    f"tətbiq olunmur ({year} il). rate_elections.tsv-dəki sətri "
+                    f"silin; müddət kartdakı FİM ilə müəyyən edilir."
+                )
+            term = straight_term(code, asset)
+            if term is None:
+                # Category level: every card has its own term, so there is no
+                # single norm to state. Said explicitly rather than printed as
+                # zero per cent, which would read as "nothing is accrued".
+                return RateInfo(
+                    category=code, statutory_max=ZERO,
+                    statutory_year=st.effective_year, status=status_row.status,
+                    coefficient=coefficient, ceiling=ZERO, applied=ZERO,
+                    elected=False, below_ceiling=False,
+                    method="duz", per_card=True,
+                )
+            norm = D(1) / D(term)
+            remaining = None
+            if asset is not None:
+                if asset.in_date is None:
+                    raise CalcError(
+                        f"{asset.inv_no or asset.asset_id}: alış tarixi yoxdur "
+                        f"— düz xətt metodu üçün cədvəlin başlanğıcı məlum "
+                        f"olmalıdır."
+                    )
+                # Years already behind it. The year of acquisition is year
+                # zero: a full annual amount is charged in it, exactly as for
+                # a fixed asset (§5.3 step 2) -- neither 114.3.6 nor 114.6
+                # knows anything about months.
+                remaining = max(1, term - (year - asset.in_date.year))
+            return RateInfo(
+                category=code, statutory_max=norm,
+                statutory_year=st.effective_year, status=status_row.status,
+                coefficient=coefficient, ceiling=norm, applied=norm,
+                elected=False, below_ceiling=False,
+                method="duz", term_years=term, remaining_years=remaining,
+            )
+
         if st.max_rate is None:
             raise CalcError(
                 f"{code}: dərəcə istifadə müddətindən (FİM) çıxarılır — mərhələ 1b"
             )
-        ceiling = min(st.max_rate * mult.coefficient, D("1"))
-        election = data.election_for(year, code, asset_id)
+        ceiling = min(st.max_rate * coefficient, D("1"))
         applied = election.applied_rate if election else st.max_rate
         if applied > ceiling:
             where = f"{election.asset_id}: " if election and election.asset_id else ""
             raise CalcError(
                 f"{code}: {where}seçilmiş dərəcə {applied:%} yuxarı həddi "
-                f"{ceiling:%} aşır ({st.max_rate:%} × {mult.coefficient}, {year} il). "
+                f"{ceiling:%} aşır ({st.max_rate:%} × {coefficient}, {year} il). "
                 f"Hesablama dayandırıldı — bu, qanunsuz bəyannaməyə gətirib çıxarardı."
             )
         if applied < ZERO:
             raise CalcError(f"{code}: dərəcə mənfidir — {applied}")
         return RateInfo(
             category=code, statutory_max=st.max_rate, statutory_year=st.effective_year,
-            status=status_row.status, coefficient=mult.coefficient, ceiling=ceiling,
+            status=status_row.status, coefficient=coefficient, ceiling=ceiling,
             applied=applied, elected=election is not None,
             below_ceiling=applied < ceiling,
             below_statutory=applied < st.max_rate,
             coefficient_used=applied > st.max_rate,
             source=("asset" if election and election.asset_id
                     else "category" if election else "norm"),
+            method=st.method,
         )
 
-    priceable = {c.code for c in CATEGORIES
-                 if c.kind == "ev" and statutory(year, c.code).max_rate is not None}
+    # A category can be computed once its schedule has a source: a rate for
+    # the declining balance, a term for the straight line. `it` has neither
+    # yet (its term is the lease contract, §12.5), and says so per card below
+    # rather than by disappearing from the report.
+    def has_schedule(code: str) -> bool:
+        st = statutory(year, code)
+        return st.method == "duz" or st.max_rate is not None
+
+    priceable = {c.code for c in CATEGORIES if has_schedule(c.code)}
 
     # An asset counts as having STARTED once it was bought, or once a balance
     # was recorded for it, in this year or any earlier one. The distinction
@@ -486,7 +611,7 @@ def compute_year(data: ClientData, year: int,
     # -- step 1: opening balances and acquisitions --------------------------
     cards: dict[str, CardResult] = {}
     for aid, asset in assets.items():
-        if CATEGORY_BY_CODE[asset.category].kind != "ev":
+        if CATEGORY_BY_CODE[asset.category].kind not in ("ev", "qma"):
             continue
         if aid in explicit:
             open_val, open_src = explicit[aid], "explicit"
@@ -570,7 +695,7 @@ def compute_year(data: ClientData, year: int,
                 f"{c.inv_no or c.asset_id}: {c.category} kateqoriyası hələ "
                 f"dəstəklənmir (dərəcə istifadə müddətindən, mərhələ 1b)"
             )
-        c.rate_info = resolve_rate(c.category, c.asset_id)
+        c.rate_info = resolve_rate(c.category, c.asset_id, assets[c.asset_id])
         if c.retired:
             # Nothing to depreciate and therefore no rate to state. Leaving
             # the category rate on the row printed "20%" next to a line of
@@ -595,12 +720,26 @@ def compute_year(data: ClientData, year: int,
                   + c.repair_capitalized)
 
         # step 5: the write-off test runs on the pre-depreciation residual,
-        # measured against the asset's initial cost
-        c.threshold_hit, c.threshold_reason = threshold_test(
-            c, c.opening, year,
-            c.cost_prior)                   # start of year: before this year's
+        # measured against the asset's initial cost.
+        #
+        # Not for a QMA: 114.8 speaks of "əsas vəsaitin qalıq dəyəri", and
+        # from 2026 it opens with "azalan qalıq dəyəri metodu ilə amortizasiya
+        # hesablanması zamanı" -- twice out of reach of an intangible. A
+        # straight line needs no such cut-off anyway: it ends by arriving at
+        # zero, which is what the declining balance never does.
+        if CATEGORY_BY_CODE[c.category].kind == "ev":
+            c.threshold_hit, c.threshold_reason = threshold_test(
+                c, c.opening, year,
+                c.cost_prior)               # start of year: before this year's
                                             # additions existed
 
+        if (c.asset_id in writeoffs
+                and CATEGORY_BY_CODE[c.category].kind == "qma"):
+            raise CalcError(
+                f"{c.inv_no or c.asset_id}: qeyri-maddi aktiv üçün m.114.8 "
+                f"silinmə qərarı yazılıb ({year}), lakin bu hədd yalnız əsas "
+                f"vəsaitlərə aiddir. writeoffs.tsv-dəki sətri silin."
+            )
         if c.threshold_hit and c.asset_id in writeoffs:
             c.written_off = True
             c.writeoff = money(c.base)
@@ -609,7 +748,19 @@ def compute_year(data: ClientData, year: int,
         else:
             info = c.rate_info
             c.rate = info.applied
-            c.depreciation = money(c.base * info.applied)
+            if info.method == "duz":
+                # base / what is left of the term, not cost x norm. The two
+                # agree for an asset that started here and was left alone, and
+                # they must NOT agree otherwise: a residual carried in from
+                # the client's last return, or one left standing when 2026
+                # moved `qma-n` off the declining balance, is exactly where a
+                # fixed 1/term leaves a stub or overshoots. Dividing what is
+                # on the books by the years it has left arrives at zero at the
+                # end of the term either way -- the rule 114.11.2 states for a
+                # change of method, applied to the same situation.
+                c.depreciation = money(c.base / D(info.remaining_years))
+            else:
+                c.depreciation = money(c.base * info.applied)
             if c.depreciation > c.base:
                 c.depreciation = money(c.base)
             c.closing = money(c.base - c.depreciation)
@@ -624,12 +775,15 @@ def compute_year(data: ClientData, year: int,
         # write-off would happen. With the threshold hardcoded this could not
         # go wrong; now that an amendment can move it, forecasting a 2027
         # write-off against the 2026 threshold would be simply wrong.
-        if not c.written_off:
+        if not c.written_off and CATEGORY_BY_CODE[c.category].kind == "ev":
             c.threshold_next, c.threshold_next_reason = threshold_test(
                 c, c.closing, year + 1)
 
     # -- roll the cards up into categories ----------------------------------
-    for code in EV_CODES:
+    # QMA categories sit in the same list as the fixed ones, on purpose: art.
+    # 118.2 deducts them as amortisation computed under art. 114, so they are
+    # part of the same declaration line and must be part of the same total.
+    for code in EV_CODES + QMA_CODES:
         group = sorted(
             (c for c in cards.values() if c.category == code),
             # Spent cards sink to the bottom of their group: they are there to
@@ -715,7 +869,8 @@ def compute_year(data: ClientData, year: int,
     # repeated five times is noise, and noise is how a real warning gets missed.
     if mult.coefficient > D("1"):
         unused = [cat for cat in result.categories
-                  if not cat.mixed_rates and not cat.rate.coefficient_used]
+                  if not cat.mixed_rates and not cat.rate.coefficient_used
+                  and CATEGORY_BY_CODE[cat.code].kind == "ev"]
         if unused:
             result.warnings.append(
                 f"{STATUS_NAMES[status_row.status]} əmsalı (×{mult.coefficient}) "
@@ -820,6 +975,13 @@ class RateCell:
     law_changed: bool = False         # the norm differs from the year before
     rate_changed: bool = False        # the applied rate differs from the year before
     cards: int = 0                    # live cards behind the figure
+    # Which schedule stands behind the percentage. `qma-n` reads 10% in every
+    # column from 2001 to 2030, and yet 2026 is a different calculation -- the
+    # matrix exists to make a break like that visible, so it may not be the
+    # one place that hides it.
+    method: str = "azalan"
+    term_years: Optional[int] = None
+    per_card: bool = False
 
 
 @dataclass
@@ -851,6 +1013,7 @@ def _cell_from(info: "RateInfo", year: int) -> RateCell:
         ceiling=info.ceiling, applied=info.applied, source=info.source,
         below_statutory=info.below_statutory, below_ceiling=info.below_ceiling,
         coefficient_used=info.coefficient_used,
+        method=info.method, term_years=info.term_years, per_card=info.per_card,
     )
 
 
@@ -866,8 +1029,10 @@ def _mark_changes(series: RateSeries) -> None:
         if not cell.on_books:
             continue
         if prev is not None:
-            cell.rate_changed = cell.applied != prev.applied
-            cell.law_changed = cell.statutory != prev.statutory
+            cell.rate_changed = (cell.applied != prev.applied
+                                 or cell.method != prev.method)
+            cell.law_changed = (cell.statutory != prev.statutory
+                                or cell.method != prev.method)
             series.rate_changed |= cell.rate_changed
             series.law_changed |= cell.law_changed
         prev = cell
@@ -902,7 +1067,7 @@ def rate_matrix(data: ClientData, years: list[int]) -> RateMatrix:
                 deviating.setdefault(card.asset_id,
                                      (card.category, card.inv_no, card.name))
 
-    for code in EV_CODES:
+    for code in EV_CODES + QMA_CODES:
         cat_name = CATEGORY_BY_CODE[code].name_az
         series = RateSeries(key=code, kind="category", name=cat_name,
                             law_ref=rates.LAW_REF.get(code, ""), category=code)

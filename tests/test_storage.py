@@ -588,5 +588,83 @@ class PathSafety(EngineTest):
         self.assertNotIn("е", mutate.slugify("еtest"))
 
 
+class QmaCards(TempRoot):
+    """A QMA on the write path (§4, §5.3).
+
+    It is an ordinary card, so most of the store needs no new machinery -- and
+    that is exactly why the two fields the SCHEDULE depends on have to be
+    guarded here as well as in the calculation: a card saved without a term is
+    a card that stops the year computing for everyone else in it.
+    """
+
+    def make(self, **kw):
+        p = {"mode": "new", "category": "qma-m", "name": "1C proqramı",
+             "cost": "6000", "in_date": "2024-03-01", "useful_life": "5"}
+        p.update(kw)
+        return mutate.create_asset(self.root, self.slug, p)
+
+    def test_a_known_term_card_round_trips(self):
+        aid = self.make()
+        a = next(a for a in self.client().assets if a.asset_id == aid)
+        self.assertEqual(a.category, "qma-m")
+        self.assertEqual(a.useful_life, 5)
+
+    def test_and_computes_on_the_straight_line(self):
+        self.make()
+        r = compute_year(self.client(), 2024)
+        self.assertEqual(str(r.totals["depreciation"]), "1200.00")
+
+    def test_a_known_term_card_without_a_term_is_refused(self):
+        with self.assertRaises(DataError) as e:
+            self.make(useful_life="")
+        self.assertIn("FİM", str(e.exception))
+
+    def test_a_term_on_an_unknown_term_card_is_refused(self):
+        """Both halves of 114.3.6 at once. Ignoring it would cost ten years
+        against five, silently."""
+        with self.assertRaises(DataError):
+            self.make(category="qma-n", useful_life="5")
+
+    def test_an_unknown_term_card_needs_no_term(self):
+        aid = self.make(category="qma-n", useful_life="")
+        self.assertIsNone(next(a for a in self.client().assets
+                               if a.asset_id == aid).useful_life)
+
+    def test_a_qma_carried_from_earlier_years_still_needs_its_date(self):
+        """`carried` lets a fixed asset in without a date -- only the residual
+        matters there. A straight line has to know which year is year zero."""
+        with self.assertRaises(DataError):
+            self.make(mode="carried", in_date="", opening_residual="3000",
+                      opening_year="2024", cost="")
+
+    def test_a_group_pool_cannot_be_a_qma(self):
+        """A pool stands for a category with no cards (§6.1): no date, no
+        term, and 10% of a residual is the one thing a straight line will not
+        do."""
+        with self.assertRaises(DataError):
+            self.make(mode="pool", opening_residual="3000",
+                      opening_year="2024", useful_life="")
+
+    def test_the_term_can_be_corrected_on_the_card(self):
+        aid = self.make()
+        mutate.update_asset(self.root, self.slug, {
+            "asset_id": aid, "inv_no": "QMA-0001", "name": "1C proqramı",
+            "category": "qma-m", "in_date": "2024-03-01", "cost": "6000",
+            "useful_life": "3"})
+        self.assertEqual(self.client().assets[0].useful_life, 3)
+        r = compute_year(self.client(), 2024)
+        self.assertEqual(str(r.totals["depreciation"]), "2000.00")
+
+    def test_a_hand_edited_file_is_caught_on_read(self):
+        """§3: the files are plain text and people edit them, so the same rule
+        has to hold on the way in."""
+        self.make()
+        f = self.root / "clients" / self.slug / "assets.tsv"
+        f.write_text(f.read_text(encoding="utf-8-sig").replace("\t5\t", "\t\t"),
+                     encoding="utf-8-sig")
+        with self.assertRaises(DataError):
+            self.client()
+
+
 if __name__ == "__main__":
     unittest.main()

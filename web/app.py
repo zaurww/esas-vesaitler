@@ -168,6 +168,12 @@ def serialize(r) -> dict:
                     "below_statutory": c.rate.below_statutory,
                     "coefficient_used": c.rate.coefficient_used,
                     "source": c.rate.source,
+                    # Which schedule, and how long it runs. A straight-line
+                    # figure is never printed as a bare percentage of the
+                    # base: that base is not what it was multiplied by.
+                    "method": c.rate.method,
+                    "term_years": c.rate.term_years,
+                    "per_card": c.rate.per_card,
                 },
                 "opening": m(c.opening),
                 "acquisition": m(c.acquisition),
@@ -228,6 +234,9 @@ def serialize(r) -> dict:
                             "below_ceiling": k.rate_info.below_ceiling,
                             "below_statutory": k.rate_info.below_statutory,
                             "coefficient_used": k.rate_info.coefficient_used,
+                            "method": k.rate_info.method,
+                            "term_years": k.rate_info.term_years,
+                            "remaining_years": k.rate_info.remaining_years,
                         } if k.rate_info else None,
                         "retired": k.retired,
                         "retired_kind": k.retired_kind,
@@ -349,6 +358,9 @@ def asset_history(root: Path, slug: str, asset_id: str) -> dict:
             "rate_ceiling": rate(ri.ceiling) if ri else "0",
             "rate_statutory": rate(ri.statutory_max) if ri else "0",
             "coefficient": str(ri.coefficient) if ri else "1",
+            "method": ri.method if ri else "azalan",
+            "term_years": ri.term_years if ri else None,
+            "remaining_years": ri.remaining_years if ri else None,
             "depreciation": m(card.depreciation),
             "writeoff": m(card.writeoff),
             "closing": m(card.closing),
@@ -440,6 +452,8 @@ def rate_report(root: Path, slug: str, first: int = 0, last: int = 0) -> dict:
             "coefficient_used": c.coefficient_used,
             "law_changed": c.law_changed, "rate_changed": c.rate_changed,
             "cards": c.cards,
+            "method": c.method, "term_years": c.term_years,
+            "per_card": c.per_card,
         }
 
     def series(s) -> dict:
@@ -551,7 +565,8 @@ class Handler(BaseHTTPRequestHandler):
                     "clients": out,
                     "engine_version": ENGINE_VERSION,
                     "categories": [
-                        {"code": c.code, "name_az": c.name_az, "name_ru": c.name_ru}
+                        {"code": c.code, "name_az": c.name_az,
+                         "name_ru": c.name_ru, "kind": c.kind}
                         for c in CATEGORIES
                     ],
                 })
