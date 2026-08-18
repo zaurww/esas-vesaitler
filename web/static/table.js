@@ -60,11 +60,51 @@ function toggleCol(k, on){
   render();
 }
 
+/* Subtotals per «Növ» inside each category (§13.1). A setting, not a click
+   to repeat every morning -- same reasoning as the hidden columns above.
+
+   Note what it does NOT do: it changes no figure. The group rows are a
+   partition of the cards already on screen, printed between them and the
+   category line the engine computed. */
+let GROUPBY = localStorage.getItem('ev.groupby') === '1';
+
+function toggleGroupBy(on){
+  GROUPBY = on;
+  localStorage.setItem('ev.groupby', on ? '1' : '0');
+  render();
+}
+
 // Open/closed is state, not a DOM detail: each checkbox re-renders the table,
 // and a panel that lived only in the DOM shut itself after every single tick.
 let COLPICK = false;
 
 function colPicker(){ COLPICK = !COLPICK; render(); }
+
+/* The cards of one category in printing order.
+
+   With the switch off that is simply the cards. With it on they are laid out
+   group by group -- dictionary order, the ungrouped last -- and two kinds of
+   marker are slipped into the same array: a header before each run and a
+   subtotal after it. One array means the table body stays a single pass, and
+   the subtotal is built by the very function that builds the category line,
+   so the two can never disagree about what a column means. */
+function cardOrder(cards){
+  if (!GROUPBY || !GROUPS().length) return cards;
+  const present = new Set(cards.map(c => c.group_id || ''));
+  const order = GROUPS().map(g => g.group_id).filter(id => present.has(id));
+  if (present.has('')) order.push('');
+  const out = [];
+  for (const id of order){
+    const part = cards.filter(c => (c.group_id || '') === id)
+                      .filter(c => !(c.retired && HIDERETIRED));
+    if (!part.length) continue;
+    const name = id ? groupName(id) : '— növsüz —';
+    out.push({__group_head: name, __group_n: part.length});
+    out.push(...part);
+    out.push({__group_total: sumCards(part), __group_name: name});
+  }
+  return out;
+}
 
 function viewAnnual(d){
   const cols = ANN_COLS.filter(c => !HIDECOLS.has(c.k));
@@ -83,7 +123,19 @@ function viewAnnual(d){
       ${d.is_closed ? '' : `<button class="tagbtn"
         onclick="event.stopPropagation();formElection(REPORT.categories.find(x=>x.code==='${cat.code}'))"
         >dərəcəni dəyiş</button>`}</span></td></tr>`;
-    for (const c of cards){
+    for (const c of cardOrder(cards)){
+      // A group header, printed when the run of cards changes group. The rows
+      // are already ordered by group, so this is a fold, not a second pass.
+      if (c.__group_head != null){
+        rows += `<tr class="grp"><td colspan="${span}">${esc(c.__group_head)}
+          <span class="rate">${c.__group_n} ƏV</span></td></tr>`;
+        continue;
+      }
+      if (c.__group_total){
+        rows += `<tr class="subtotal"><td colspan="4">${esc(c.__group_name)}
+          — aralıq yekun</td>${totCells(cols, c.__group_total)}</tr>`;
+        continue;
+      }
       if (c.retired && HIDERETIRED) continue;
       const cls = c.retired ? 'asset retired'
                 : c.threshold_hit ? 'asset warn'
@@ -102,18 +154,25 @@ function viewAnnual(d){
         <td class="d">${esc(c.in_date)}</td>
         ${cols.map(col => `<td class="num">${col.cell(c, cat)}</td>`).join('')}</tr>`;
     }
-    rows += `<tr class="total"><td colspan="4">${esc(cat.name_az)} — yekun</td>
-      ${totCells(cols, cat)}</tr>`;
+    // Under a filter the category line has to cover what is on screen, not
+    // what the category holds -- otherwise three visible rows sit under a
+    // total of forty, which is wrong and looks entirely plausible.
+    const narrowed = FILTER || GRPFILTER;
+    rows += `<tr class="total"><td colspan="4">${esc(cat.name_az)} — yekun${
+      narrowed ? ' <span class="rate">süzgəcə görə</span>' : ''}</td>
+      ${totCells(cols, narrowed ? sumCards(cards) : cat)}</tr>`;
   }
   // With a category picked, the grand total must cover only what is shown.
   const shown = cats(d);
-  const t = CATFILTER
-    ? Object.fromEntries(['opening','acquisition','addition','repair_capitalized',
-        'disposed','depreciation','writeoff','closing'].map(k =>
-        [k, shown.reduce((s,c) => s + parseFloat(c[k]), 0).toFixed(2)]))
-    : d.totals;
+  const narrowed = FILTER || GRPFILTER;
+  const t = narrowed
+    ? sumCards(shown.flatMap(c => c.cards).filter(match))
+    : CATFILTER
+      ? Object.fromEntries(SUM_KEYS.map(k =>
+          [k, shown.reduce((s,c) => s + parseFloat(c[k]), 0).toFixed(2)]))
+      : d.totals;
   rows += `<tr class="total"><td colspan="4">C Ə M İ${
-    CATFILTER ? ' (seçilmiş kateqoriya)' : ''}</td>
+    narrowed ? ' (süzgəcə görə)' : CATFILTER ? ' (seçilmiş kateqoriya)' : ''}</td>
     ${totCells(cols, t)}</tr>`;
   const retired = d.categories.flatMap(c => c.cards).filter(c => c.retired).length;
   const toggle = retired ? `<label style="display:inline-flex;gap:6px;
@@ -128,7 +187,12 @@ function viewAnnual(d){
         onchange="toggleCol('${c.k}', this.checked)"> ${esc(c.h)}</label>`).join('')
     }<button class="tagbtn" onclick="HIDECOLS=new Set();
         localStorage.removeItem('ev.hidecols');render()">hamısını göstər</button></div>`;
-  const bar = `<div class="tbar">${toggle}
+  const groupSwitch = GROUPS().length ? `<label style="display:inline-flex;
+        gap:6px;align-items:center;cursor:pointer" class="h">
+        <input type="checkbox" style="width:auto" ${GROUPBY ? 'checked' : ''}
+          onchange="toggleGroupBy(this.checked)"> Növ üzrə aralıq yekunlar</label>`
+    : '';
+  const bar = `<div class="tbar">${toggle}${groupSwitch}
     <button class="tagbtn" onclick="colPicker()">Sütunlar${
       HIDECOLS.size ? ` (${ANN_COLS.length - cols.length} gizli)` : ''}</button>
     </div>${picker}`;

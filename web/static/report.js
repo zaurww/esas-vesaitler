@@ -45,6 +45,9 @@ function confirmReopen(year){
 }
 
 function renderSide(d){
+  const btn2 = (id, label, sub, on) =>
+    `<button aria-current="${on}" onclick="pickGroup('${id}')">${esc(label)}
+       <span class="n">${sub}</span></button>`;
   const btn = (code, label, sub, on) =>
     `<button aria-current="${on}" onclick="pickCat('${code}')">${esc(label)}
        <span class="n">${sub}</span></button>`;
@@ -60,8 +63,24 @@ function renderSide(d){
              + ` · ${fmt.format(parseFloat(cat.depreciation))}`,
              CATFILTER === cat.code);
   }
+  // The client's own grouping, under the law's. Only when there is one --
+  // a client who does not keep types should not be shown an empty apparatus.
+  const groups = GROUPS();
+  if (groups.length){
+    h += '<hr><div class="sidehead">Növ</div>';
+    h += btn2('', 'Hamısı', '', GRPFILTER === '');
+    for (const g of groups)
+      h += btn2(g.group_id, g.name, `${groupCount(g.group_id)} ƏV`,
+                GRPFILTER === g.group_id);
+    const none = groupCount(NOGROUP);
+    if (none) h += btn2(NOGROUP, '— növsüz —', `${none} ƏV`,
+                        GRPFILTER === NOGROUP);
+  }
+  h += `<hr><button class="sidelink" onclick="formGroups()">Növləri idarə et…</button>`;
   document.getElementById('side').innerHTML = h;
 }
+
+function pickGroup(id){ GRPFILTER = (GRPFILTER === id) ? '' : id; render(); }
 
 function pickCat(code){ CATFILTER = (CATFILTER === code) ? '' : code; render(); }
 
@@ -122,9 +141,23 @@ function viewRepair(d){
 // Searchable by everything written ON the card, including the e-invoice and
 // the serial: "which asset is JTNBE46K..." is exactly the question those
 // fields exist to answer.
-const match = c => !FILTER ||
-  [c.name, c.inv_no, c.category, c.counterparty, c.e_qaime, c.serial_no]
-    .join(' ').toLowerCase().includes(FILTER);
+const inGroup = c => !GRPFILTER
+  || (GRPFILTER === NOGROUP ? !c.group_id : c.group_id === GRPFILTER);
+const match = c => inGroup(c) && (!FILTER ||
+  [c.name, c.inv_no, c.category, c.counterparty, c.e_qaime, c.serial_no, c.group]
+    .join(' ').toLowerCase().includes(FILTER));
+
+/* Totals over an arbitrary set of cards -- a group, or whatever a filter has
+   left on screen. The keys are the ones the annual table's total cells read,
+   so a subtotal row is built exactly like the category row above it.
+
+   It exists because a totals line that ignores the filter is the failure
+   §11.2 warns about: pick «Serverlər», see three rows, and read a category
+   total covering forty. Wrong and entirely plausible-looking. */
+const SUM_KEYS = ['opening', 'acquisition', 'addition', 'repair_capitalized',
+                  'disposed', 'depreciation', 'writeoff', 'closing'];
+const sumCards = cards => Object.fromEntries(SUM_KEYS.map(k =>
+  [k, cards.reduce((s, c) => s + parseFloat(c[k]), 0).toFixed(2)]));
 // The sidebar narrows the whole report to one category; the text box narrows
 // it further to matching cards. Both are view state, never engine state.
 const cats = d => d.categories.filter(c => !CATFILTER || c.code === CATFILTER);

@@ -14,7 +14,7 @@ const IMP_LABELS = {
   inv_no:'İnv.№', name:'Adı', category:'Kateqoriya', in_date:'Alış tarixi',
   cost:'İlkin dəyər', opening_residual:'Qalıq dəyər',
   counterparty:'Kontragent', e_qaime:'E-qaimə №', serial_no:'Seriya №',
-  note:'Qeyd'};
+  group:'Növ', note:'Qeyd'};
 const IMP_REQUIRED = ['name','category'];
 
 function formImport(){
@@ -23,7 +23,7 @@ function formImport(){
   impRender();
 }
 
-function impBox(step, body, foot, back){
+function impBox(step, body, foot, back, sheet){
   const steps = ['Cədvəli gətirin','Sütunları yoxlayın','Baxış və idxal'];
   document.getElementById('mtitle').textContent =
     `ƏV idxalı · ${step}/3 · ${steps[step-1]}`;
@@ -33,7 +33,9 @@ function impBox(step, body, foot, back){
   const cancel = document.querySelector('#mform .foot .ghost');
   cancel.textContent = back ? '← Geri' : 'İmtina';
   cancel.onclick = back ? back : closeModal;
-  document.querySelector('#modal .box').classList.toggle('wide', step > 1);
+  const box = document.querySelector('#modal .box');
+  box.classList.toggle('wide', step > 1);
+  box.classList.toggle('sheet', !!sheet);      // the paste grid: ten columns
   document.getElementById('modal').classList.add('open');
 }
 
@@ -198,28 +200,65 @@ const impPayload = () => IMP.rows.map(r => {
    rectangle here. The whole grid is just a way of building the same `rows`
    payload the file import already sends, which is why it can jump straight
    to the shared preview. */
-const GRID_COLS = ['category','inv_no','name','in_date','cost',
-                   'opening_residual','counterparty','e_qaime','serial_no'];
+/* Declared once -- field, heading, width -- and the header, the cells and
+   the totals row are all drawn from this list. Position was already lying
+   here: the headings were hand-written and stopped at seven while the payload
+   had nine, so `table-layout:fixed`, which takes its columns from the first
+   row, laid `e_qaime` and `serial_no` out at zero width. They were in the
+   data and invisible on screen. Same fix as the annual table (§11.3).
+
+   The list must offer everything «+ Yeni ƏV» offers, minus `say`: a count is
+   a field of that form, not a column of data (§4), and a row here IS one
+   card. A test compares the two and fails when they drift (§11.2). */
+const GRID_COLS = [
+  {f:'category',         t:'Kat.',              w: 84},
+  {f:'inv_no',           t:'İnv.№',             w:100},
+  {f:'name',             t:'Adı *',             w:180},
+  {f:'in_date',          t:'Alış tarixi',       w:100, ph:'GG.AA.YYYY'},
+  {f:'cost',             t:'İlkin dəyər',       w:118, num:true},
+  // The heading is uppercased by the stylesheet, so it needs the room its
+  // own lower-case text does not suggest.
+  {f:'opening_residual', t:() => `Qalıq (${IMP.year} əvv.)`,
+                                                w:158, num:true},
+  {f:'counterparty',     t:'Kontragent',        w:140},
+  {f:'e_qaime',          t:'E-qaimə №',         w:120},
+  {f:'serial_no',        t:'Seriya № / VIN',    w:140},
+  // A NAME here, not an id: this column is pasted out of the client's own
+  // sheet. The import matches it against groups.tsv case-insensitively and
+  // creates the ones that are new (§13.1).
+  {f:'group',            t:'Növ',               w:130},
+  {f:'note',             t:'Qeyd',              w:130},
+];
+const GRID_DEL = 36;                     // the row-delete column, no field
+const gcol = f => GRID_COLS.findIndex(c => c.f === f);
+const gridRow = () => GRID_COLS.map(() => '');
+const GRID_WIDTH = GRID_COLS.reduce((w, c) => w + c.w, GRID_DEL);
 
 function impGrid(rows){
   IMP.step = 2; IMP.back = impGrid;
   const data = rows || IMP.grid || [];
-  while (data.length < 15) data.push(GRID_COLS.map(() => ''));
+  while (data.length < 15) data.push(gridRow());
   IMP.grid = data;
+  // Every edit rebuilds the grid, and deleting a row is now an ordinary edit.
+  // Without keeping the scroll, clearing four bad rows would send the sheet
+  // back to line one four times.
+  const open = document.getElementById('gridwrap');
+  const scroll = open ? open.scrollTop : 0;
 
-  const cell = (r, c) => GRID_COLS[c] === 'category'
+  const cell = (r, c) => GRID_COLS[c].f === 'category'
     ? `<select data-r="${r}" data-c="${c}">${
         impCats().map(k => `<option value="${k.code}"
           ${data[r][c] === k.code ? 'selected' : ''}>${esc(k.code)}</option>`).join('')
       }</select>`
     : `<input data-r="${r}" data-c="${c}" value="${val(data[r][c])}"
-        ${GRID_COLS[c] === 'in_date' ? 'placeholder="GG.AA.YYYY"' : ''}>`;
+        ${GRID_COLS[c].ph ? `placeholder="${GRID_COLS[c].ph}"` : ''}>`;
 
   impBox(2, `
     <div class="note">Excel-də <strong>bir sütunu</strong> seçin →
       <kbd>Ctrl+C</kbd> → burada həmin sütunun birinci xanasına
       <kbd>Ctrl+V</kbd>. Bir neçə sütunu birdən də yapışdıra bilərsiniz.
-      Boş sətirlər nəzərə alınmır.</div>
+      Boş sətirlər nəzərə alınmır; artıq düşən sətri sağdakı
+      <strong>×</strong> ilə silin.</div>
     <div style="display:flex;gap:10px;align-items:flex-end;margin-bottom:10px">
       <div class="fld" style="margin:0">
         <label>Bütün sətirlərin kateqoriyası</label>
@@ -236,22 +275,22 @@ function impGrid(rows){
     </div>
     <div class="scroll imp grid" style="max-height:40vh" id="gridwrap"
       onpaste="return impGridPaste(event)" oninput="impGridTotals()">
-      <table><thead><tr><th>Kat.</th><th>İnv.№</th><th>Adı *</th>
-        <th>Alış tarixi</th><th class="num">İlkin dəyər</th>
-        <th class="num">Qalıq (${IMP.year} əvvəlinə)</th>
-        <th>Kontragent</th></tr></thead><tbody id="gridbody">${
-        data.map((row, r) => `<tr>${row.map((_, c) =>
-          `<td>${cell(r, c)}</td>`).join('')}</tr>`).join('')}</tbody>
-      <tfoot><tr>
-        <td colspan="4" id="gridcount"></td>
-        <td class="num" id="gridsumcost"></td>
-        <td class="num" id="gridsumres"></td>
-        <td id="gridbad"></td></tr></tfoot></table></div>
+      <table style="min-width:${GRID_WIDTH}px"><thead><tr>${
+        GRID_COLS.map(c => `<th style="width:${c.w}px"${c.num ? ' class="num"' : ''}
+          >${typeof c.t === 'function' ? c.t() : c.t}</th>`).join('')
+      }<th style="width:${GRID_DEL}px"></th></tr></thead>
+      <tbody id="gridbody">${data.map((row, r) => `<tr>${
+        GRID_COLS.map((_, c) => `<td>${cell(r, c)}</td>`).join('')
+      }<td class="del"><button type="button" class="rowdel" title="Sətri sil"
+          onclick="impGridDel(${r})">×</button></td></tr>`).join('')}</tbody>
+      ${impGridFoot()}</table></div>
     <div class="h">«Adı» məcburidir. «İlkin dəyər» olmadan 500/5% testinin
       yalnız məbləğ hissəsi işləyəcək — bilirsinizsə, yazın.<br>
       Cəmi sətri Excel-dəki cəmi ilə tutuşdurun — sütun düz düşübsə,
       rəqəmlər üst-üstə düşməlidir.</div>`,
-    'Baxış', () => impRender());
+    'Baxış', () => impRender(), true);
+  const wrap = document.getElementById('gridwrap');
+  if (wrap) wrap.scrollTop = scroll;
   impGridTotals();
 
   MSUBMIT = async () => {
@@ -259,11 +298,39 @@ function impGrid(rows){
     if (!IMP.grid.some(impGridFilled))
       throw new Error('Heç bir sətir doldurulmayıb');
     IMP.rows = IMP.grid.filter(impGridFilled);
-    IMP.map = {}; GRID_COLS.forEach((f, i) => { IMP.map[f] = i; });
+    IMP.map = {}; GRID_COLS.forEach((c, i) => { IMP.map[c.f] = i; });
     IMP.catmap = {};
     await impPreview();
     throw new Error(STAY);
   };
+}
+
+/* A pasted block routinely brings a few lines too many -- an Excel selection
+   is a rectangle, and the rectangle is easy to draw one row too tall. Nothing
+   has been written yet, so the row goes out at once: no confirmation, no
+   undo, and no need for either. */
+function impGridDel(r){
+  impGridRead();
+  IMP.grid.splice(r, 1);
+  impGrid(IMP.grid);
+}
+
+/* The totals row follows the same column list as the header: a total under
+   every money column, the rest merged into the gaps. A hand-counted colspan
+   is how the headings went out of step with the data in the first place. */
+function impGridFoot(){
+  const parts = [];
+  for (const c of GRID_COLS.concat([{f:'del'}])){
+    if (c.num) parts.push({f: c.f});
+    else if (parts.length && parts[parts.length - 1].span) parts[parts.length - 1].span++;
+    else parts.push({span: 1});
+  }
+  const gaps = parts.filter(p => p.span);
+  if (gaps.length) gaps[0].id = 'gridcount';
+  if (gaps.length > 1) gaps[gaps.length - 1].id = 'gridbad';
+  return `<tfoot><tr>${parts.map(p => p.span
+    ? `<td colspan="${p.span}"${p.id ? ` id="${p.id}"` : ''}></td>`
+    : `<td class="num" id="gridsum-${p.f}"></td>`).join('')}</tr></tfoot>`;
 }
 
 /* The point of pasting a whole column is that you already know its total from
@@ -308,39 +375,42 @@ function impGridNum(raw){
    qualifies: it is a dropdown, so it always holds a value, and "apply to all
    rows" would otherwise turn every blank line into a row. The engine draws
    the same line -- it skips a line with neither name nor inv_no. */
-const GRID_SELF = GRID_COLS.map((f, i) => i).filter(i => GRID_COLS[i] !== 'category');
+const GRID_SELF = GRID_COLS.map((c, i) => i).filter(i => GRID_COLS[i].f !== 'category');
 const impGridFilled = row => GRID_SELF.some(i => String(row[i] ?? '').trim());
 
 function impGridTotals(){
   if (!document.getElementById('gridcount')) return;
   impGridRead();
-  const ci = GRID_COLS.indexOf('cost'), ri = GRID_COLS.indexOf('opening_residual');
-  const ni = GRID_COLS.indexOf('name');
-  let rows = 0, noName = 0, sum = {[ci]: 0, [ri]: 0}, bad = {[ci]: 0, [ri]: 0};
+  const money = GRID_COLS.map((c, i) => [c, i]).filter(([c]) => c.num);
+  const ni = gcol('name');
+  const sum = {}, bad = {};
+  money.forEach(([, i]) => { sum[i] = 0; bad[i] = 0; });
+  let rows = 0, noName = 0;
   IMP.grid.forEach((row, r) => {
     if (!impGridFilled(row)) return;
     rows++;
-    if (!String(row[ni]).trim()) noName++;
-    for (const c of [ci, ri]){
-      const v = impGridNum(row[c]);
-      if (v === null) continue;
-      if (Number.isNaN(v)) bad[c]++; else sum[c] += v;
-      const el = document.querySelector(`#gridbody [data-r="${r}"][data-c="${c}"]`);
+    if (!String(row[ni] ?? '').trim()) noName++;
+    for (const [, i] of money){
+      const v = impGridNum(row[i]);
+      const el = document.querySelector(`#gridbody [data-r="${r}"][data-c="${i}"]`);
+      // Marked rather than dropped -- and the mark has to come off again once
+      // the cell is fixed, or the row goes on accusing itself.
       if (el) el.classList.toggle('badnum', Number.isNaN(v));
+      if (v === null) continue;
+      if (Number.isNaN(v)) bad[i]++; else sum[i] += v;
     }
   });
-  const cell = (id, c) => {
-    document.getElementById(id).innerHTML = rows
-      ? fmt.format(sum[c]) + (bad[c] ? ` <span class="badtag">+${bad[c]}?</span>` : '')
+  money.forEach(([c, i]) => {
+    document.getElementById(`gridsum-${c.f}`).innerHTML = rows
+      ? fmt.format(sum[i]) + (bad[i] ? ` <span class="badtag">+${bad[i]}?</span>` : '')
       : '';
-  };
+  });
   document.getElementById('gridcount').textContent =
     rows ? `Cəmi: ${rows} sətir` : '';
-  cell('gridsumcost', ci);
-  cell('gridsumres', ri);
+  const badnum = money.reduce((n, [, i]) => n + bad[i], 0);
   const problems = [];
   if (noName) problems.push(`${noName} sətirdə ad yoxdur`);
-  if (bad[ci] + bad[ri]) problems.push(`${bad[ci] + bad[ri]} rəqəm oxunmur`);
+  if (badnum) problems.push(`${badnum} rəqəm oxunmur`);
   document.getElementById('gridbad').innerHTML = problems.length
     ? `<span class="badtag">${esc(problems.join('; '))}</span>` : '';
 }
@@ -354,14 +424,14 @@ function impGridRead(){
 
 function impGridAdd(n){
   impGridRead();
-  for (let i = 0; i < n; i++) IMP.grid.push(GRID_COLS.map(() => ''));
+  for (let i = 0; i < n; i++) IMP.grid.push(gridRow());
   impGrid(IMP.grid);
 }
 
 function impGridAllCats(code){
   if (!code) return;
   impGridRead();
-  const c = GRID_COLS.indexOf('category');
+  const c = gcol('category');
   IMP.grid.forEach(r => { r[c] = code; });
   impGrid(IMP.grid);
 }
@@ -380,11 +450,11 @@ function impGridPaste(e){
   impGridRead();
   const r0 = +el.dataset.r, c0 = +el.dataset.c;
   while (IMP.grid.length < r0 + block.length)
-    IMP.grid.push(GRID_COLS.map(() => ''));
+    IMP.grid.push(gridRow());
   block.forEach((line, i) => line.forEach((v, j) => {
     const c = c0 + j;
     if (c >= GRID_COLS.length) return;          // wider than the grid: ignore
-    IMP.grid[r0 + i][c] = GRID_COLS[c] === 'category'
+    IMP.grid[r0 + i][c] = GRID_COLS[c].f === 'category'
       ? impGridCat(v) : v.trim();
   }));
   impGrid(IMP.grid);
@@ -409,6 +479,17 @@ async function impPreview(){
   const fresh = rep.rows.filter(r => r.mode === 'new').length;
   const auto = rep.rows.filter(r => r.auto_inv).length;
 
+  // Import appends. With inventory numbers filled in, a second run of the
+  // same sheet is refused row by row; with them blank there is nothing to
+  // collide and the duplicates simply arrive under fresh numbers. Say so
+  // before the button, not after (§2.1).
+  const already = rep.existing ? `<div class="note">Bu müştəridə artıq
+      <strong>${rep.existing} ƏV</strong> var. İdxal onları <strong>silmir</strong>,
+      üstünə əlavə edir.${auto ? ` Bu cədvəldə inventar nömrələri boşdur —
+      təkrar idxal ${auto} kartı ikinci dəfə yaradacaq, proqram bunu
+      tuta bilməyəcək.` : ''}
+      <br>Sıfırdan başlamaq üçün: ⚙ → «Bütün ƏV-ləri sil».</div>` : '';
+
   const summary = bad
     ? `<div class="note"><strong>${bad} sətirdə problem var.</strong>
         İdxal ya bütövlükdə keçir, ya da heç keçmir — belə ki, yarımçıq
@@ -417,9 +498,10 @@ async function impPreview(){
         ${carried ? `${carried}-i əvvəlki illərdən gəlir — ${IMP.year} ilin
           əvvəlinə qalıq dəyəri ilə.<br>` : ''}
         ${fresh ? `${fresh}-i bu il alınıb — ilkin dəyəri ilə.<br>` : ''}
-        ${auto ? `${auto} ƏV üçün inventar nömrəsi avtomatik veriləcək.` : ''}</div>`;
+        ${auto ? `${auto} ƏV üçün inventar nömrəsi avtomatik veriləcək.<br>` : ''}
+        ${rep.groups_created ? `${rep.groups_created} yeni növ yaradılacaq.` : ''}</div>`;
 
-  impBox(3, summary + `
+  impBox(3, already + summary + `
     <div class="scroll imp" style="max-height:42vh"><table><thead><tr>
       <th>#</th><th>İnv.№</th><th>Adı</th><th>Kateqoriya</th>
       <th class="num">İlkin dəyər</th><th class="num">Qalıq dəyər</th>

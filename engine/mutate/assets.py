@@ -14,6 +14,7 @@ from ..rates import CATEGORY_BY_CODE
 from ..storage import DataError
 
 from .core import Tx, guard_open_year, rows_of, save_rows, transaction
+from .groups import group_ref
 from .numbering import asset_id_series, batch_count, inv_series, suggest_inv_no
 from .parse import category_of, dec, iso_date
 
@@ -53,6 +54,7 @@ def create_asset(root: Path, slug: str, p: dict) -> str:
 
     with transaction(root, slug, "asset.create") as tx:
         assets = rows_of(root, slug, "assets.tsv")
+        group_id = group_ref(root, slug, p.get("group_id"))
         inv = str(p.get("inv_no", "")).strip()
         if inv and any(r["inv_no"] == inv for r in assets):
             raise DataError(f"inv_no {inv!r} artıq mövcuddur")
@@ -122,6 +124,9 @@ def create_asset(root: Path, slug: str, p: dict) -> str:
                 # state something false about thirty-nine of them.
                 "serial_no": (str(p.get("serial_no", "")).strip()
                               if count == 1 else ""),
+                # Unlike the serial, a batch DOES share its group: forty
+                # identical laptops are forty laptops.
+                "group_id": group_id,
             })
             # One changelog line per object even though the act was one. The
             # grouping was for the person doing the work, not an excuse to
@@ -157,6 +162,7 @@ def update_asset(root: Path, slug: str, p: dict) -> str:
             "note": str(p.get("note", "")).strip(),
             "e_qaime": str(p.get("e_qaime", "")).strip(),
             "serial_no": str(p.get("serial_no", "")).strip(),
+            "group_id": group_ref(root, slug, p.get("group_id")),
         }
         if new["inv_no"] and any(
                 r["inv_no"] == new["inv_no"] and r["asset_id"] != aid for r in assets):
@@ -213,6 +219,63 @@ def update_asset(root: Path, slug: str, p: dict) -> str:
     return aid
 
 
+# Everything that points at a card. The same list delete_asset walks, which
+# is the point: emptying the store must not leave behind exactly the orphans
+# that deleting one card is careful to take with it.
+DEPENDENT = ("opening_balances.tsv", "disposals.tsv", "repairs.tsv",
+             "additions.tsv", "writeoffs.tsv", "rate_elections.tsv")
+
+
+def clear_assets(root: Path, slug: str, p: dict) -> str:
+    """Delete ALL cards -- "import again from scratch".
+
+    Import appends; it has no other mode, and it should not have one, because
+    "this file replaces everything" is a much bigger claim than "these rows
+    are assets". So starting over is its own act, named as what it does.
+
+    Two guards, for opposite reasons:
+
+    * the client's name has to be typed back. Not ceremony: this is the only
+      action in the program that destroys facts in bulk, and the mis-click it
+      protects against is a real one -- the button sits next to ordinary
+      settings;
+    * a closed year refuses it outright. Its sealed balances are the evidence
+      behind a filed return (§6.2), and wiping them would leave `ev.py verify`
+      unable to check the very years it exists for. Reopen first, deliberately.
+
+    What survives: the firm itself, the taxpayer status per year, the category
+    rate elections, the «Növ» dictionary. None of them are facts about a card,
+    and re-typing them would be re-entering work the import never touched.
+    """
+    from ..storage import load_client
+    data = load_client(root, slug)
+    typed = " ".join(str(p.get("confirm", "")).split()).casefold()
+    if typed not in (data.client_name.casefold(), slug.casefold()):
+        raise DataError(
+            f"Təsdiq üçün müştərinin adını yazın: «{data.client_name}» "
+            f"və ya «{slug}»")
+    closed = sorted(data.closed_years())
+    if closed:
+        raise DataError(
+            f"{', '.join(str(y) for y in closed)} ili bağlıdır — silinmə "
+            f"qəbul edilmir. Əvvəlcə bağlanışı ləğv edin (§6.2).")
+
+    with transaction(root, slug, "asset.clear") as tx:
+        assets = rows_of(root, slug, "assets.tsv")
+        n = len(assets)
+        for name in DEPENDENT:
+            rows = rows_of(root, slug, name)
+            # A category-wide rate election is a decision about the CATEGORY,
+            # not about any card, so it stays; only the per-asset ones go.
+            kept = [r for r in rows if not r.get("asset_id")]
+            if len(kept) != len(rows):
+                tx.log("", name, f"{len(rows) - len(kept)} sətir", "silindi")
+                save_rows(root, slug, name, kept)
+        tx.log("", "assets", f"{n} ƏV", "hamısı silindi")
+        save_rows(root, slug, "assets.tsv", [])
+    return f"{n} ƏV silindi"
+
+
 def delete_asset(root: Path, slug: str, p: dict) -> str:
     """Delete the asset AND everything that references it.
 
@@ -221,8 +284,7 @@ def delete_asset(root: Path, slug: str, p: dict) -> str:
     """
     aid = str(p["asset_id"])
     with transaction(root, slug, "asset.delete") as tx:
-        for name in ("opening_balances.tsv", "disposals.tsv", "repairs.tsv",
-                     "additions.tsv", "writeoffs.tsv", "rate_elections.tsv"):
+        for name in DEPENDENT:
             rows = rows_of(root, slug, name)
             kept = [r for r in rows if r.get("asset_id") != aid]
             if len(kept) != len(rows):

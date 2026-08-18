@@ -13,6 +13,7 @@ from typing import Any
 from ..storage import DataError
 
 from .core import guard_open_year, rows_of, save_rows, transaction
+from .groups import find_group, next_group_id
 from .numbering import next_asset_id, suggest_inv_no
 from .parse import _fold, _fold2, category_of, dec, iso_date
 
@@ -20,9 +21,29 @@ class _DryRun(Exception):
     """Raised to force the transaction to roll back after a validation pass."""
 
 
+def resolve_group(groups: list[dict[str, str]], name) -> str:
+    """A group name from someone else's sheet into our group_id.
+
+    Matched case- and space-insensitively so «Serverlər» and «serverler» land
+    in one group rather than two (§13.1); unknown names are added to the
+    dictionary, which is the only way a bulk import can carry a grouping at
+    all. Appends to `groups` in place -- the caller saves it inside the same
+    transaction, so a rolled-back import leaves no orphan groups behind.
+    """
+    clean = " ".join(str(name or "").split())
+    if not clean:
+        return ""
+    hit = find_group(groups, clean)
+    if hit:
+        return hit["group_id"]
+    gid = next_group_id(groups)
+    groups.append({"group_id": gid, "name": clean, "note": ""})
+    return gid
+
+
 IMPORT_FIELDS = ("inv_no", "name", "category", "in_date", "cost",
                  "opening_residual", "counterparty", "e_qaime", "serial_no",
-                 "note")
+                 "group", "note")
 
 # Header names seen in the wild: the source workbook, 1C exports, and the
 # obvious Russian/English equivalents. Matching is case- and space-insensitive.
@@ -46,6 +67,16 @@ IMPORT_ALIASES = {
     "serial_no": ["seriya nömrəsi", "seriya", "serial", "serial no", "serial number",
                   "s/n", "sn", "vin", "zavod nömrəsi", "заводской номер",
                   "серийный номер", "серийный", "серия"],
+    # The client's own classification arrives as a NAME, because that is what
+    # their sheet holds; the id is ours and is resolved on the way in.
+    #
+    # Deliberately NOT "qrup" or "group" on their own: `category` has claimed
+    # both since before this field existed -- a column headed «Qrup» is far
+    # more often the tax group -- and taking them back would silently move an
+    # existing client's category column into a reporting field that changes
+    # no figure. Losing the tax category is the expensive half of that trade.
+    "group": ["növ", "növü", "nov", "qrup adı", "qrup adi", "group name",
+              "тип", "вид", "növ (qrup)"],
     "note": ["qeyd", "примечание", "note", "комментарий"],
 }
 
@@ -98,7 +129,15 @@ def import_assets(root: Path, slug: str, p: dict) -> Any:
     try:
         with transaction(root, slug, "asset.import") as tx:
             assets = rows_of(root, slug, "assets.tsv")
+            # Import APPENDS -- always has. Said out loud in the preview,
+            # because the second import of a corrected sheet is the normal
+            # thing to try, and with inventory numbers left blank there is
+            # nothing to collide and nothing to warn: the duplicates simply
+            # arrive under fresh numbers.
+            report["existing"] = len(assets)
             ob = rows_of(root, slug, "opening_balances.tsv")
+            groups = rows_of(root, slug, "groups.tsv")
+            before = len(groups)
             seen_inv = {r["inv_no"] for r in assets if r["inv_no"]}
 
             for n, raw in enumerate(rows, start=1):
@@ -128,6 +167,13 @@ def import_assets(root: Path, slug: str, p: dict) -> Any:
                     if mode == "new" and not in_date:
                         raise DataError("Alış tarixi tələb olunur")
 
+                    # A name that is not in the dictionary yet creates the
+                    # group -- the client's sheet is where these names come
+                    # from, and refusing the import over a spelling would be
+                    # asking the accountant to key the list in twice. The
+                    # preview says how many will be created before anything is
+                    # written.
+                    gid = resolve_group(groups, raw.get("group"))
                     aid = next_asset_id(assets)
                     assets.append({
                         "asset_id": aid, "inv_no": inv, "name": name,
@@ -137,6 +183,7 @@ def import_assets(root: Path, slug: str, p: dict) -> Any:
                         "note": str(raw.get("note", "")).strip(),
                         "e_qaime": str(raw.get("e_qaime", "")).strip(),
                         "serial_no": str(raw.get("serial_no", "")).strip(),
+                        "group_id": gid,
                     })
                     if inv:
                         seen_inv.add(inv)
@@ -173,6 +220,9 @@ def import_assets(root: Path, slug: str, p: dict) -> Any:
                 )
             if year:
                 guard_open_year(root, slug, year)
+            report["groups_created"] = len(groups) - before
+            if len(groups) != before:
+                save_rows(root, slug, "groups.tsv", groups)
             save_rows(root, slug, "assets.tsv", assets)
             save_rows(root, slug, "opening_balances.tsv", ob)
             tx.log("", "import", "", f"{report['created']} ƏV")

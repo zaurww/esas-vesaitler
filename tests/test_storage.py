@@ -347,6 +347,220 @@ class OwnerNorms(TempRoot):
         self.assertEqual(rates.statutory(2024, "ma").max_rate, Decimal("0.20"))
 
 
+class StartOver(TempRoot):
+    """Clearing the card list -- "import again from scratch" (§11.2).
+
+    Import appends and always has, which is right: "this file replaces
+    everything" is a much bigger claim than "these rows are assets". So
+    starting over is a separate, named act, and these tests pin down what it
+    takes with it and what it must leave alone.
+    """
+
+    def setUp(self):
+        super().setUp()
+        mutate.create_asset(self.root, self.slug, {
+            "mode": "new", "category": "ma", "name": "Dəzgah",
+            "in_date": "2024-04-01", "cost": "1000", "say": "3"})
+        self.aid = self.client().assets[0].asset_id
+        mutate.add_repair(self.root, self.slug, {
+            "asset_id": self.aid, "year": 2024, "date": "2024-06-01",
+            "amount": "50"})
+        mutate.set_election(self.root, self.slug, {
+            "year": 2024, "category": "ma", "applied_rate": "0.10"})
+
+    def clear(self, confirm="Test MMC"):
+        return mutate.clear_assets(self.root, self.slug, {"confirm": confirm})
+
+    def test_the_cards_and_what_hangs_off_them_go(self):
+        self.clear()
+        d = self.client()
+        self.assertEqual(d.assets, [])
+        self.assertEqual(d.repairs, [])
+        self.assertEqual(d.opening_balances, [])
+
+    def test_what_the_import_never_touched_stays(self):
+        """Re-typing the status and the category rate would be re-entering
+        work that was never part of the sheet."""
+        self.clear()
+        d = self.client()
+        self.assertEqual([s.status for s in d.statuses], ["orta"])
+        self.assertEqual([e.category for e in d.elections], ["ma"])
+
+    def test_the_slug_is_accepted_as_confirmation_too(self):
+        self.clear(confirm="  TEST-MMC ")
+        self.assertEqual(self.client().assets, [])
+
+    def test_a_wrong_name_changes_nothing(self):
+        with self.assertRaises(DataError):
+            self.clear(confirm="Başqa MMC")
+        self.assertEqual(len(self.client().assets), 3)
+
+    def test_a_closed_year_refuses_it(self):
+        """The sealed balances are the evidence behind a filed return (§6.2);
+        wiping them would leave `verify` unable to check the years it exists
+        for. Reopening first is the deliberate way through."""
+        mutate.close_year(self.root, self.slug, {"year": 2024})
+        with self.assertRaises(DataError):
+            self.clear()
+        self.assertEqual(len(self.client().assets), 3)
+
+    def test_it_leaves_a_backup_and_a_changelog_line(self):
+        self.clear()
+        snaps = [p.name for p in (self.root / "backups" / self.slug).iterdir()
+                 if p.name.endswith("asset.clear")]
+        self.assertTrue(snaps)
+        log = read_tsv(self.root / "clients" / self.slug / "changelog.tsv")
+        self.assertTrue(any(r["action"] == "asset.clear" for r in log))
+
+    def test_the_import_preview_says_how_many_are_already_there(self):
+        """The warning that makes the trap visible: with blank inventory
+        numbers a second import of the same sheet duplicates silently."""
+        rep = mutate.import_assets(self.root, self.slug, {
+            "rows": [{"name": "Yeni", "category": "ma", "in_date": "2024-05-05",
+                      "cost": "500"}], "dry_run": True})
+        self.assertEqual(rep["existing"], 3)
+
+
+class Groups(TempRoot):
+    """«Növ» -- the client's own classification beside the tax one (§13.1).
+
+    The one invariant worth more than all the rest: it changes no figure. Set
+    up here on the write path, and asserted on the numbers in
+    test_pipeline.GroupsChangeNothing.
+    """
+
+    def make(self, name="Serverlər"):
+        return mutate.create_group(self.root, self.slug, {"name": name})
+
+    def asset(self, name="Server", group_id=""):
+        return mutate.create_asset(self.root, self.slug, {
+            "mode": "new", "category": "yt", "name": name,
+            "in_date": "2024-03-01", "cost": "5000", "group_id": group_id})
+
+    def test_a_group_survives_a_round_trip(self):
+        gid = self.make()
+        aid = self.asset(group_id=gid)
+        d = self.client()
+        self.assertEqual([g.name for g in d.groups], ["Serverlər"])
+        self.assertEqual(d.group_name(gid), "Serverlər")
+        card = next(a for a in d.assets if a.asset_id == aid)
+        self.assertEqual(card.group_id, gid)
+        self.assertEqual(d.card_meta()[aid]["group"], "Serverlər")
+
+    def test_the_same_name_twice_is_refused(self):
+        """A dictionary exists so that «Serverlər» cannot become two groups;
+        matching is case- and space-insensitive for the same reason (§2.1)."""
+        self.make("Serverlər")
+        with self.assertRaises(DataError):
+            self.make("  serverlər ")
+
+    def test_renaming_touches_no_card(self):
+        """The card stores the id, so a rename is one edit here -- the same
+        reasoning that keeps inv_no out of the key position (§4)."""
+        gid = self.make()
+        aid = self.asset(group_id=gid)
+        before = read_tsv(self.root / "clients" / self.slug / "assets.tsv")
+        mutate.update_group(self.root, self.slug,
+                            {"group_id": gid, "name": "Server avadanlığı"})
+        after = read_tsv(self.root / "clients" / self.slug / "assets.tsv")
+        self.assertEqual(before, after)
+        self.assertEqual(self.client().card_meta()[aid]["group"],
+                         "Server avadanlığı")
+
+    def test_a_group_in_use_is_not_deleted(self):
+        """Clearing forty cards as a side effect of one click is data loss
+        wearing the clothes of tidying up."""
+        gid = self.make()
+        self.asset(group_id=gid)
+        with self.assertRaises(DataError):
+            mutate.delete_group(self.root, self.slug, {"group_id": gid})
+        self.assertEqual(len(self.client().groups), 1)
+
+    def test_an_empty_group_is_deleted(self):
+        gid = self.make()
+        mutate.delete_group(self.root, self.slug, {"group_id": gid})
+        self.assertEqual(self.client().groups, [])
+
+    def test_assigning_is_one_transaction_for_many_cards(self):
+        """One backup and one recompute for one act of sorting (§8.1,
+        §5.3-bis) -- and the changelog still gets a line per card."""
+        gid = self.make()
+        ids = [self.asset(f"Server {i}") for i in range(3)]
+        mutate.assign_group(self.root, self.slug,
+                            {"group_id": gid, "asset_ids": ids})
+        d = self.client()
+        self.assertEqual({a.group_id for a in d.assets}, {gid})
+        log = read_tsv(self.root / "clients" / self.slug / "changelog.tsv")
+        moved = [r for r in log if r["field"] == "group_id"]
+        self.assertEqual(len(moved), 3)
+        self.assertEqual({r["action"] for r in moved}, {"group.assign"})
+
+    def test_assigning_an_empty_group_clears_the_field(self):
+        gid = self.make()
+        aid = self.asset(group_id=gid)
+        mutate.assign_group(self.root, self.slug,
+                            {"group_id": "", "asset_ids": [aid]})
+        self.assertEqual(self.client().assets[0].group_id, "")
+
+    def test_an_unknown_group_is_refused_at_the_door(self):
+        with self.assertRaises(DataError):
+            self.asset(group_id="QR-999")
+
+    def test_a_dangling_reference_is_refused_at_read_time(self):
+        """Files are plain text and people will edit them (§3), so the store
+        checks on the way in as well as on the way out."""
+        gid = self.make()
+        self.asset(group_id=gid)
+        path = self.root / "clients" / self.slug / "groups.tsv"
+        path.write_text("group_id\tname\tnote\n", encoding="utf-8-sig")
+        with self.assertRaises(DataError):
+            self.client()
+
+    def test_a_closed_year_does_not_block_grouping(self):
+        """Closing seals the RETURN, not the card (§6.2): a group reaches no
+        figure, so sorting a 2024 asset cannot change a filed 2024."""
+        gid = self.make()
+        aid = self.asset()
+        mutate.close_year(self.root, self.slug, {"year": 2024})
+        mutate.assign_group(self.root, self.slug,
+                            {"group_id": gid, "asset_ids": [aid]})
+        self.assertEqual(self.client().assets[0].group_id, gid)
+
+
+class GroupImport(TempRoot):
+    """A «Növ» column in a bulk import carries NAMES from the client's sheet."""
+
+    def rows(self, *groups):
+        return [{"name": f"Obyekt {i}", "category": "ma", "in_date": "2024-05-05",
+                 "cost": "1000", "group": g} for i, g in enumerate(groups)]
+
+    def test_names_become_one_group_each_however_they_are_typed(self):
+        mutate.import_assets(self.root, self.slug, {
+            "rows": self.rows("Serverlər", "serverlər", " Serverlər  ",
+                              "Printerlər")})
+        d = self.client()
+        self.assertEqual(sorted(g.name for g in d.groups),
+                         ["Printerlər", "Serverlər"])
+        meta = d.card_meta()
+        self.assertEqual([meta[a.asset_id]["group"] for a in d.assets],
+                         ["Serverlər", "Serverlər", "Serverlər", "Printerlər"])
+
+    def test_a_dry_run_leaves_no_group_behind(self):
+        """The preview validates through the real path and rolls back, so a
+        group invented for a row that never landed must not survive it."""
+        rep = mutate.import_assets(self.root, self.slug, {
+            "rows": self.rows("Serverlər"), "dry_run": True})
+        self.assertEqual(rep["groups_created"], 1)
+        self.assertEqual(self.client().groups, [])
+
+    def test_an_existing_group_is_reused_not_duplicated(self):
+        gid = mutate.create_group(self.root, self.slug, {"name": "Serverlər"})
+        mutate.import_assets(self.root, self.slug, {"rows": self.rows("SERVERLƏR")})
+        d = self.client()
+        self.assertEqual(len(d.groups), 1)
+        self.assertEqual(d.assets[0].group_id, gid)
+
+
 class PathSafety(EngineTest):
     """§4: the client name reaches the filesystem, so it must not be able to
     point outside clients/."""
@@ -358,6 +572,12 @@ class PathSafety(EngineTest):
 
     def test_slugify_transliterates_to_ascii(self):
         self.assertEqual(mutate.slugify('«Şəfa Tibb» MMC'), "sefa-tibb-mmc")
+
+    def test_a_capital_dotted_i_does_not_split_the_slug(self):
+        """Python lowercases «İ» to "i" plus a combining dot, and the dot was
+        not in the map -- «Sınaq İdxal MMC» came out as `sinaq-i-dxal-mmc`."""
+        self.assertEqual(mutate.slugify("Sınaq İdxal MMC"), "sinaq-idxal-mmc")
+        self.assertEqual(mutate.slugify("İSTEHSAL"), "istehsal")
 
     def test_slugify_never_returns_empty(self):
         self.assertEqual(mutate.slugify("«»"), "musteri")

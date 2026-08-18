@@ -37,7 +37,8 @@ STATIC = Path(__file__).resolve().parent / "static"
 _STATE_LOCK = threading.RLock()
 _closed_cache: set = set()
 _has_opening = False
-# Card fields the calculation never reads -- counterparty, e-invoice, serial.
+# Card fields the calculation never reads -- counterparty, e-invoice, serial,
+# the client's own group.
 # One dict rather than one global per field: they are all "what the card says
 # about itself", and three parallel lookups was two too many.
 _card_meta: dict = {}
@@ -196,6 +197,13 @@ def serialize(r) -> dict:
                                              .get("e_qaime", ""),
                         "serial_no": _card_meta.get(k.asset_id, {})
                                                .get("serial_no", ""),
+                        # Reporting only -- no figure below depends on it
+                        # (§13.1). The name rides along with the id because
+                        # every reader of this is about to print it.
+                        "group_id": _card_meta.get(k.asset_id, {})
+                                              .get("group_id", ""),
+                        "group": _card_meta.get(k.asset_id, {})
+                                           .get("group", ""),
                         "opening": m(k.opening),
                         "opening_source": k.opening_source,
                         "acquisition": m(k.acquisition),
@@ -568,7 +576,13 @@ class Handler(BaseHTTPRequestHandler):
                         "need": "status", "year": year, "kind": "setup",
                     }, 400)
                     return
-                self._json(serialize(compute_year(data, year)))
+                payload = serialize(compute_year(data, year))
+                # The dictionary itself, not just the name on each card: the
+                # filter and the card form need the whole list, including
+                # groups nothing points at yet.
+                payload["groups"] = [{"group_id": g.group_id, "name": g.name,
+                                      "note": g.note} for g in data.groups]
+                self._json(payload)
                 return
 
             if url.path == "/api/rate-matrix":

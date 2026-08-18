@@ -6,7 +6,9 @@ person sees it. Two shapes are refused on purpose, because guessing at them is
 wrong by a factor of a thousand or by several months.
 """
 
-from tests.support import EngineTest
+import re
+
+from tests.support import ROOT, EngineTest
 
 from engine.mutate import dec, iso_date
 from engine.mutate.parse import _normalise_number
@@ -126,6 +128,80 @@ class ColumnGuessing(EngineTest):
                                "in_date": 3, "cost": 4, "opening_residual": 5,
                                "counterparty": 6, "e_qaime": 7,
                                "serial_no": 8, "note": 9})
+
+
+class ImportGridColumns(EngineTest):
+    """The paste grid must offer what «+ Yeni ƏV» offers (§11.2).
+
+    Both are the same act -- putting a card in -- so a field present in one
+    and missing from the other is a field the user cannot fill depending on
+    which route they happened to take. They drifted once already: `e_qaime`
+    and `serial_no` were added to the form and to the grid's payload, while
+    the grid's headings were hand-written and stayed at seven. Under
+    `table-layout:fixed` the columns come from the first row, so the two new
+    ones were laid out at zero width -- in the data and invisible on screen.
+
+    Nothing in Python could see that, which is why this test reads the JS.
+    It is a sync guard, so it is meant to fail when the two lists diverge:
+    the fix is to add the field to whichever side is short, not to loosen the
+    test.
+    """
+
+    # Not columns of data: `say` is how many cards to create (§4), `group_new`
+    # is the box that appears when someone picks "+ yeni növ", the rest is the
+    # form's own plumbing.
+    FORM_ONLY = {"mode", "asset_id", "say", "opening_year", "opening_edit",
+                 "group_new"}
+
+    # The same field under two shapes, on purpose. The form offers the
+    # DICTIONARY, so it posts a group_id -- picking from a list is what keeps
+    # «Serverlər» from becoming two groups (§13.1). The grid is pasted out of
+    # somebody else's sheet, which holds a NAME, so the import resolves the
+    # name to an id on the way in. Neither side can use the other's shape.
+    FORM_ALIAS = {"group_id": "group"}
+
+    def js(self, name: str) -> str:
+        return (ROOT / "web" / "static" / name).read_text(encoding="utf-8")
+
+    def grid_columns(self) -> list[str]:
+        src = self.js("import.js")
+        start = src.index("const GRID_COLS = [")
+        block = src[start:src.index("\n];", start)]
+        return re.findall(r"\{f:'(\w+)'", block)
+
+    def region(self, file: str, func: str) -> str:
+        src = self.js(file)
+        start = src.index(f"function {func}(")
+        return src[start:src.index("\nfunction ", start)]
+
+    def form_fields(self) -> set[str]:
+        # formAsset draws the group field by calling groupField(), so the
+        # scan follows it there rather than declaring the field exempt --
+        # exempting it is exactly how the two lists drifted last time.
+        body = self.region("forms.js", "formAsset") + \
+            self.region("groups.js", "groupField")
+        found = set(re.findall(r"fld\('(\w+)'", body)) | \
+            set(re.findall(r'name="(\w+)"', body))
+        return {self.FORM_ALIAS.get(f, f) for f in found}
+
+    def test_the_grid_offers_every_field_the_asset_form_does(self):
+        self.assertEqual(
+            self.form_fields() - self.FORM_ONLY, set(self.grid_columns()),
+            "«+ Yeni ƏV» and the paste grid must offer the same fields (§11.2)")
+
+    def test_every_grid_column_is_a_field_the_import_accepts(self):
+        from engine.mutate.imports import IMPORT_FIELDS
+        self.assertEqual(set(self.grid_columns()) - set(IMPORT_FIELDS), set())
+
+    def test_every_column_carries_its_own_heading_and_width(self):
+        """The drift that started this: a column with no heading of its own is
+        a column the browser lays out at zero width."""
+        src = self.js("import.js")
+        start = src.index("const GRID_COLS = [")
+        block = src[start:src.index("\n];", start)]
+        n = len(self.grid_columns())
+        self.assertEqual(len(re.findall(r"[ ,]t:", block)), n, "a heading each")
+        self.assertEqual(len(re.findall(r"[ ,]w: *\d+", block)), n, "a width each")
 
 
 if __name__ == "__main__":

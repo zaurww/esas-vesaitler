@@ -32,6 +32,10 @@ function formAsset(card){
     if (edit) h += `<input type="hidden" name="asset_id" value="${card.asset_id}">`;
     h += fld('category','Kateqoriya',{type:'select',req:true,
              options:catOptions(card ? card.category : 'nv')});
+    // Right under the tax category, because that is the pair to read
+    // together: the law's classification and the client's own. The second one
+    // reaches no figure (§13.1).
+    h += groupField(card);
     if (!pool){
       h += `<div class="row2">
         <div class="fld"><label>İnv.№</label>
@@ -114,7 +118,8 @@ function formAsset(card){
     }
     h += fld('note','Qeyd',{value:card&&card.note});
     openModal(edit ? `ƏV redaktəsi — ${card.inv_no || card.name}` : 'Yeni ƏV', h,
-      d => post(edit ? 'asset.update' : 'asset.create', d),
+      async d => post(edit ? 'asset.update' : 'asset.create',
+                      await groupResolve(d)),
       edit ? 'Yadda saxla' : 'Əlavə et');
     // Assigned rather than added: render() runs again on every mode switch,
     // and addEventListener would stack a handler each time.

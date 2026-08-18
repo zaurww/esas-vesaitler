@@ -23,7 +23,7 @@ if str(ROOT) not in sys.path:
 
 from engine import rates                                        # noqa: E402
 from engine.model import (                                      # noqa: E402
-    Addition, Asset, ClientData, Disposal, OpeningBalance, RateElection,
+    Addition, Asset, ClientData, Disposal, Group, OpeningBalance, RateElection,
     Repair, TaxpayerStatus, WriteOff,
 )
 
@@ -89,7 +89,8 @@ class EngineTest(unittest.TestCase):
 
 __all__ = [
     "D", "EngineTest", "ROOT", "Addition", "Asset", "ClientData", "Disposal",
-    "OpeningBalance", "RateElection", "Repair", "TaxpayerStatus", "WriteOff",
+    "Group", "OpeningBalance", "RateElection", "Repair", "TaxpayerStatus",
+    "WriteOff",
     "asset", "card_of", "clean_rates", "client", "opening", "owner_rates",
     "rates",
 ]

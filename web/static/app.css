@@ -113,7 +113,7 @@
   .zero{color:#b6bfcb}
   /* paste grid: inputs sit flush in the cells so it reads as a sheet, which
      is what the user is copying from */
-  .scroll.imp.grid table{table-layout:fixed; min-width:900px}
+  .scroll.imp.grid table{table-layout:fixed}
   .scroll.imp.grid td{padding:0}
   .scroll.imp.grid td input,
   .scroll.imp.grid td select{
@@ -124,8 +124,14 @@
   .scroll.imp.grid td select:focus{
     outline:2px solid var(--accent); outline-offset:-2px; background:#fff;
   }
-  .scroll.imp.grid th:first-child,
-  .scroll.imp.grid td:first-child{width:86px}
+  /* column widths ride on the <th>, out of GRID_COLS, so they follow the
+     column that owns them instead of a position that shifts (§11.3) */
+  .scroll.imp.grid td.del{text-align:center; vertical-align:middle}
+  .scroll.imp.grid button.rowdel{
+    border:0; background:none; color:var(--muted); cursor:pointer;
+    font-size:16px; line-height:1; padding:4px 6px; border-radius:5px;
+  }
+  .scroll.imp.grid button.rowdel:hover{background:#fdecea; color:var(--neg)}
   /* totals stay put while the rows scroll -- the whole point is to compare
      them against the Excel total without hunting for them */
   .scroll.imp.grid tfoot td{
@@ -133,6 +139,18 @@
     padding:7px 8px; border-top:2px solid var(--line);
   }
   .scroll.imp.grid td input.badnum{background:var(--warn-bg); font-weight:600}
+  /* the client's own grouping: a partition of the rows, deliberately lighter
+     than the category banner above it -- it is not a tax line (§13.1) */
+  tr.grp td{background:#f4f7fb; font-weight:600; color:var(--accent);
+            border-top:1px solid var(--line)}
+  tr.grp .rate{font-weight:400; color:var(--muted); font-size:12px; margin-left:10px}
+  tr.subtotal td{background:#f8fafc; font-weight:600; color:#41506a}
+  .sidehead{font-size:11px; text-transform:uppercase; letter-spacing:.5px;
+            color:var(--muted); padding:2px 10px 6px}
+  .sidelink{background:none; border:0; color:var(--accent); cursor:pointer;
+            font:inherit; font-size:12px; padding:6px 10px; text-align:left;
+            width:100%}
+  .sidelink:hover{text-decoration:underline}
   .badtag{
     display:inline-block; font-size:11px; font-weight:600; padding:1px 7px;
     border-radius:99px; background:var(--warn-bg); color:var(--warn-ink);
@@ -179,8 +197,7 @@
   /* ---------- notes ---------- */
   .note{padding:11px 14px; border-left:3px solid var(--warn-line); background:var(--warn-bg);
         color:var(--warn-ink); border-radius:0 8px 8px 0; margin-bottom:9px}
-  .note.q{border-color:#8fa8c8; background:#eef3f9; color:#2c4straight}
-  .note.q{color:#2c4a70}
+  .note.q{border-color:#8fa8c8; background:#eef3f9; color:#2c4a70}
   h3{margin:18px 0 8px; font-size:13px; text-transform:uppercase; letter-spacing:.5px; color:var(--muted)}
 
   /* ---------- drawer ---------- */
@@ -241,6 +258,8 @@
   .ghost{background:none; border:1px solid var(--line); border-radius:7px;
          padding:9px 16px; cursor:pointer}
   .modal .box.wide{width:min(1100px,100%)}
+  /* ten columns of a sheet do not fit where a form does */
+  .modal .box.sheet{width:min(1380px,100%)}
   .imp-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:8px}
   .imp-grid .fld{margin:0}
   .imp table{font-size:12px}

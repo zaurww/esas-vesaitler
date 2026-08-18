@@ -28,7 +28,12 @@ HEADERS: dict[str, list[str]] = {
     # enters the calculation.
     "assets.tsv": ["asset_id", "inv_no", "name", "category", "in_date", "cost",
                    "counterparty", "useful_life", "is_legacy_pool", "note",
-                   "e_qaime", "serial_no"],
+                   "e_qaime", "serial_no", "group_id"],
+    # The client's own classification (§13.1). A dictionary file rather than a
+    # name on the card: renaming is then one edit, and a typo cannot quietly
+    # split a group in two. Appended like the columns above -- an older engine
+    # ignoring it changes no figure, because no figure depends on it.
+    "groups.tsv": ["group_id", "name", "note"],
     "opening_balances.tsv": ["year", "asset_id", "category", "residual", "source",
                              "engine_version", "closed_at"],
     "disposals.tsv": ["asset_id", "date", "type", "proceeds"],

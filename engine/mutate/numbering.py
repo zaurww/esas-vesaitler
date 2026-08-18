@@ -133,6 +133,11 @@ def batch_count(value: Any) -> int:
     return n
 
 SLUG_MAP = str.maketrans({
+    # U+0307 first, and not for decoration: Python lowercases the Azerbaijani
+    # «İ» to "i" PLUS a combining dot above, so every name containing one was
+    # cut in half -- «Sınaq İdxal MMC» became `sinaq-i-dxal-mmc`, «İstehsal»
+    # became `i-stehsal`. The letter is common enough that this was not rare.
+    "̇": "",
     "ə": "e", "ç": "c", "ş": "s", "ğ": "g", "ı": "i", "ö": "o", "ü": "u",
     "Ə": "e", "Ç": "c", "Ş": "s", "Ğ": "g", "İ": "i", "Ö": "o", "Ü": "u",
     "а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e", "ж": "j",

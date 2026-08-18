@@ -25,8 +25,33 @@ class Asset:
     # missing fact.
     e_qaime: str = ""                       # e-qaimə (electronic invoice) no.
     serial_no: str = ""                     # serial / VIN / factory number
+    # The client's own classification, beside the tax one and never instead of
+    # it: laptops, servers and printers are all `yt` at one rate, and the
+    # office still wants them apart. A reference into groups.tsv, never a
+    # name: the name is renameable, so storing it on the card would mean
+    # editing forty cards to fix one spelling (§4, the inv_no reasoning).
+    #
+    # It reaches NO calculation. That is the whole constraint: the moment a
+    # group carries a rate or a repair limit of its own it becomes a
+    # substitute category, and the aggregation by art. 114/115 stops being
+    # universal (§13.1).
+    group_id: str = ""
     useful_life: Optional[int] = None       # FİM, for category `it`
     is_legacy_pool: bool = False            # group residual carried without a card (§6.1)
+    note: str = ""
+
+
+@dataclass(frozen=True)
+class Group:
+    """A client's own grouping inside a tax category (§13.1).
+
+    A dictionary row rather than free text on the card, for the same reason
+    `category` is an enum: "Serverlər" and "Serverler" typed on two different
+    days would silently become two groups, and a report split in two is worse
+    than no report (§2.1). Renaming one is one edit here, not forty there.
+    """
+    group_id: str
+    name: str
     note: str = ""
 
 
@@ -129,9 +154,16 @@ class ClientData:
     statuses: list[TaxpayerStatus] = field(default_factory=list)
     elections: list[RateElection] = field(default_factory=list)
     writeoffs: list[WriteOff] = field(default_factory=list)
+    groups: list[Group] = field(default_factory=list)
+
+    def group_name(self, group_id: str) -> str:
+        return next((g.name for g in self.groups if g.group_id == group_id), "")
 
     def card_meta(self) -> dict[str, dict[str, str]]:
         """Card fields the calculation never reads, keyed by asset_id.
+
+        The client's group is here for exactly that reason: it is reporting,
+        not tax. `CardResult` has no group and must not grow one.
 
         `CardResult` deliberately carries only what the pipeline works on, so
         the counterparty, the e-invoice and the serial have to travel beside
@@ -139,9 +171,16 @@ class ClientData:
         what the card says about itself -- and a separate dict per field meant
         a new field touched every caller.
         """
+        names = {g.group_id: g.name for g in self.groups}
         return {a.asset_id: {"counterparty": a.counterparty,
                              "e_qaime": a.e_qaime,
-                             "serial_no": a.serial_no}
+                             "serial_no": a.serial_no,
+                             "group_id": a.group_id,
+                             # The name travels with the id because every
+                             # reader of this dict is about to display it, and
+                             # resolving it at each one is how a stale name
+                             # gets printed somewhere.
+                             "group": names.get(a.group_id, "")}
                 for a in self.assets}
 
     def status_for(self, year: int) -> Optional[TaxpayerStatus]:

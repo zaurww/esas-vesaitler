@@ -9,8 +9,8 @@ is an identity nobody knows still holds.
 
 from decimal import Decimal
 
-from tests.support import D, EngineTest, Addition, Disposal, Repair, asset, \
-    card_of, client, opening
+from tests.support import D, EngineTest, Addition, Disposal, Group, Repair, \
+    asset, card_of, client, opening
 
 from engine.calc import CalcError, compute_year
 
@@ -155,6 +155,50 @@ class SpentCards(EngineTest):
         c = card_of(r, "A1")
         self.assertFalse(c.retired)
         self.assertMoney(c.repair_actual, "400.00")
+
+
+class GroupsChangeNothing(EngineTest):
+    """The whole constraint on «Növ» in one place (§13.1).
+
+    A group is a way of cutting the report, never a tax fact. If it ever
+    reached a rate, a repair limit or an aggregate, it would be a substitute
+    category and the aggregation by art. 114/115 would stop being universal --
+    which is what the fixed category enum protects (§4). So: the same events,
+    grouped and ungrouped, must produce the identical calculation.
+    """
+
+    def build(self, grouped: bool):
+        d = client(status="mikro")
+        d.groups = [Group("QR-001", "Serverlər"), Group("QR-002", "Printerlər")]
+        for i, (cat, cost) in enumerate((("yt", "5000"), ("yt", "800"),
+                                         ("ma", "12000"), ("nv", "40000"))):
+            gid = ["QR-001", "QR-002"][i % 2] if grouped else ""
+            d.assets.append(asset(f"A{i}", category=cat, cost=cost,
+                                  group_id=gid))
+        d.repairs.append(Repair(2025, "A2", None, D("900")))
+        d.disposals.append(Disposal("A3", None, "realizasiya", D("30000")))
+        return d
+
+    def test_every_figure_is_identical(self):
+        plain = compute_year(self.build(False), 2025)
+        grouped = compute_year(self.build(True), 2025)
+        self.assertEqual(plain.totals, grouped.totals)
+        self.assertEqual(plain.disposal_gain, grouped.disposal_gain)
+        self.assertEqual([(c.code, c.depreciation, c.closing, c.repair_limit)
+                          for c in plain.categories],
+                         [(c.code, c.depreciation, c.closing, c.repair_limit)
+                          for c in grouped.categories])
+        self.assertEqual([(c.asset_id, c.rate, c.depreciation, c.closing)
+                          for c in plain.cards],
+                         [(c.asset_id, c.rate, c.depreciation, c.closing)
+                          for c in grouped.cards])
+
+    def test_the_card_result_carries_no_group(self):
+        """Belt and braces: the group must not even be visible to the
+        pipeline, or a later change could quietly start reading it."""
+        r = compute_year(self.build(True), 2025)
+        self.assertFalse(any(hasattr(c, "group_id") or hasattr(c, "group")
+                             for c in r.cards))
 
 
 if __name__ == "__main__":

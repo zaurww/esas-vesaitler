@@ -11,6 +11,9 @@ const pct = s => pctnum(s) + '%';
 const esc = s => String(s??'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
 let CTX = null, REPORT = null, TAB = 'annual', FILTER = '', CATFILTER = '';
+// The client's own grouping (§13.1). View state, like CATFILTER -- it
+// narrows what is shown and never what is computed.
+let GRPFILTER = '';
 function fail(msg){
   const box = document.getElementById('error');
   // needStatus() tints the same box blue; reset it back to the error look.

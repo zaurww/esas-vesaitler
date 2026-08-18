@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .model import (
-    Addition, Asset, ClientData, Disposal, OpeningBalance, RateElection,
+    Addition, Asset, ClientData, Disposal, Group, OpeningBalance, RateElection,
     Repair, TaxpayerStatus, WriteOff,
 )
 from .rates import CATEGORY_BY_CODE
@@ -153,6 +153,31 @@ def load_client(root: Path, slug: str) -> ClientData:
         format_version=int(cfg.get("format_version", 1)),
     )
 
+    # Read before the assets, because an asset points at one. A group is
+    # reporting only -- it never reaches a figure (§13.1) -- but a card
+    # pointing at a group that is not there is still a broken store, and the
+    # store says so at READ time rather than showing a blank column later.
+    seen_groups: set[str] = set()
+    seen_group_names: set[str] = set()
+    for r in read_tsv(folder / "groups.tsv"):
+        w = _where(r)
+        gid = r.get("group_id", "").strip()
+        name = r.get("name", "").strip()
+        if not gid:
+            raise DataError(f"{w}: group_id boşdur")
+        if gid in seen_groups:
+            raise DataError(f"{w}: group_id təkrarlanır — {gid!r}")
+        if not name:
+            raise DataError(f"{w}: qrup adı boşdur")
+        # Case-folded, because the point of a dictionary is that "Serverlər"
+        # cannot become two groups (§13.1).
+        if name.casefold() in seen_group_names:
+            raise DataError(f"{w}: qrup adı təkrarlanır — {name!r}")
+        seen_groups.add(gid)
+        seen_group_names.add(name.casefold())
+        data.groups.append(Group(group_id=gid, name=name,
+                                 note=r.get("note", "").strip()))
+
     seen_ids: set[str] = set()
     seen_inv: set[str] = set()
     for r in read_tsv(folder / "assets.tsv"):
@@ -175,6 +200,9 @@ def load_client(root: Path, slug: str) -> ClientData:
         if in_date and in_date > date.today():
             raise DataError(f"{w}: alış tarixi gələcəkdədir — {in_date}")
         life = r.get("useful_life", "").strip()
+        gid = r.get("group_id", "").strip()
+        if gid and gid not in seen_groups:
+            raise DataError(f"{w}: mövcud olmayan qrupa istinad — {gid!r}")
         data.assets.append(Asset(
             asset_id=aid,
             inv_no=inv,
@@ -185,6 +213,7 @@ def load_client(root: Path, slug: str) -> ClientData:
             counterparty=r.get("counterparty", "").strip(),
             e_qaime=r.get("e_qaime", "").strip(),
             serial_no=r.get("serial_no", "").strip(),
+            group_id=gid,
             useful_life=int(life) if life else None,
             is_legacy_pool=r.get("is_legacy_pool", "").strip() in ("1", "true", "yes"),
             note=r.get("note", "").strip(),

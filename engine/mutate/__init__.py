@@ -46,6 +46,7 @@ from .numbering import (
     slugify, suggest_inv_no,
 )
 from .assets import (
+    clear_assets,
     MODES, add_addition, add_repair, create_asset, delete_asset,
     remove_addition, remove_repair, set_disposal, set_opening, update_asset,
 )
@@ -56,17 +57,26 @@ from .decisions import (
 )
 from .norms import set_coefficient_row, set_parameter_row, set_rate_row
 from .imports import IMPORT_ALIASES, IMPORT_FIELDS, guess_columns, import_assets
+from .groups import (
+    assign_group, create_group, delete_group, find_group, next_group_id,
+    update_group,
+)
 
 # What the UI is allowed to ask for. One name per action, so an unknown action
 # is refused by lookup rather than by dispatching into something unintended.
 ACTIONS = {
     "asset.import": import_assets,
+    "group.create": create_group,
+    "group.update": update_group,
+    "group.delete": delete_group,
+    "group.assign": assign_group,
     "rate.set": set_rate_row,
     "coefficient.set": set_coefficient_row,
     "parameter.set": set_parameter_row,
     "asset.create": create_asset,
     "asset.update": update_asset,
     "asset.delete": delete_asset,
+    "asset.clear": clear_assets,
     "opening.set": set_opening,
     "disposal.set": set_disposal,
     "repair.add": add_repair,
@@ -87,7 +97,10 @@ __all__ = [
     "ACTIONS", "BACKUP_KEEP_ALWAYS", "BACKUP_KEEP_COUNT", "BACKUP_KEEP_DAYS",
     "BATCH_MAX", "HEADERS", "IMPORT_ALIASES", "IMPORT_FIELDS",
     "MODES", "Tx", "add_addition", "add_repair", "asset_id_series",
-    "batch_count", "category_of", "close_year", "create_asset",
+    "batch_count", "category_of", "clear_assets", "close_year",
+    "create_asset",
+    "assign_group", "create_group", "delete_group", "find_group",
+    "next_group_id", "update_group",
     "create_client", "dec", "delete_asset", "export_client", "guard_open_year",
     "guess_columns", "import_assets", "import_client", "inspect_archive",
     "inv_series", "iso_date", "mutate_folder", "next_asset_id", "one_segment",

@@ -106,6 +106,33 @@ function needStatus(year){
   document.getElementById('kpis').innerHTML = '';
 }
 
+/* The one act in the program that destroys facts in bulk, so it is spelled
+   out rather than confirmed with a yes/no: what goes, what stays, and the
+   name typed back by hand. The mis-click it guards against is real -- the
+   button sits among ordinary settings.
+
+   Not a hidden feature: without it "I imported, found mistakes, I want to
+   start again" had no answer inside the program at all. Import appends and
+   should keep appending -- "this file replaces everything" is a far bigger
+   claim than "these rows are assets" -- so starting over is its own act. */
+function formClearAssets(){
+  const slug = document.getElementById('client').value;
+  const n = REPORT ? REPORT.categories.reduce((s, c) => s + c.cards.length, 0) : 0;
+  openModal(`Bütün ƏV-ləri sil — ${esc(REPORT.client_name || slug)}`,
+    `<div class="note"><strong>${n} ƏV</strong> və onlara bağlı hər şey
+      silinəcək: açılış qalıqları, xaricetmələr, təmirlər, dəyər artımları,
+      500/5% qərarları və ayrı-ayrı ƏV üçün seçilmiş dərəcələr.
+      <br><br>Qalacaq: firmanın özü, illər üzrə sahibkarlıq statusu,
+      kateqoriya üzrə dərəcə seçimləri və «Növ» siyahısı.
+      <br><br>Əməliyyatdan əvvəl ehtiyat nüsxə götürülür
+      (<code>backups/${esc(slug)}/</code>), changelog-a yazılır.</div>
+     ${fld('confirm','Təsdiq üçün müştərinin adını yazın',
+           {req:true, placeholder:REPORT.client_name || slug})}
+     <div class="h">«${esc(REPORT.client_name || slug)}» və ya
+       «${esc(slug)}» — hər ikisi qəbul edilir.</div>`,
+    d => post('asset.clear', d), 'Sil');
+}
+
 /* ---- taxpayer status ---- */
 /* Everything about the FIRM, as opposed to its assets. The creation form
    asked for these once and then there was nowhere to go: a typo in the name,
@@ -130,7 +157,15 @@ function formSettings(){
              >${esc(REPORT.status_name)} — dəyiş</button>`}</div>
     <div class="note q">Qovluğun adı — <code>${esc(slug)}</code> — dəyişmir:
       onunla ehtiyat nüsxələr və arxivlər bağlıdır. Başqa ad lazımdırsa,
-      «⇄ Baza» ilə ixrac edib yeni adla idxal edin.</div>`,
+      «⇄ Baza» ilə ixrac edib yeni adla idxal edin.</div>
+    <hr style="border:0;border-top:1px solid var(--line);margin:14px 0">
+    <div class="fld"><label>Sıfırdan başlamaq</label>
+      <div class="h" style="margin:0 0 8px">İdxal mövcud kartları
+        <strong>silmir, üstünə əlavə edir</strong>. Cədvəli düzəldib yenidən
+        gətirmək üçün əvvəlcə kartları təmizləyin.</div>
+      <button type="button" class="ghost" style="border-color:var(--neg);
+        color:var(--neg)" onclick="closeModal(); formClearAssets()"
+        >Bütün ƏV-ləri sil…</button></div>`,
     d => post('client.update', d));
 }
 

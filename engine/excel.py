@@ -198,7 +198,11 @@ def _sheet_cards(wb: Workbook, r: YearResult,
     # index literals ("i >= 8 is money"), which silently means "everything
     # after this point" -- so inserting a text column ahead of the figures
     # formatted an invoice number as currency.
-    head = ["⚠", "Kod", "Kateqoriya", "İnv.№", "Adı", "Kontragent",
+    # «Növ» sits next to the tax category on purpose: the two are read
+    # together and confusing them is the one real risk of having both. The
+    # sheet is flat with an autofilter, so "all the servers" is a filter here
+    # rather than a report someone has to build (§13.1).
+    head = ["⚠", "Kod", "Kateqoriya", "Növ", "İnv.№", "Adı", "Kontragent",
             "E-qaimə", "Seriya №",
             "Alış tarixi", "İlkin dəyər", "Qalıq (il əvvəli)",
             "Daxilolma", "Dəyər artımı", "Kapital. təmir", "Xaricetmə",
@@ -235,7 +239,8 @@ def _sheet_cards(wb: Workbook, r: YearResult,
                 suffix = (f" ({RETIRED_AZ.get(card.retired_kind, 'balansdan çıxıb')}"
                           f"{', ' + str(card.retired_year) if card.retired_year else ''})")
             info = meta.get(card.asset_id, {})
-            vals = [flag, card.category, cat.name_az, card.inv_no,
+            vals = [flag, card.category, cat.name_az, info.get("group", ""),
+                    card.inv_no,
                     card.name + suffix,
                     info.get("counterparty", ""),
                     info.get("e_qaime", ""), info.get("serial_no", ""),
@@ -472,18 +477,20 @@ TEMPLATE_LABELS = {
     "counterparty": ("Kontragent", "Satıcı / təchizatçı"),
     "e_qaime": ("E-qaimə №", "İxtiyari — alışın elektron qaiməsi"),
     "serial_no": ("Seriya №", "İxtiyari — zavod / VIN nömrəsi"),
+    "group": ("Növ", "İxtiyari — müştərinin öz bölgüsü; hesabata təsir edir, "
+                     "hesablamaya yox"),
     "note": ("Qeyd", "İxtiyari"),
 }
 
 TEMPLATE_EXAMPLES = [
     ["NV-0001", "Toyota Camry 2.5", "nv", "2026-02-14", "45000", "",
      "Toyota Center Baku", "EQ-2026-004512", "JTNBE46K873012345",
-     "bu il alınıb"],
+     "Minik avtomobilləri", "bu il alınıb"],
     ["MA-0007", "Kompressor", "ma", "2023-05-10", "12000", "4800",
-     "Aqro Texnika", "", "",
+     "Aqro Texnika", "", "", "Sex avadanlığı",
      "əvvəlki illərdən — qalıq dəyər son bəyannamədən"],
     ["", "Ofis mebeli", "dg", "2024-11-02", "3200", "1900", "Embawood", "", "",
-     "inv.№ boşdur — proqram özü verəcək"],
+     "", "inv.№ boşdur — proqram özü verəcək"],
 ]
 
 
