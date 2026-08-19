@@ -14,3 +14,7 @@ __pycache__/
 # Backups
 *.bak
 backups/
+
+# Internal decision log — local only, not on the public repo.
+# Still read by Claude Code every session; just never committed.
+/CLAUDE.md
