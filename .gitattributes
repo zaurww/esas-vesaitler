@@ -6,3 +6,9 @@
 *.html text eol=lf
 *.md   text eol=lf
 *.xlsx binary
+
+# Internal — versioned for development, not shipped in release zips
+# (GitHub's zipball_url / "Download ZIP" honour export-ignore).
+CLAUDE.md      export-ignore
+.gitattributes export-ignore
+.gitignore     export-ignore
