@@ -790,5 +790,68 @@ class QmaCards(TempRoot):
             self.client()
 
 
+class ItCards(TempRoot):
+    """İcarəyə götürülmüş ƏV-in təmiri on the write path (§10, m.115.6-1).
+
+    Shares the QMA write path almost entirely -- kind == "qma" is the gate --
+    with two things unique to it: the term is floored at 5 years rather than
+    just required, and creation asks a confirmation the m.115.6-1 deduction
+    depends on (not reimbursed by the lessor, not offset against rent) that
+    no other category asks for.
+    """
+
+    def make(self, **kw):
+        p = {"mode": "new", "category": "it", "name": "Ofis təmiri",
+             "cost": "5000", "in_date": "2024-03-01", "useful_life": "5",
+             "it_confirmed": "1"}
+        p.update(kw)
+        return mutate.create_asset(self.root, self.slug, p)
+
+    def test_a_confirmed_card_round_trips(self):
+        aid = self.make()
+        a = next(a for a in self.client().assets if a.asset_id == aid)
+        self.assertEqual(a.category, "it")
+        self.assertEqual(a.useful_life, 5)
+
+    def test_and_computes_on_the_straight_line(self):
+        self.make()
+        r = compute_year(self.client(), 2024)
+        self.assertEqual(str(r.totals["depreciation"]), "1000.00")
+
+    def test_without_the_confirmation_it_is_refused(self):
+        """§2.1: a wrongly-claimed deduction is exactly the failure a silent
+        default would produce -- refused rather than assumed."""
+        with self.assertRaises(DataError) as e:
+            self.make(it_confirmed="")
+        self.assertIn("m.115.6", str(e.exception))
+
+    def test_a_term_under_five_years_is_refused(self):
+        with self.assertRaises(DataError) as e:
+            self.make(useful_life="3")
+        self.assertIn("5", str(e.exception))
+
+    def test_a_term_of_exactly_five_years_is_accepted(self):
+        aid = self.make(useful_life="5")
+        self.assertEqual(next(a for a in self.client().assets
+                              if a.asset_id == aid).useful_life, 5)
+
+    def test_a_group_pool_cannot_be_an_it_card(self):
+        """A pool stands for a category with no cards (§6.1): no single lease
+        contract to date."""
+        with self.assertRaises(DataError):
+            self.make(mode="pool", opening_residual="3000",
+                      opening_year="2024", useful_life="", it_confirmed="1")
+
+    def test_editing_the_card_does_not_reopen_the_confirmation(self):
+        """Asked once, at creation -- a fact about how the repair was paid
+        for, not about the card's other fields."""
+        aid = self.make()
+        mutate.update_asset(self.root, self.slug, {
+            "asset_id": aid, "inv_no": "IT-0001", "name": "Ofis təmiri (2)",
+            "category": "it", "in_date": "2024-03-01", "cost": "5000",
+            "useful_life": "5"})
+        self.assertEqual(self.client().assets[0].name, "Ofis təmiri (2)")
+
+
 if __name__ == "__main__":
     unittest.main()

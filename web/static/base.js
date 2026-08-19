@@ -39,6 +39,47 @@ async function boot(){
   cs.onchange = () => { fillYears(); load(); };
   document.getElementById('year').onchange = load;
   fillYears(); load();
+  checkUpdate();      // fire-and-forget -- must never delay or block boot()
+}
+
+/* Once per page load, never a repeating timer (§9): a worker who leaves the
+   tab open all day should not have it quietly polling GitHub in the
+   background. A failed check -- offline, GitHub unreachable -- is silent on
+   purpose: it is a courtesy, not something an accountant doing tax work
+   should ever see an error about. */
+async function checkUpdate(){
+  try {
+    const r = await fetch('/api/update-check');
+    const u = await r.json();
+    if (!u.available) return;
+    const ver = document.getElementById('ver');
+    ver.classList.add('upd');
+    ver.textContent = `engine ${u.current} → ${u.latest} var`;
+    ver.onclick = () => openUpdateModal(u);
+  } catch (e) { /* quiet -- see above */ }
+}
+
+function openUpdateModal(u){
+  openModal(`Yeniləmə — ${u.latest}`,
+    `<div class="h">Hazırkı versiya <strong>${esc(u.current)}</strong>,
+      yeni versiya <strong>${esc(u.latest)}</strong> mövcuddur.</div>
+     <div class="h" style="margin-top:8px">Müştəri qovluqları
+      (<code>clients/</code>), normalar (<code>rates.tsv</code> və s.) və
+      bəkaplar toxunulmaz qalır — yalnız proqramın öz faylları yenilənir.</div>`,
+    async () => {
+      const r = await fetch('/api/update-apply', {method: 'POST'});
+      const j = await r.json();
+      if (!r.ok || !j.ok) throw new Error(j.error || 'Yeniləmə alınmadı');
+      document.getElementById('mtitle').textContent = 'Hazırdır';
+      document.getElementById('mbody').innerHTML = `<div class="h">${esc(j.message)}</div>`;
+      document.getElementById('msubmit').style.display = 'none';
+      document.querySelector('#mform .foot .ghost').textContent = 'Bağla';
+      // Stays open to show the message above -- the same escape hatch the
+      // import wizard uses to hold the modal across a step (base.js
+      // submitModal): any message but this one is treated as a real error.
+      throw new Error('__stay__');
+    },
+    'Yüklə və qur');
 }
 
 function fillYears(){
@@ -201,17 +242,31 @@ const fld = (name, label, o = {}) => `<div class="fld">
         ${o.placeholder ? `placeholder="${o.placeholder}"` : ''}>`}
   ${o.hint ? `<div class="h">${o.hint}</div>` : ''}</div>`;
 
-/* Categories a card may be created in: every one the engine has a schedule
-   for. QMA belongs here -- art. 118.2 deducts it as amortisation under art.
-   114, so it is entered, carried and disposed of like any other card (§4).
+/* Categories offered for a NEW RATE ROW (rates.js) or a BULK IMPORT
+   (import.js's impCats). `it` is left out of both, but no longer because the
+   engine lacks a schedule for it (it has one -- m.115.6-1, §10):
 
-   `it` is the one left out, and deliberately: its term is the lease contract
-   (§12.5) and the engine has no schedule for it yet. It used to be offered
-   all the same, and picking it stopped the WHOLE year from computing -- every
-   other card with it. An option that cannot be honoured is not an option. */
+   * a new rate row has nothing to say about `it` -- no percentage rate, no
+     repair limit, nothing rates.tsv carries a column for; its schedule comes
+     from the lease contract on the card, like `qma-m`'s FİM;
+   * bulk import has nowhere to carry the m.115.6-1 confirmation (not
+     reimbursed, not offset against rent) that a single card asks for at
+     creation -- see mutate.assets.create_asset and mutate.imports, which
+     refuses the category outright rather than silently dropping the check. */
 const cardCats = () => CTX.categories.filter(c => c.code !== 'it');
 
 const catOptions = sel => cardCats()
+  .map(c => `<option value="${c.code}" ${c.code === sel ? 'selected' : ''}>
+    ${esc(c.name_az)}</option>`).join('');
+
+/* Categories a CARD may be created in -- every one the engine has a schedule
+   for, `it` included. QMA belongs here for the same reason: art. 118.2
+   deducts it as amortisation under art. 114, so it is entered, carried and
+   disposed of like any other card (§4); `it` is entered the same way, one
+   card per capitalised repair-year (m.115.6-1, §10). */
+const assetCats = () => CTX.categories;
+
+const assetCatOptions = sel => assetCats()
   .map(c => `<option value="${c.code}" ${c.code === sel ? 'selected' : ''}>
     ${esc(c.name_az)}</option>`).join('');
 

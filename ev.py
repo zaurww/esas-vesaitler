@@ -34,13 +34,25 @@ def cmd_calc(slug: str, year: int) -> None:
     print(f"  {r.status_name} · engine {r.engine_version} · format v{r.format_version}\n")
     for cat in r.categories:
         ri = cat.rate
-        # Kept out of the f-string: an expression spanning lines inside one is
-        # PEP 701, i.e. 3.12+, and this file claims 3.11 as its floor. Nothing
-        # said so until CI ran the 3.11 leg -- the module did not even parse.
-        note = ("  (fərdi dərəcələr var)" if cat.mixed_rates else
-                "  (həddən aşağı)" if ri.below_ceiling else "")
-        print(f"  {cat.name_az}  —  {ri.statutory_max:.0%} × {ri.coefficient} "
-              f"= {ri.ceiling:.0%} hədd, tətbiq {ri.applied:.0%}{note}")
+        if ri.method == "duz":
+            # A straight-line category has no ceiling to state and no rate to
+            # change -- the schedule comes from a term, per card. Printing the
+            # generic "norm x coefficient = ceiling" line here would show
+            # "0% x 1 = 0% hədd" (nothing has a category-wide rate) and flag
+            # every card as "fərdi dərəcə", same bug the web table already
+            # avoids (table.js, §5.2) by asking the method first.
+            law = "m.115.6-1" if cat.code == "it" else "m.114.3.6"
+            print(f"  {cat.name_az}  —  düz xətt ({law}) · "
+                  f"müddət hər kartda · sahibkar əmsalı tətbiq olunmur")
+        else:
+            # Kept out of the f-string: an expression spanning lines inside
+            # one is PEP 701, i.e. 3.12+, and this file claims 3.11 as its
+            # floor. Nothing said so until CI ran the 3.11 leg -- the module
+            # did not even parse.
+            note = ("  (fərdi dərəcələr var)" if cat.mixed_rates else
+                    "  (həddən aşağı)" if ri.below_ceiling else "")
+            print(f"  {cat.name_az}  —  {ri.statutory_max:.0%} × {ri.coefficient} "
+                  f"= {ri.ceiling:.0%} hədd, tətbiq {ri.applied:.0%}{note}")
         print(f"    {'İnv.№':<10}{'Adı':<26}{'Qalıq(əvv)':>{w}}{'Daxil':>{w}}"
               f"{'Xaric':>{w}}{'Amort.':>{w}}{'Silinmə':>{w}}{'Qalıq(son)':>{w}}")
         for c in cat.cards:

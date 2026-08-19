@@ -81,8 +81,9 @@ async function loadNorms(){
   const age = REPORT.year - parseInt(NORMS.law_reviewed.slice(0, 4), 10);
 
   document.getElementById('view').innerHTML = `
-    <div class="note">Bu cədvəl <strong>qanunun özüdür</strong> — proqramla
-      birlikdə gəlir və işə başlamaq üçün heç nə doldurmaq lazım deyil.
+    <div class="note">Bu cədvəl <strong>AR VM əsasında hazırlanıb</strong> —
+      proqramla birlikdə gəlir və işə başlamaq üçün heç nə doldurmaq lazım
+      deyil.
       ${REPORT.year} ili bu normalarla hesablanır.</div>
     <div class="note ${age >= 2 ? 'q' : ''}">Normalar Vergi Məcəlləsinin
       <strong>${esc(NORMS.law_reviewed)}</strong> tarixinə redaksiyası ilə

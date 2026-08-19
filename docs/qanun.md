@@ -11,6 +11,13 @@
 > ⚠️ Это не заверенная копия и **редакция не сверена с действующей**
 > (CLAUDE.md §12.2). Перед сдачей отчётности сверяйтесь с taxes.gov.az
 > или e-qanun.az.
+>
+> Исключение — **115.3, 115.6 и 115.6-1**: сверены 19.08.2026 по
+> `D:\consulting\legal-base\tax\current\-Azərbaycan Respublikasının Vergi
+> Məcəlləsi.md` (сводный текст с разметкой правок и датами законов), тем же
+> путём, каким CLAUDE.md §12 велит сверять то, чего нет в этом файле.
+> Извлечение от 13.08.2026 выше **не содержало ст. 115.6-1 вовсе** —
+> редакция 406-VIQD/1033-VIQD в него не попала.
 
 ---
 
@@ -34,7 +41,9 @@
 | 115.1 | лимит ремонта: 2% / 5% / 3% по ссылкам на 114.3.x | `rates.py` `repair_limit` |
 | 115.1 абз.2 | неиспользованный лимит увеличивает лимит будущих лет | **не реализовано** — §12.4-bis |
 | 115.2 | превышение лимита увеличивает остаток на конец года | `calc.py`, шаг 3 |
-| 115.4 | ремонт арендованных — тот же процентный лимит | категория `it`, **этап 1d** |
+| 115.3 | диапазон 115.4–115.6-1 (сужен законом 406-VIQD от 03.12.2021; было 115.4–115.8) | категория `it` — только ветка 115.6-1, см. ниже |
+| 115.4 | арендованное ОС **на балансе арендатора** — процентный лимит по типу объекта | **не реализовано** — сознательно вне области, CLAUDE.md §5.1, §10 (19.08.2026) |
+| 115.6-1 | арендованное ОС **не на балансе**, расход не возмещён/не зачтён в счёт аренды — амортизация по сроку договора, не менее 5 лет, каждый год ремонта отдельно | категория `it`, `method="duz"`, **реализовано 19.08.2026** — CLAUDE.md §5.1, §10 |
 | 115.7 | если остаток категории нулевой — ремонт целиком в остаток | **не реализовано** — §12.4-ter |
 | 144.1.3 | разница не признаётся при недобровольном выбытии с реинвестированием | не применяется автоматически, поднимается вопросом при `leqv` |
 
@@ -114,13 +123,15 @@
 
 **115.2.** Bu Məcəllənin 115.1-ci maddəsində müəyyən edilən məhdudlaşdırmadan artıq olan məbləğ cari vergi ilinin sonuna əsas vəsaitlərin (vəsaitin) qalıq dəyərinin artmasına aid edilir. Amortizasiya olunmayan, köhnəlmə (amortizasiya) hesablanmayan əsas vəsaitlərin təmirinə çəkilmiş xərclər gəlirdən çıxılmır və onların balans dəyərini artırır.
 
-**115.3.** İcarəyə götürülmüş əsas vəsaitlər üzrə təmir xərclərinin gəlirdən çıxılması bu Məcəllənin 115.4 -115.8-ci maddələrinə uyğun olaraq müəyyən edilir.
+**115.3.** İcarəyə götürülmüş əsas vəsaitlər üzrə təmir xərclərinin gəlirdən çıxılması bu Məcəllənin 115.4 - 115.6-1-ci maddələrinə uyğun olaraq müəyyən edilir. *(Redaksiya 406-VIQD, 03.12.2021 — əvvəllər "115.4-115.8-ci" idi; 115.7 və 115.8 artıq icarəyə aid deyil.)*
 
 **115.4.** İcarəyə götürülmüş əsas vəsaitlərin təmiri üzrə xərclərin gəlirdən çıxılan məbləği əsas vəsaitlərin hər bir kateqoriyasının əvvəlki ilin sonuna qalıq dəyərinin bu Məcəllənin 115.1-ci maddəsi ilə müəyyən edilən faiz həddi ilə məhdudlaşdırılır.
 
 **115.5.** Əsas vəsaitlərin icarəyə götürülməsi müddətləri, şərtləri, habelə onların təmiri üzrə xərclər qanunvericilikdə nəzərdə tutulmuş qaydada icarəyə verənlə icarəçi arasında bağlanılan müqavilədə razılaşdırılır.
 
-**115.6.** Təmir işləri icarəyə verənin hesabına aparıldıqda, yaxud icarəçinin hesabına aparılaraq, icarə haqqı ilə əvəzləşdirildikdə bu Məcəllənin 115-ci maddəsinin müddəaları icarəçiyə tətbiq edilmir.
+**115.6.** İcarəyə götürülmüş əsas vəsaitlər icarəçinin balansında uçota alınmadıqda və ya təmir işləri icarəyə verənin hesabına aparıldıqda, yaxud icarəçinin hesabına aparılaraq, icarə haqqı ilə əvəzləşdirildikdə bu Məcəllənin 115.4-cü maddəsinin müddəaları icarəçiyə tətbiq edilmir. *(Redaksiya 1033-VIQD, 05.12.2023 — "İcarəyə götürülmüş əsas vəsaitlər icarəçinin balansında uçota alınmadıqda və ya" hissəsi və "115.4-cü maddəsinin" sözləri əlavə/dəyişdirilib.)*
+
+**115.6-1.** İcarəçinin balansında uçota alınmayan əsas vəsaitlərin təmirinə çəkilən və icarə haqqı ilə əvəzləşdirilməyən, yaxud icarəyə verən tərəfindən əvəzi ödənilməyən xərclər bağlanmış müqavilə müddəti ərzində, lakin 5 ildən az olmayaraq, illər üzrə mütənasib məbləğlərdə amortizasiya olunmaqla gəlirdən çıxılır. İcarəyə götürülmüş əsas vəsaitlərin təmirinə çəkilən xərclər hər il üzrə ayrıca olaraq kapitallaşdırılır və bu maddə ilə müəyyən edilmiş qaydada amortizasiya olunur. *(Əlavə edilib 406-VIQD, 03.12.2021; yeni redaksiyada — 1033-VIQD, 05.12.2023. Mühərrikdə: kateqoriya `it`, yalnız bu maddə — CLAUDE.md §5.1, §10.)*
 
 **115.7.** Əsas vəsaitlərin hər bir kateqoriyasının ilin sonuna qalıq dəyəri sıfıra bərabər olduqda, təmir xərclərinin faktiki məbləği müvafiq kateqoriyaya aid əsas vəsaitlərin qalıq dəyərinə aid edilir və bu Məcəllənin müddəalarına uyğun olaraq amortizasiya hesablanır.
 

@@ -106,6 +106,22 @@ def create_asset(root: Path, slug: str, p: dict) -> str:
         check_qma(category, in_date=in_date or None, useful_life=life,
                   is_legacy_pool=(mode == "pool"))
 
+        # m.115.6-1 only reaches a repair that the lessor did NOT reimburse
+        # and that was NOT offset against rent (m.115.6) -- otherwise there is
+        # no deduction under this mechanism at all, not a smaller one. Asked
+        # once, at creation: the fact is about the repair being capitalised,
+        # not about the card's other fields, so an edit later (name, note,
+        # counterparty) does not re-open it. Required rather than a silent
+        # default, because a wrongly-claimed deduction is exactly the failure
+        # §2.1 rules out -- and unlike most facts here, this one the engine
+        # cannot check against anything else in the books.
+        if category == "it" and not p.get("it_confirmed"):
+            raise DataError(
+                "İcarə təmiri: təsdiq tələb olunur — xərc icarədar tərəfindən "
+                "ödənilməyib və icarə haqqı ilə əvəzləşdirilməyib (m.115.6, "
+                "m.115.6-1). Əks halda bu maddə ilə vergidən çıxılmır."
+            )
+
         if mode == "pool":
             numbers = [""]
         else:

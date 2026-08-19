@@ -148,10 +148,14 @@ class ImportGridColumns(EngineTest):
     """
 
     # Not columns of data: `say` is how many cards to create (§4), `group_new`
-    # is the box that appears when someone picks "+ yeni növ", the rest is the
-    # form's own plumbing.
+    # is the box that appears when someone picks "+ yeni növ", `it_confirmed`
+    # is the m.115.6-1 confirmation asked only at creation of an `it` card
+    # (not reimbursed, not offset against rent) -- the grid excludes `it`
+    # itself for exactly that reason (§10, mutate.imports), so it has nowhere
+    # to carry a field that only ever applies to a category it never offers.
+    # The rest is the form's own plumbing.
     FORM_ONLY = {"mode", "asset_id", "say", "opening_year", "opening_edit",
-                 "group_new"}
+                 "group_new", "it_confirmed"}
 
     # The same field under two shapes, on purpose. The form offers the
     # DICTIONARY, so it posts a group_id -- picking from a list is what keeps

@@ -10,6 +10,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+from ..rates import CATEGORY_BY_CODE
 from ..storage import DataError, check_qma
 
 from .assets import life_of
@@ -158,6 +159,20 @@ def import_assets(root: Path, slug: str, p: dict) -> Any:
                     if inv and inv in seen_inv:
                         raise DataError(f"inv_no {inv!r} təkrarlanır")
                     category = category_of(raw.get("category"))
+                    # Excluded from bulk import on purpose, not by omission:
+                    # m.115.6-1 requires confirming per repair that it was
+                    # neither reimbursed by the lessor nor offset against rent
+                    # (m.115.6), and a spreadsheet row has nowhere to carry
+                    # that confirmation. One card per repair-year is also a
+                    # low-volume fact, entered through "+ Yeni ƏV" where the
+                    # confirmation lives (mutate.assets.create_asset).
+                    if category == "it":
+                        raise DataError(
+                            f"{CATEGORY_BY_CODE[category].name_az}: idxal "
+                            f"vasitəsilə əlavə edilmir — «+ Yeni ƏV» "
+                            f"formasından, hər təmir ili üçün ayrıca kart "
+                            f"yaradın (m.115.6-1)."
+                        )
                     if not inv:
                         inv = suggest_inv_no(assets, category)
                         auto_inv = True

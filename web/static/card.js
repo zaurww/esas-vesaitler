@@ -11,6 +11,7 @@ function openCard(id){
   // residual and may still be accrued below it.
   const rinf = card.rate_info || cat.rate;
   const qma = isQma(card.category);
+  const isIt = card.category === 'it';
   const straight = rinf.method === 'duz';
   document.getElementById('dtitle').textContent = (card.inv_no ? card.inv_no + ' · ' : '') + card.name;
   const step = (l, v, extra='') =>
@@ -55,7 +56,8 @@ function openCard(id){
   h += step('4 · Xaricetmə', card.disposed);
   h += step('= Amortizasiya bazası', card.base);
   h += `<div class="step"><span class="l">5 · 500/5% həddi</span><span>${
-    qma ? 'tətbiq olunmur (m.114.8 — əsas vəsait)'
+    isIt ? 'tətbiq olunmur (cədvəl özü sıfıra çatır — m.115.6-1)'
+    : qma ? 'tətbiq olunmur (m.114.8 — əsas vəsait)'
         : card.threshold_hit ? '⚠ düşür' : 'düşmür'}</span></div>`;
   if (card.threshold_hit)
     h += `<div class="note" style="margin:8px 0">${esc(card.threshold_reason)}<br>
@@ -74,11 +76,12 @@ function openCard(id){
   // entrepreneur coefficient is not among the factors.
   if (straight){
     h += `<div class="step"><span class="l"><strong>6 · Amortizasiya cədvəli</strong>
-        — düz xətt (m.114.3.6)</span>
+        — düz xətt (${isIt ? 'm.115.6-1' : 'm.114.3.6'})</span>
         <span><strong>${money(card.depreciation)}</strong></span></div>
       <div class="sub">
-        <div class="step"><span class="l">İstifadə müddəti${
+        <div class="step"><span class="l">${isIt ? 'Müqavilə müddəti' : 'İstifadə müddəti'}${
           card.category === 'qma-n' ? ' — qanunla (m.114.3-1.10)'
+          : isIt ? ' — kartda göstərilib, 5 ildən az deyil'
                                     : ' — FİM, kartda göstərilib'}</span>
           <span class="num">${r6.term_years} il</span></div>
         <div class="step"><span class="l">Bu ilin əvvəlinə qalan müddət</span>
@@ -88,9 +91,13 @@ function openCard(id){
         <div class="step"><span class="l">Sahibkar əmsalı — ${esc(REPORT.status_name)}</span>
           <span>tətbiq olunmur</span></div>
       </div>
-      <div class="note" style="margin:8px 0">m.114.3-2 və m.114.3-3 əmsalı
-        <strong>əsas vəsaitlərə</strong> verir, qeyri-maddi aktiv isə m.118-ə
-        görə əsas vəsait deyil. m.114.8 (500/5%) də bu kartda yoxlanılmır.</div>`;
+      <div class="note" style="margin:8px 0">${isIt
+        ? 'm.115.6-1 art. 114-dən kənar, ayrıca mexanizmdir — sahibkarlıq '
+          + 'əmsalının tutulduğu heç bir maddəyə bağlı deyil. m.114.8 '
+          + '(500/5%) də bu kartda yoxlanılmır: cədvəl özü sıfıra çatır.'
+        : 'm.114.3-2 və m.114.3-3 əmsalı <strong>əsas vəsaitlərə</strong> '
+          + 'verir, qeyri-maddi aktiv isə m.118-ə görə əsas vəsait deyil. '
+          + 'm.114.8 (500/5%) də bu kartda yoxlanılmır.'}</div>`;
   } else {
   h += `<div class="step"><span class="l"><strong>6 · Amortizasiya dərəcəsi</strong></span>
         <span><strong>${pct(r6.applied)}</strong></span></div>

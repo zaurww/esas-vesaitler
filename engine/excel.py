@@ -567,8 +567,12 @@ def build_import_template(fields: list[str]) -> bytes:
     ws.freeze_panes = "A2"
     _widths(ws, [14, 34, 16, 14, 15, 16, 26, 30])
 
-    # QMA belongs in the dropdown; `it` does not, because the engine has no
-    # schedule for it yet and a card in it stops the year computing (§12.5).
+    # QMA belongs in the dropdown; `it` does not -- not because the engine
+    # lacks a schedule for it (it has one, m.115.6-1, §10), but because a
+    # bulk-imported row has nowhere to carry the confirmation the law
+    # requires per repair (not reimbursed, not offset against rent, m.115.6).
+    # One card per capitalised repair-year is also a low-volume fact, entered
+    # through "+ Yeni ƏV" where that confirmation lives.
     cats = [c for c in CATEGORIES if c.code != "it"]
 
     ref = wb.create_sheet("Kateqoriyalar")

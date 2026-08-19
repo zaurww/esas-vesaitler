@@ -13,23 +13,54 @@ function batchTotal(){
     : '—';
 }
 
-/* The term of a QMA, shown only where it means something.
+/* The term of a QMA or an `it` card, shown only where it means something.
 
    `qma-m` IS the category "term known", so the field is required there and
    the card cannot be saved without it -- the engine has no schedule otherwise
    (§5.3, the `duz` branch). `qma-n` is the opposite claim, so a term typed
    there is refused rather than kept: it would say the term is known and
-   unknown at once. Everything else never sees the field at all. */
+   unknown at once. `it` reads the same way as `qma-m` -- a known term, this
+   time the lease contract's -- except the law floors it at 5 years
+   (m.115.6-1), so the label, hint and minimum swap to match rather than
+   silently accepting a shorter number and rounding it up somewhere the user
+   cannot see (§2.1). Everything else never sees the field at all. */
 function qmaToggle(){
   const f = document.getElementById('mform');
   const box = document.getElementById('fimbox');
   if (!f || !box || !f.category) return;
   const cat = f.category.value;
-  box.hidden = cat !== 'qma-m';
+  const isIt = cat === 'it';
+  box.hidden = cat !== 'qma-m' && !isIt;
   const inp = box.querySelector('input');
-  if (inp) inp.required = (cat === 'qma-m');
+  if (inp){
+    inp.required = (cat === 'qma-m' || isIt);
+    inp.min = isIt ? '5' : '1';
+  }
+  const lbl = box.querySelector('label');
+  const hint = box.querySelector('.h');
+  if (lbl) lbl.textContent = isIt ? 'Müqavilə müddəti (il)'
+                                  : 'İstifadə müddəti — FİM (il)';
+  if (hint) hint.textContent = isIt
+    ? 'm.115.6-1: icarəyə götürülmüş ƏV-in təmirinə çəkilən xərc bağlanmış '
+      + 'müqavilə müddəti ərzində, lakin 5 ildən az olmayaraq, illər üzrə '
+      + 'bərabər hissələrlə gəlirdən çıxılır. Müqavilə daha qısadırsa, 5 '
+      + 'yazın — qanun elə tələb edir. Sahibkarlıq əmsalı bura tətbiq '
+      + 'olunmur: bu, m.114 üzrə deyil, ayrıca mexanizmdir.'
+    : 'm.114.3.6: müddəti məlum olan QMA ilkin dəyəri bu illər üzrə bərabər '
+      + 'hissələrlə gəlirdən çıxılır. Sahibkarlıq əmsalı (×2 / ×1,5) QMA-ya '
+      + 'tətbiq olunmur — m.114.3-2 yalnız əsas vəsaitlərə aiddir.';
   const note = document.getElementById('qmanote');
   if (note) note.hidden = cat !== 'qma-n';
+  // The m.115.6-1 confirmation is asked once, at creation -- editing a card
+  // later (name, note, counterparty) does not reopen a fact about how the
+  // repair itself was paid for.
+  const editing = !!f.elements['asset_id'];
+  const confirm = document.getElementById('itconfirm');
+  if (confirm){
+    confirm.hidden = !isIt || editing;
+    const cb = confirm.querySelector('input');
+    if (cb) cb.required = isIt && !editing;
+  }
 }
 
 /* ---- asset: new / carried over / group pool ---- */
@@ -50,7 +81,7 @@ function formAsset(card){
     let h = modes + `<input type="hidden" name="mode" value="${mode}">`;
     if (edit) h += `<input type="hidden" name="asset_id" value="${card.asset_id}">`;
     h += fld('category','Kateqoriya',{type:'select',req:true,
-             options:catOptions(card ? card.category : 'nv')});
+             options:assetCatOptions(card ? card.category : 'nv')});
     // Right under the tax category, because that is the pair to read
     // together: the law's classification and the client's own. The second one
     // reaches no figure (§13.1).
@@ -87,7 +118,15 @@ function formAsset(card){
         <div id="qmanote" class="fld" hidden><div class="h">Müddəti məlum
           olmayan QMA: <strong>2026-cı ildən düz xətt metodu ilə 10 il</strong>
           (m.114.3-1.10, 297-VIIQD), ondan əvvəlki illər üçün 10% azalan qalıq
-          dəyəri. Müddət kartda göstərilmir — qanun özü verir.</div></div>`;
+          dəyəri. Müddət kartda göstərilmir — qanun özü verir.</div></div>
+        <div id="itconfirm" class="fld" hidden>
+          <label style="display:flex;gap:8px;align-items:flex-start;font-weight:normal">
+            <input type="checkbox" name="it_confirmed" style="margin-top:3px;width:auto">
+            <span>Bu xərcin əvəzi icarədar tərəfindən <strong>ödənilməyib</strong>
+              və icarə haqqı ilə <strong>əvəzləşdirilməyib</strong> (m.115.6) —
+              əks halda m.115.6-1 ilə vergidən çıxılmır.</span>
+          </label>
+        </div>`;
       // Neither figure enters the calculation; both are here because the card
       // is also where an accountant comes to answer "which invoice was this
       // on" and "which of the forty units is it". Optional on purpose --

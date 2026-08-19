@@ -13,9 +13,11 @@ Step 6 has two forms, and which one applies is a fact about the year, not
 about the asset (§5.1, RateRow.method):
 
     azalan   base x rate             declining balance, art. 114.4
-    duz      base / remaining term   straight line, art. 114.3.6 for QMA
+    duz      base / remaining term   straight line, art. 114.3.6 for QMA,
+                                      art. 115.6-1 for `it`
 
-Everything around step 6 is shared, which is why a QMA is an ordinary card in
+Everything around step 6 is shared, which is why a QMA (or `it`, a leased
+asset's repair capitalised under its own schedule) is an ordinary card in
 assets.tsv and not a parallel world: it is acquired, carried, disposed of and
 sealed exactly like a fixed asset (§4).
 """
@@ -444,9 +446,19 @@ def compute_year(data: ClientData, year: int,
     # none of them, so the repair loop below (EV_CODES) would step straight
     # over such a row and the money would disappear without a word -- the one
     # failure §2.1 rules out. Refused here instead, where the row can be named.
+    # `it` is excluded the same way but for a different reason: its own card
+    # IS the capitalised repair (m.115.6-1), so a second entry in repairs.tsv
+    # would be a top-up the statute does not describe.
     for aid in repairs:
         a = assets.get(aid)
         if a is not None and CATEGORY_BY_CODE[a.category].kind == "qma":
+            if a.category == "it":
+                raise CalcError(
+                    f"{a.inv_no or aid}: icarə təmiri kartına əlavə təmir "
+                    f"xərci yazılıb ({year}). Bu kateqoriyada kartın özü "
+                    f"kapitallaşan təmirdir (m.115.6-1) — əlavə xərc üçün "
+                    f"yeni kart yaradın, repairs.tsv-dəki sətri silin."
+                )
             raise CalcError(
                 f"{a.inv_no or aid}: qeyri-maddi aktiv üçün təmir xərci "
                 f"yazılıb ({year}), lakin m.115 təmir həddi yalnız əsas "
@@ -474,20 +486,25 @@ def compute_year(data: ClientData, year: int,
         `qma-m` reads it off the card -- that is what "istifadə müddəti məlum"
         means, and it is why the FİM is required there. `qma-n` reads it from
         the parameter table, because for an unknown term the law supplies the
-        length itself (114.3-1.10: ten years).
+        length itself (114.3-1.10: ten years). `it` reads it off the card too
+        -- the lease contract's term -- and it is already floored at 5 years
+        by storage.check_qma at entry, so there is no MAX() to apply here.
 
         None means the category has no single term to state -- the term is per
         card, so the category header cannot print one.
         """
-        if code == "qma-m":
+        if code in ("qma-m", "it"):
             if asset is None:
                 return None
             life = asset.useful_life
-            if not life or life < 1:
+            floor = 1 if code == "qma-m" else 5
+            if not life or life < floor:
+                what = "istifadə müddəti (FİM)" if code == "qma-m" else "müqavilə müddəti"
+                law = "m.114.3.6" if code == "qma-m" else "m.115.6-1"
                 raise CalcError(
-                    f"{asset.inv_no or asset.asset_id}: istifadə müddəti (FİM) "
-                    f"göstərilməyib — m.114.3.6 üzrə düz xətt metodu müddət "
-                    f"olmadan hesablana bilmir. Kartı redaktə edib FİM yazın."
+                    f"{asset.inv_no or asset.asset_id}: {what} göstərilməyib "
+                    f"— {law} üzrə düz xətt metodu müddət olmadan hesablana "
+                    f"bilmir. Kartı redaktə edib {what} yazın."
                 )
             return int(life)
         if code == "qma-n":
@@ -501,7 +518,10 @@ def compute_year(data: ClientData, year: int,
         # 114.3-2 and 114.3-3 grant the coefficient "əsas vəsaitlərə
         # münasibətdə" -- with respect to FIXED assets. A QMA is not one
         # (art. 118), so its ceiling is the plain norm and the taxpayer's
-        # status moves nothing.
+        # status moves nothing. `it` shares the exclusion for a different
+        # reason: m.115.6-1 is a self-contained deduction outside art. 114
+        # altogether, with no coefficient article of its own to reach it --
+        # not because the leased asset itself is not an əsas vəsait.
         is_qma = CATEGORY_BY_CODE[code].kind == "qma"
         coefficient = D("1") if is_qma else mult.coefficient
         election = data.election_for(year, code, asset_id)
@@ -581,14 +601,14 @@ def compute_year(data: ClientData, year: int,
         )
 
     # A category can be computed once its schedule has a source: a rate for
-    # the declining balance, a term for the straight line. `it` has neither
-    # yet (its term is the lease contract, §12.5), and says so per card below
-    # rather than by disappearing from the report.
+    # the declining balance, a term for the straight line. `it` has one now
+    # (m.115.6-1, the lease contract term read off the card, same as `qma-m`
+    # reads a FİM).
     def has_schedule(code: str) -> bool:
         # A category the owner just added (§12.4-quater) may not have a rate
         # row yet -- statutory() raises rather than guessing one (§2.1), and
         # that must not crash the whole year; it is "not priceable" exactly
-        # like `it` before its rate existed.
+        # like `it` was before its rate existed.
         try:
             st = statutory(year, code)
         except LookupError:
@@ -709,9 +729,9 @@ def compute_year(data: ClientData, year: int,
                     f"üçün {year} ili üçün dərəcə təyin edilməyib. Normalar "
                     f"səhifəsində əlavə edin."
                 ) from None
-            # A rate exists but the engine has no schedule for it yet -- so
-            # far only `it`, whose term is a lease contract (§12.5) and needs
-            # a code change, not a rate.
+            # A rate row exists for the year but carries no max_rate, and the
+            # category is not on the straight line -- an owner-added category
+            # (§12.4-quater) declared before its rate was filled in.
             raise CalcError(
                 f"{c.inv_no or c.asset_id}: {c.category} kateqoriyası hələ "
                 f"dəstəklənmir (dərəcə istifadə müddətindən, mərhələ 1b)"
@@ -745,9 +765,12 @@ def compute_year(data: ClientData, year: int,
         #
         # Not for a QMA: 114.8 speaks of "əsas vəsaitin qalıq dəyəri", and
         # from 2026 it opens with "azalan qalıq dəyəri metodu ilə amortizasiya
-        # hesablanması zamanı" -- twice out of reach of an intangible. A
-        # straight line needs no such cut-off anyway: it ends by arriving at
-        # zero, which is what the declining balance never does.
+        # hesablanması zamanı" -- twice out of reach of an intangible. Not for
+        # `it` either, but for a narrower reason: the leased asset itself IS
+        # an əsas vəsait, but m.115.6-1 runs its own complete schedule outside
+        # art. 114/114.8 altogether, and a straight line needs no cut-off
+        # anyway -- it ends by arriving at zero, which the declining balance
+        # never does on its own.
         if CATEGORY_BY_CODE[c.category].kind == "ev":
             c.threshold_hit, c.threshold_reason = threshold_test(
                 c, c.opening, year,
@@ -756,6 +779,13 @@ def compute_year(data: ClientData, year: int,
 
         if (c.asset_id in writeoffs
                 and CATEGORY_BY_CODE[c.category].kind == "qma"):
+            if c.category == "it":
+                raise CalcError(
+                    f"{c.inv_no or c.asset_id}: icarə təmiri kartı üçün "
+                    f"m.114.8 silinmə qərarı yazılıb ({year}), lakin bu hədd "
+                    f"bu kateqoriyaya aid deyil — cədvəl özü sıfıra çatır "
+                    f"(m.115.6-1). writeoffs.tsv-dəki sətri silin."
+                )
             raise CalcError(
                 f"{c.inv_no or c.asset_id}: qeyri-maddi aktiv üçün m.114.8 "
                 f"silinmə qərarı yazılıb ({year}), lakin bu hədd yalnız əsas "

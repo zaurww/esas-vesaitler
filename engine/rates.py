@@ -24,6 +24,24 @@ FORMAT_VERSION = 1
 LAW_REVIEWED = "2026-08-14"
 
 
+def version_tuple(v: str) -> tuple:
+    """Compare two dotted version strings numerically, not lexically.
+
+    Lives beside ENGINE_VERSION rather than wherever first needed it
+    (mutate/archive.py, for the "don't import an archive written by a newer
+    engine" guard) so a second caller -- web/update.py's "is there a newer
+    release" check -- reads the same rule instead of growing its own copy
+    that could drift (the class of bug rates.NORM_FILES was named once to
+    avoid). A leading "v", as GitHub tags carry (v0.10.0), is stripped so
+    both callers can hand it a tag or a bare ENGINE_VERSION alike.
+    """
+    v = str(v).lstrip("vV")
+    out = []
+    for part in v.split("."):
+        out.append(int(part) if part.isdigit() else 0)
+    return tuple(out)
+
+
 class Category(NamedTuple):
     code: str
     name_az: str
@@ -43,8 +61,15 @@ _BUILTIN_CATEGORIES: List[Category] = [
     Category("ym", "Yük maşınları", "Грузовые машины", "ev", "VM m.114.3.3"),
     Category("yt", "Yüksək texnologiya", "Высокие технологии", "ev", "VM m.114.3.2-1"),
     Category("dg", "Digər əsas vəsaitlər", "Прочие основные средства", "ev", "VM m.114.3.7"),
-    Category("it", "İcarəyə götürülmüş ƏV-in təmiri", "Ремонт арендованных ОС", "ev",
-              "VM m.115.3-115.8"),
+    # kind="qma", not "ev": the object is a leased FIXED asset, but the
+    # DEDUCTION runs through the same exclusions as an intangible -- no
+    # coefficient, no 114.8, no ordinary art. 115 limit (§5.1-bis: kind drives
+    # those gates, not the label). The reason differs from a real QMA's
+    # (art. 118 vs. m.115.6-1 being a self-contained mechanism outside art.
+    # 114), so every message a user can see is worded per category, not per
+    # kind -- see calc.py, storage.py check_qma, card.js.
+    Category("it", "İcarəyə götürülmüş ƏV-in təmiri", "Ремонт арендованных ОС", "qma",
+              "VM m.115.3-115.6-1"),
     Category("qma-m", "QMA — FİM məlum", "НМА — срок известен", "qma", "VM m.114.3.6"),
     Category("qma-n", "QMA — FİM nəməlum", "НМА — срок неизвестен", "qma", "VM m.114.3.6"),
 ]
@@ -113,7 +138,32 @@ STATUTORY_RATES: List[RateRow] = [
     RateRow(2001, "yt", D("0.25"), D("0.03")),
     RateRow(2022, "yt", D("0.25"), D("0.05"), "406-VIQD 03.12.2021"),
     RateRow(2001, "dg", D("0.20"), D("0.03")),
-    RateRow(2001, "it", None, D("0.03")),       # 1/MAX(FİM;5)
+
+    # -- İcarəyə götürülmüş ƏV-in təmiri, m.115.6-1 -------------------------
+    # Only the common case is modelled: the leased asset is NOT on the
+    # lessee's own balance, and the repair is neither reimbursed by the
+    # lessor nor offset against rent (that combination is what m.115.6 leaves
+    # for m.115.6-1 to govern). The rarer case -- the leased asset carried on
+    # the lessee's OWN balance -- falls under m.115.4 instead, with a plain
+    # percentage limit by the TYPE of asset leased; that case is out of scope
+    # (decided 19.08.2026, CLAUDE.md §10).
+    #
+    # No percentage limit at all: m.115.6-1 is not "a rate like `dg`", it is
+    # a straight-line schedule with no cap -- "illər üzrə mütənasib
+    # məbləğlərdə amortizasiya olunmaqla gəlirdən çıxılır", capitalised
+    # separately per year of repair ("hər il üzrə ayrıca olaraq
+    # kapitallaşdırılır"). repair_limit=None keeps it out of the ordinary
+    # art. 115 loop entirely (that loop only runs for a category with a
+    # limit), same as it already stays out for a QMA.
+    #
+    # The term is "bağlanmış müqavilə müddəti ərzində, lakin 5 ildən az
+    # olmayaraq" -- the lease contract's term, floored at 5 years. The floor
+    # is enforced at DATA ENTRY (storage.check_qma, mutate.assets.create_asset)
+    # rather than applied silently at calc time: the number stored in
+    # useful_life IS the schedule length, so nothing here ever rewrites a
+    # figure the user typed (§2.1). calc.straight_term reads it exactly like
+    # `qma-m` reads a FİM.
+    RateRow(2001, "it", None, None, "", "duz"),
 
     # -- Qeyri-maddi aktivlər, 114.3.6 -------------------------------------
     # A known term has always been straight line: "illər üzrə istifadə

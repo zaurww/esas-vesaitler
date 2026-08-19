@@ -21,7 +21,7 @@ from typing import Any
 
 from .. import rates
 from ..calc import compute_year
-from ..rates import ENGINE_VERSION, FORMAT_VERSION
+from ..rates import ENGINE_VERSION, FORMAT_VERSION, version_tuple
 from ..storage import DataError, load_client
 
 from .core import mutate_folder, one_segment
@@ -88,7 +88,7 @@ def inspect_archive(root: Path, blob: bytes) -> dict:
                         "(manifest.json yoxdur)") from None
 
     notes, blocking = [], []
-    if _version_tuple(man["engine_version"]) > _version_tuple(ENGINE_VERSION):
+    if version_tuple(man["engine_version"]) > version_tuple(ENGINE_VERSION):
         blocking.append(
             f"Arxiv daha yeni mühərriklə ({man['engine_version']}) yazılıb, "
             f"burada {ENGINE_VERSION} var. Əvvəlcə proqramı yeniləyin — köhnə "
@@ -120,13 +120,6 @@ def inspect_archive(root: Path, blob: bytes) -> dict:
                      f"başqa ad seçin.")
     return {"manifest": man, "notes": notes, "blocking": blocking,
             "exists": exists, "suggested_slug": man["slug"]}
-
-
-def _version_tuple(v: str) -> tuple:
-    out = []
-    for part in str(v).split("."):
-        out.append(int(part) if part.isdigit() else 0)
-    return tuple(out)
 
 
 def import_client(root: Path, _slug: str, p: dict) -> Any:

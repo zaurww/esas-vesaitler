@@ -30,6 +30,7 @@ from engine.mutate import (  # noqa: E402
 from engine import rates  # noqa: E402
 from engine.rates import CATEGORIES, CATEGORY_BY_CODE, ENGINE_VERSION  # noqa: E402
 from engine.storage import DataError, list_clients, load_client  # noqa: E402
+from web.update import apply_update, check_latest, download  # noqa: E402
 
 INDEX = Path(__file__).resolve().parent / "index.html"
 STATIC = Path(__file__).resolve().parent / "static"
@@ -672,6 +673,13 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 return
 
+            if url.path == "/api/update-check":
+                # Run once per page load (web/static/boot.js), never in a
+                # background timer -- and check_latest() itself never raises,
+                # so a worker offline just sees no banner, not an error here.
+                self._json(check_latest())
+                return
+
             self._json({"error": "not found"}, 404)
 
         except (DataError, CalcError) as e:
@@ -689,6 +697,19 @@ class Handler(BaseHTTPRequestHandler):
                 length = int(self.headers.get("Content-Length", "0"))
                 body = json.loads(self.rfile.read(length) or b"{}")
                 return self._json(parse_upload(body))
+            if url.path == "/api/update-apply":
+                # Not a client mutation -- no slug, no changelog, no per-year
+                # recompute to verify against. Operates on ROOT itself, so it
+                # does not go through ACTIONS (engine.mutate.core.transaction
+                # is keyed by client, which this has none of).
+                check = check_latest()
+                if not check["available"]:
+                    return self._json(
+                        {"error": "Yenilənəcək versiya tapılmadı"}, 400)
+                blob = download(check["zip_url"])
+                message = apply_update(ROOT, blob, from_version=ENGINE_VERSION,
+                                       to_version=check["latest"])
+                return self._json({"ok": True, "message": message})
             if url.path != "/api/action":
                 return self._json({"error": "not found"}, 404)
             length = int(self.headers.get("Content-Length", "0"))

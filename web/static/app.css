@@ -40,6 +40,10 @@
   }
   .btn:hover{background:#e9eef5}
   .ver{font-size:11px; opacity:.65}
+  /* A new version is available -- clickable, unlike the plain version text
+     it replaces (§9: checked once per page load, applied only on click). */
+  .ver.upd{opacity:1; color:#0a58ca; cursor:pointer; font-weight:600}
+  .ver.upd:hover{text-decoration:underline}
 
   main{padding:18px; max-width:1500px; margin:0 auto}
 

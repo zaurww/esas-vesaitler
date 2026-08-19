@@ -61,7 +61,8 @@ def _int(value: str, where: str) -> int:
 
 def check_qma(category: str, *, in_date, useful_life, is_legacy_pool,
               where: str = "") -> None:
-    """What a QMA card must carry, checked on the way in AND on the way out.
+    """What a card on the straight line must carry, checked on the way in
+    AND on the way out.
 
     A straight line is a schedule, and a schedule needs two things a rate
     never did: where it starts and how long it runs. Both are therefore facts
@@ -70,7 +71,11 @@ def check_qma(category: str, *, in_date, useful_life, is_legacy_pool,
     * `in_date` -- with no start there is no year zero, and the engine cannot
       tell a first year from a fifth;
     * the FİM on `qma-m` -- that IS what "istifadə müddəti məlum" means, so a
-      card without it is not a known-term intangible, it is an unfinished one.
+      card without it is not a known-term intangible, it is an unfinished one;
+    * the contract term on `it` -- m.115.6-1 spreads the cost over the lease
+      term, floored at 5 years. The floor is enforced HERE, at entry, rather
+      than at calc time: what is stored IS the schedule length, so nothing
+      downstream ever silently rewrites a number the user typed (§2.1).
 
     The mirror check matters as much: a FİM written on `qma-n` says the term
     is known and unknown at once. Refused rather than ignored, because the
@@ -78,7 +83,8 @@ def check_qma(category: str, *, in_date, useful_life, is_legacy_pool,
 
     A group pool is refused outright: it stands for a category with no cards
     (§6.1), so it has neither a date nor a term, and 10% of a residual is the
-    one thing a straight line will not do.
+    one thing a straight line will not do. `it` is refused here for the same
+    shape of reason -- a pool has no single lease contract to date.
 
     Raising from both sides is deliberate (§8): the files are plain text and
     people edit them.
@@ -88,6 +94,11 @@ def check_qma(category: str, *, in_date, useful_life, is_legacy_pool,
     w = f"{where}: " if where else ""
     name = CATEGORY_BY_CODE[category].name_az
     if is_legacy_pool:
+        if category == "it":
+            raise DataError(
+                f"{w}{name}: qrup qalığı tətbiq olunmur — hər icarə təmiri "
+                f"ayrıca kart kimi yaradılır, öz müqavilə müddəti ilə "
+                f"(m.115.6-1)")
         raise DataError(
             f"{w}qeyri-maddi aktiv üçün qrup qalığı tətbiq olunmur — "
             f"QMA hər kart üzrə ayrıca amortizasiya olunur (m.114.5)")
@@ -100,6 +111,13 @@ def check_qma(category: str, *, in_date, useful_life, is_legacy_pool,
             raise DataError(
                 f"{w}{name}: istifadə müddəti (FİM, il) tələb olunur və 1-dən "
                 f"kiçik ola bilməz (m.114.3.6)")
+    elif category == "it":
+        if useful_life is None or int(useful_life) < 5:
+            raise DataError(
+                f"{w}{name}: müqavilə müddəti (il) tələb olunur və 5 ildən "
+                f"kiçik ola bilməz — müqavilə daha qısadırsa, qanunla 5 "
+                f"yazılır (m.115.6-1: 'bağlanmış müqavilə müddəti ərzində, "
+                f"lakin 5 ildən az olmayaraq')")
     elif useful_life is not None:
         raise DataError(
             f"{w}{name}: istifadə müddəti göstərilib — müddət məlumdursa, "

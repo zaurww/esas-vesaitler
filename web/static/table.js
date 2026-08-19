@@ -140,9 +140,10 @@ function viewAnnual(d){
     // the schedule comes from a term, per card where the card carries it. The
     // old header would have printed "0% x 1 = 0% hədd" for `qma-m` -- true of
     // nothing, and it invites the reader to look for the missing rate.
+    const isItCat = cat.code === 'it';
     const headRate = r.method === 'duz'
-      ? `<span class="rate">düz xətt (m.114.3.6) · ${r.per_card
-          ? 'müddət hər kartda — FİM'
+      ? `<span class="rate">düz xətt (${isItCat ? 'm.115.6-1' : 'm.114.3.6'}) · ${r.per_card
+          ? (isItCat ? 'müddət hər kartda — müqavilə' : 'müddət hər kartda — FİM')
           : r.term_years + ' il'} · sahibkar əmsalı tətbiq olunmur</span>`
       : `<span class="rate">${pct(r.statutory_max)} × ${r.coefficient} (${esc(d.status)})
       = ${pct(r.ceiling)} hədd · tətbiq <strong>${pct(r.applied)}</strong>
