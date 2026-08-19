@@ -7,9 +7,10 @@ under-ceiling one is legal but usually not what the client meant.
 
 from decimal import Decimal
 from tests.support import D, EngineTest, RateElection, asset, card_of, \
-    client, owner_rates, rates
+    client, owner_categories, owner_rates, rates
 
 from engine.calc import CalcError, compute_year, rate_matrix
+from engine.mutate import set_category_row
 
 
 class RateTable(EngineTest):
@@ -81,6 +82,55 @@ class RateTable(EngineTest):
         would send the accountant to the wrong text."""
         self.assertEqual(rates.coef_law_ref(2025, "mikro"), "VM m.114.3-1")
         self.assertEqual(rates.coef_law_ref(2026, "mikro"), "VM m.114.3-2")
+
+
+class CategoryTable(EngineTest):
+    """A category the code has not caught up with (§12.4-quater), read from
+    `categories.tsv` and joined to the built-ins on refresh (§5.1-bis)."""
+
+    def test_an_owner_category_joins_the_built_ins(self):
+        owner_categories(
+            "code\tname_az\tname_ru\tkind\tlaw_ref\tnote\n"
+            "iy\tİş heyvanları\t\tev\tVM m.114.3.4\t\n"
+        )
+        self.assertIn("iy", rates.CATEGORY_BY_CODE)
+        self.assertIn("iy", rates.EV_CODES)
+        self.assertNotIn("iy", rates.QMA_CODES)
+        # bt is still there -- an addition, not a replacement.
+        self.assertIn("bt", rates.CATEGORY_BY_CODE)
+
+    def test_a_category_and_its_rate_take_effect_in_one_refresh(self):
+        """categories.tsv is read before rates.tsv within refresh(), so a
+        rate for a brand-new code does not need a second pass to validate."""
+        owner_categories(
+            "code\tname_az\tname_ru\tkind\tlaw_ref\tnote\n"
+            "iy\tİş heyvanları\t\tev\tVM m.114.3.4\t\n",
+            rates_text="effective_year\tcategory\tmax_rate\trepair_limit\tnote\n"
+                       "2024\tiy\t0.20\t\t\n",
+        )
+        data = client(years=(2024,))
+        data.assets = [asset("A1", "iy", "1000", in_year=2024)]
+        r = compute_year(data, 2024)
+        self.assertMoney(card_of(r, "A1").depreciation, "200.00")
+
+    def test_a_category_without_a_rate_fails_the_card_gracefully(self):
+        """§2.1: no rate anywhere for this year must not crash has_schedule()
+        with a raw LookupError -- it is CalcError, same as any other refusal
+        the engine can explain."""
+        owner_categories(
+            "code\tname_az\tname_ru\tkind\tlaw_ref\tnote\n"
+            "iy\tİş heyvanları\t\tev\tVM m.114.3.4\t\n"
+        )
+        data = client(years=(2024,))
+        data.assets = [asset("A1", "iy", "1000", in_year=2024)]
+        with self.assertRaises(CalcError) as cm:
+            compute_year(data, 2024)
+        self.assertIn("dərəcə təyin edilməyib", str(cm.exception))
+
+    def test_reset_drops_owner_categories(self):
+        """§11.4: EngineTest.setUp resets the rate tables between tests, so
+        one test's category must not leak into the next."""
+        self.assertNotIn("iy", rates.CATEGORY_BY_CODE)
 
 
 class RateResolution(EngineTest):

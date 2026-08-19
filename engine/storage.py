@@ -198,6 +198,7 @@ def load_client(root: Path, slug: str) -> ClientData:
         voen=str(cfg.get("voen", "")),
         start_year=int(cfg.get("start_year", 0)),
         format_version=int(cfg.get("format_version", 1)),
+        client_id=str(cfg.get("client_id", "")).strip(),
     )
 
     # Read before the assets, because an asset points at one. A group is

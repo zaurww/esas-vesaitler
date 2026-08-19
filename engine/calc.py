@@ -585,7 +585,14 @@ def compute_year(data: ClientData, year: int,
     # yet (its term is the lease contract, §12.5), and says so per card below
     # rather than by disappearing from the report.
     def has_schedule(code: str) -> bool:
-        st = statutory(year, code)
+        # A category the owner just added (§12.4-quater) may not have a rate
+        # row yet -- statutory() raises rather than guessing one (§2.1), and
+        # that must not crash the whole year; it is "not priceable" exactly
+        # like `it` before its rate existed.
+        try:
+            st = statutory(year, code)
+        except LookupError:
+            return False
         return st.method == "duz" or st.max_rate is not None
 
     priceable = {c.code for c in CATEGORIES if has_schedule(c.code)}
@@ -691,6 +698,20 @@ def compute_year(data: ClientData, year: int,
     # -- steps 4-7, per card ------------------------------------------------
     for c in cards.values():
         if c.category not in priceable:
+            try:
+                statutory(year, c.category)
+            except LookupError:
+                # No rate row anywhere for this year -- an owner-added
+                # category (§12.4-quater) that is missing its rates.tsv row,
+                # or one added for a later year than this report.
+                raise CalcError(
+                    f"{c.inv_no or c.asset_id}: {c.category} kateqoriyası "
+                    f"üçün {year} ili üçün dərəcə təyin edilməyib. Normalar "
+                    f"səhifəsində əlavə edin."
+                ) from None
+            # A rate exists but the engine has no schedule for it yet -- so
+            # far only `it`, whose term is a lease contract (§12.5) and needs
+            # a code change, not a rate.
             raise CalcError(
                 f"{c.inv_no or c.asset_id}: {c.category} kateqoriyası hələ "
                 f"dəstəklənmir (dərəcə istifadə müddətindən, mərhələ 1b)"
@@ -1070,7 +1091,7 @@ def rate_matrix(data: ClientData, years: list[int]) -> RateMatrix:
     for code in EV_CODES + QMA_CODES:
         cat_name = CATEGORY_BY_CODE[code].name_az
         series = RateSeries(key=code, kind="category", name=cat_name,
-                            law_ref=rates.LAW_REF.get(code, ""), category=code)
+                            law_ref=rates.CATEGORY_BY_CODE[code].law_ref, category=code)
         seen = False
         for y in years:
             res = per_year.get(y)

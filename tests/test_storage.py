@@ -37,6 +37,11 @@ class TempRoot(EngineTest):
     def client(self):
         return load_client(self.root, self.slug)
 
+    def backups_dir(self) -> Path:
+        """Backups are keyed by client_id, not slug (§3, §8.3) -- resolve it
+        from the live client rather than hardcoding the value."""
+        return self.root / "backups" / self.client().client_id
+
 
 class Roundtrip(TempRoot):
 
@@ -233,8 +238,7 @@ class WriteProtection(TempRoot):
         mutate.create_asset(self.root, self.slug, {
             "mode": "new", "category": "dg", "name": "Soyuducu",
             "cost": "400", "in_date": "2024-05-01", "say": "50"})
-        snapshots = [p for p in (self.root / "backups" / self.slug).iterdir()
-                     if p.is_dir()]
+        snapshots = [p for p in self.backups_dir().iterdir() if p.is_dir()]
         self.assertEqual(len(snapshots), 1)
         # ... and still one changelog line per object.
         rows = [r for r in mutate.rows_of(self.root, self.slug, "changelog.tsv")
@@ -249,14 +253,12 @@ class Backups(TempRoot):
 
     def snap(self, days_ago: float, action: str = "asset.update") -> Path:
         when = datetime.now() - timedelta(days=days_ago)
-        p = (self.root / "backups" / self.slug /
-             f"{when.strftime('%Y%m%d-%H%M%S-%f')}-{action}")
+        p = self.backups_dir() / f"{when.strftime('%Y%m%d-%H%M%S-%f')}-{action}"
         p.mkdir(parents=True)
         return p
 
     def snaps(self) -> list[str]:
-        folder = self.root / "backups" / self.slug
-        return sorted(p.name for p in folder.iterdir() if p.is_dir())
+        return sorted(p.name for p in self.backups_dir().iterdir() if p.is_dir())
 
     def many(self, n: int, days_ago: float) -> None:
         for i in range(n):
@@ -293,7 +295,7 @@ class Backups(TempRoot):
 
     def test_a_folder_we_did_not_write_is_left_alone(self):
         """Only what this program created is this program's to delete."""
-        mine = self.root / "backups" / self.slug / "əl ilə saxlanılıb"
+        mine = self.backups_dir() / "əl ilə saxlanılıb"
         mine.mkdir(parents=True)
         self.many(mutate.BACKUP_KEEP_COUNT + 5, days_ago=400)
         mutate.prune_backups(self.root, self.slug)
@@ -304,7 +306,7 @@ class Backups(TempRoot):
         changelog.tsv is for the client's facts, not the program's."""
         self.many(mutate.BACKUP_KEEP_COUNT + 2, days_ago=400)
         mutate.prune_backups(self.root, self.slug)
-        rows = read_tsv(self.root / "backups" / self.slug / "_cleanup.tsv")
+        rows = read_tsv(self.backups_dir() / "_cleanup.tsv")
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["removed"], "2")
         self.assertEqual(rows[0]["kept"], str(mutate.BACKUP_KEEP_COUNT))
@@ -318,6 +320,55 @@ class Backups(TempRoot):
             "in_date": "2024-01-01"})
         self.assertTrue(self.snaps()[-1].endswith("-asset.create"))
         self.assertEqual(len(self.snaps()), mutate.BACKUP_KEEP_COUNT + 1)
+
+
+class ClientIdentity(TempRoot):
+    """`client_id` (§3, §8.3): the stable key behind a client's backups, once
+    a folder is free to live anywhere and slug is only a display name again."""
+
+    def _strip_client_id(self) -> None:
+        """Simulate a client folder that predates this field."""
+        path = self.root / "clients" / self.slug / "config.toml"
+        text = path.read_text(encoding="utf-8-sig")
+        lines = [ln for ln in text.splitlines() if not ln.startswith("client_id")]
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8-sig", newline="\n")
+
+    def test_a_new_client_gets_one_immediately(self):
+        cid = self.client().client_id
+        self.assertTrue(cid)
+        self.assertEqual(len(cid), 32)          # uuid4().hex
+
+    def test_it_is_stable_across_loads(self):
+        self.assertEqual(self.client().client_id, self.client().client_id)
+
+    def test_it_survives_client_update(self):
+        before = self.client().client_id
+        mutate.update_client(self.root, self.slug, {
+            "client_name": "Yeni ad", "voen": "9999", "start_year": 2024})
+        self.assertEqual(self.client().client_id, before)
+
+    def test_an_old_client_is_backfilled_on_its_next_write(self):
+        self._strip_client_id()
+        self.assertEqual(self.client().client_id, "")
+        mutate.create_asset(self.root, self.slug, {
+            "mode": "new", "category": "ma", "name": "A", "cost": "1000",
+            "in_date": "2024-01-01"})
+        self.assertTrue(self.client().client_id)
+
+    def test_backfill_carries_existing_backups_to_the_new_key(self):
+        """The old slug-keyed folder must not be left behind, orphaned,
+        while every new snapshot goes to the fresh id-keyed one."""
+        self._strip_client_id()
+        old = (self.root / "backups" / self.slug / "20200101-000000-000000"
+              "-asset.update")
+        old.mkdir(parents=True)
+        mutate.create_asset(self.root, self.slug, {
+            "mode": "new", "category": "ma", "name": "A", "cost": "1000",
+            "in_date": "2024-01-01"})
+        self.assertFalse((self.root / "backups" / self.slug).exists())
+        names = {p.name for p in self.backups_dir().iterdir() if p.is_dir()}
+        self.assertIn("20200101-000000-000000-asset.update", names)
+        self.assertTrue(any(n.endswith("-asset.create") for n in names))
 
 
 class OwnerNorms(TempRoot):
@@ -345,6 +396,79 @@ class OwnerNorms(TempRoot):
                 "effective_year": 2024, "category": "ma", "max_rate": "0.05",
                 "allow_past": True})
         self.assertEqual(rates.statutory(2024, "ma").max_rate, Decimal("0.20"))
+
+
+class OwnerCategories(TempRoot):
+    """A category the code has not caught up with (§12.4-quater) added as
+    data, not a release (§5.1-bis) -- `set_category_row`, behind "Yeni
+    kateqoriya" on the norms screen."""
+
+    def test_a_new_category_reaches_the_table(self):
+        mutate.set_category_row(self.root, self.slug, {
+            "code": "iy", "name_az": "İş heyvanları", "kind": "ev",
+            "law_ref": "VM m.114.3.4"})
+        self.assertIn("iy", rates.CATEGORY_BY_CODE)
+        self.assertIn("iy", rates.EV_CODES)
+        self.assertEqual(rates.CATEGORY_BY_CODE["iy"].law_ref, "VM m.114.3.4")
+
+    def test_a_builtin_code_cannot_be_reused(self):
+        with self.assertRaises(DataError):
+            mutate.set_category_row(self.root, self.slug, {
+                "code": "bt", "name_az": "Bir şey", "kind": "ev"})
+
+    def test_a_repeated_code_is_refused_too(self):
+        mutate.set_category_row(self.root, self.slug, {
+            "code": "iy", "name_az": "İş heyvanları", "kind": "ev"})
+        with self.assertRaises(DataError):
+            mutate.set_category_row(self.root, self.slug, {
+                "code": "iy", "name_az": "İkinci dəfə", "kind": "ev"})
+
+    def test_qma_is_refused_because_its_method_is_code_not_data(self):
+        """§5.1-bis: straight line needs a term SOURCE in code (the card's
+        FİM, or qma_term_unknown) -- a category added here would otherwise
+        fall to RateRow's field default and compute a real QMA the wrong
+        way, silently."""
+        with self.assertRaises(DataError):
+            mutate.set_category_row(self.root, self.slug, {
+                "code": "iy", "name_az": "İş heyvanları", "kind": "qma"})
+        self.assertNotIn("iy", rates.CATEGORY_BY_CODE)
+
+    def test_a_malformed_code_is_refused(self):
+        with self.assertRaises(DataError):
+            mutate.set_category_row(self.root, self.slug, {
+                "code": "İY 1", "name_az": "X", "kind": "ev"})
+
+    def test_a_blank_name_is_refused(self):
+        with self.assertRaises(DataError):
+            mutate.set_category_row(self.root, self.slug, {
+                "code": "iy", "name_az": "  ", "kind": "ev"})
+
+    def test_a_category_and_its_rate_then_carry_a_card(self):
+        """The whole path a user follows: name the category, give it a rate,
+        then use it on an asset -- same numbers a built-in category would
+        give (§5.3)."""
+        mutate.set_category_row(self.root, self.slug, {
+            "code": "iy", "name_az": "İş heyvanları", "kind": "ev",
+            "law_ref": "VM m.114.3.4"})
+        mutate.set_rate_row(self.root, self.slug, {
+            "effective_year": 2024, "category": "iy", "max_rate": "20"})
+        mutate.create_asset(self.root, self.slug, {
+            "mode": "new", "category": "iy", "name": "Heyvan",
+            "in_date": "2024-01-15", "cost": "1000"})
+        r = compute_year(self.client(), 2024)
+        cat = next(c for c in r.categories if c.code == "iy")
+        self.assertEqual(f"{cat.depreciation:.2f}", "200.00")
+
+    def test_a_card_in_a_rateless_category_is_rolled_back(self):
+        """§8.1: the category exists, but nothing prices it yet -- the write
+        must not stick around waiting for a rate that may never come."""
+        mutate.set_category_row(self.root, self.slug, {
+            "code": "iy", "name_az": "İş heyvanları", "kind": "ev"})
+        with self.assertRaises(CalcError):
+            mutate.create_asset(self.root, self.slug, {
+                "mode": "new", "category": "iy", "name": "Heyvan",
+                "in_date": "2024-01-15", "cost": "1000"})
+        self.assertEqual(self.client().assets, [])
 
 
 class StartOver(TempRoot):
@@ -406,7 +530,7 @@ class StartOver(TempRoot):
 
     def test_it_leaves_a_backup_and_a_changelog_line(self):
         self.clear()
-        snaps = [p.name for p in (self.root / "backups" / self.slug).iterdir()
+        snaps = [p.name for p in self.backups_dir().iterdir()
                  if p.name.endswith("asset.clear")]
         self.assertTrue(snaps)
         log = read_tsv(self.root / "clients" / self.slug / "changelog.tsv")

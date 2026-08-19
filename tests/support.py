@@ -43,6 +43,16 @@ def owner_rates(text: str) -> None:
     rates.refresh(tmp)
 
 
+def owner_categories(categories_text: str, rates_text: str = "") -> None:
+    """Load an owner `categories.tsv` (§5.1-bis), and optionally a matching
+    `rates.tsv`, given as literal TSV text."""
+    tmp = Path(tempfile.mkdtemp())
+    (tmp / "categories.tsv").write_text(categories_text, encoding="utf-8-sig")
+    if rates_text:
+        (tmp / "rates.tsv").write_text(rates_text, encoding="utf-8-sig")
+    rates.refresh(tmp)
+
+
 def client(*, start_year: int = 2024, status: str = "orta",
            years: tuple[int, ...] = (2024, 2025, 2026),
            use_coefficient: bool = True, **kw) -> ClientData:
@@ -91,6 +101,6 @@ __all__ = [
     "D", "EngineTest", "ROOT", "Addition", "Asset", "ClientData", "Disposal",
     "Group", "OpeningBalance", "RateElection", "Repair", "TaxpayerStatus",
     "WriteOff",
-    "asset", "card_of", "clean_rates", "client", "opening", "owner_rates",
-    "rates",
+    "asset", "card_of", "clean_rates", "client", "opening", "owner_categories",
+    "owner_rates", "rates",
 ]

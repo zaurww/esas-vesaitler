@@ -8,7 +8,11 @@ runs inside `transaction`."""
 from __future__ import annotations
 
 import getpass
+import os
 import shutil
+import tempfile
+import tomllib
+import uuid
 
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
@@ -20,6 +24,7 @@ from ..calc import compute_year
 from ..storage import (
     DataError, append_tsv, list_clients, load_client, read_tsv, write_tsv,
 )
+from .parse import _toml_str
 
 HEADERS: dict[str, list[str]] = {
     # e_qaime / serial_no were appended, never inserted: a new optional column
@@ -108,6 +113,56 @@ BACKUP_LOG = "_cleanup.tsv"
 BACKUP_LOG_HEADER = ["timestamp", "removed", "kept", "oldest_kept"]
 
 
+def _backup_key(root: Path, slug: str) -> str:
+    """The directory a client's backups live under -- `client_id`, not
+    `slug` (§3, §8.3).
+
+    Backups used to be keyed by slug because slug was, at the time, the only
+    name a client had and it lived in exactly one place: `clients/<slug>/`.
+    Once a client folder is free to live anywhere on disk, slug is only a
+    display name again -- two folders in two different places can carry the
+    same one -- so it stops being safe as a key into a shared directory.
+
+    A client that predates `client_id` gets one here, the first time it is
+    next written: generated, persisted into its `config.toml`, and any
+    backup history already sitting under the old slug-keyed folder is
+    carried over to the new id-keyed one rather than left orphaned. This is
+    a narrow, idempotent bootstrap step -- once `client_id` is set it is
+    never touched again -- so it runs ahead of the transaction's own
+    backup-and-rollback machinery rather than inside it.
+    """
+    folder = root / "clients" / one_segment(slug)
+    cfg_path = folder / "config.toml"
+    text = cfg_path.read_text(encoding="utf-8-sig")
+    cfg = tomllib.loads(text)
+    cid = str(cfg.get("client_id", "")).strip()
+    if cid:
+        return cid
+
+    cid = uuid.uuid4().hex
+    tmp = tempfile.NamedTemporaryFile(
+        "w", encoding="utf-8-sig", newline="\n", delete=False, dir=str(folder))
+    try:
+        tmp.write(text.rstrip("\n") + f"\nclient_id = {_toml_str(cid)}\n")
+        tmp.close()
+        os.replace(tmp.name, cfg_path)
+    except BaseException:
+        os.unlink(tmp.name)
+        raise
+
+    old = root / "backups" / one_segment(slug)
+    new = root / "backups" / one_segment(cid)
+    if old.is_dir() and not new.exists():
+        try:
+            old.rename(new)
+        except OSError:
+            # Same tolerance as prune_backups below: a locked folder must not
+            # fail somebody's write. New backups go to the new key from here
+            # on; the old ones stay findable under the old one, unmerged.
+            pass
+    return cid
+
+
 def _snapshot(name: str) -> tuple[datetime | None, str]:
     """Split a snapshot folder name into (taken at, action it preceded).
 
@@ -131,7 +186,7 @@ def _snapshot(name: str) -> tuple[datetime | None, str]:
 
 def prune_backups(root: Path, slug: str, now: datetime | None = None) -> int:
     """Drop backups this client no longer needs. Per client, never global."""
-    folder = root / "backups" / one_segment(slug)
+    folder = root / "backups" / one_segment(_backup_key(root, slug))
     if not folder.is_dir():
         return 0
     snaps = sorted((p for p in folder.iterdir() if p.is_dir()), key=lambda p: p.name)
@@ -181,12 +236,15 @@ class Tx:
 @contextmanager
 def transaction(root: Path, slug: str, action: str) -> Iterator[Tx]:
     src = mutate_folder(root, slug)
+    # Keyed by client_id, not slug (§3, §8.3) -- generated and persisted here
+    # if this client predates it, carrying its backup history to the new key.
+    client_id = _backup_key(root, slug)
     # The action is part of the folder name so that a snapshot says what it
     # preceded -- both for the person hunting "the state before I deleted
     # that card" and for the keep-always rule above, which has nothing else
     # to go on. Older snapshots carry no suffix and are ordinary ones.
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
-    dest = root / "backups" / slug / f"{stamp}-{action}"
+    dest = root / "backups" / one_segment(client_id) / f"{stamp}-{action}"
     dest.parent.mkdir(parents=True, exist_ok=True)
     # Cleaning BEFORE the copy, never after: this transaction's own snapshot
     # is what the rollback below restores from, and it must never be a

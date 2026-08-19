@@ -146,6 +146,13 @@ class ClientData:
     voen: str
     start_year: int
     format_version: int
+    # Stable identity behind the backups directory (§3, §8.3), once slug can
+    # no longer be assumed unique -- a client folder free to live anywhere on
+    # disk may share a display name with one somewhere else. Blank for a
+    # client that predates this field; it is generated and persisted on its
+    # next write (`mutate.core._backup_key`), not here, because loading must
+    # never write (§2, §8.1).
+    client_id: str = ""
     assets: list[Asset] = field(default_factory=list)
     opening_balances: list[OpeningBalance] = field(default_factory=list)
     disposals: list[Disposal] = field(default_factory=list)

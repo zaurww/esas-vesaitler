@@ -544,6 +544,14 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if url.path == "/api/context":
+                # Categories used to be fixed at import time, so which read
+                # endpoint refreshed first never mattered. Now an owner can
+                # append one (§12.4-quater), and this is the endpoint the
+                # category dropdown is built from -- without a refresh here a
+                # category added in an earlier session stayed invisible after
+                # a restart until some unrelated action happened to trigger
+                # one first.
+                rates.refresh(ROOT)
                 # One unreadable client must not blank the whole app: report it
                 # per client so the picker still works and the message is seen.
                 out = []

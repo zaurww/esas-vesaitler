@@ -105,7 +105,8 @@ async function loadNorms(){
       <tbody>${param}</tbody></table></div></div>
     <div style="margin:14px 0">
       <button class="btn" onclick="formNewNorm()">Qanun dəyişdi — yeni norma</button>
-      <button class="btn" onclick="formNewCoef()">Yeni əmsal</button></div>
+      <button class="btn" onclick="formNewCoef()">Yeni əmsal</button>
+      <button class="btn" onclick="formNewCategory()">Yeni kateqoriya</button></div>
     <div class="note q">Dəyişiklik <strong>bütün müştərilərə təsir edir</strong> —
       qanun hamı üçün eynidir. Yeni norma yalnız <strong>gələcək ildən</strong>
       qüvvəyə minir: keçmiş illər təqdim edilmiş bəyannamələrdir.<br>
@@ -160,6 +161,27 @@ function formNewCoef(){
             value:Math.max(floor, REPORT.year),min:floor,req:true})}
      </div>` + fld('note','Əsas',{placeholder:'məs. VM m.114.3-1'}),
     d => post('coefficient.set', d));
+}
+
+/* A category the code has not caught up with -- VM 114.3.4 `iş heyvanları`,
+   114.3.5 `geoloji-kəşfiyyat`, or whatever the next amendment adds -- used to
+   need a new release (§12.4-quater). Only the declining-balance method is
+   offered here: straight line (QMA) needs a term SOURCE in code, not just a
+   rate, so that stays a release (§5.1-bis). Once the category exists, its
+   rate is set the ordinary way, through "Qanun dəyişdi — yeni norma" above:
+   this form only names it. */
+function formNewCategory(){
+  openModal('Yeni kateqoriya',
+    fld('code','Kod',{req:true,placeholder:'məs. iy',
+        hint:'Kiçik latın hərfləri, rəqəm, defis. Sonradan silinmir və ya '
+            +'dəyişdirilmir — obyektlər ona istinad edə bilər.'}) +
+    fld('name_az','Adı',{req:true,placeholder:'məs. İş heyvanları'}) +
+    fld('law_ref','Maddə',{placeholder:'məs. VM m.114.3.4'}) +
+    fld('note','Qeyd',{placeholder:'əlavə izah'}) +
+    `<div class="h">Yalnız əsas vəsait, azalan qalıq metodu ilə. Əlavə
+      etdikdən sonra dərəcəni «Qanun dəyişdi — yeni norma» ilə təyin edin —
+      dərəcə təyin olunmayan kateqoriyada kart hesablanmır.</div>`,
+    d => post('category.create', d), 'Əlavə et');
 }
 
 /* ---------- rates across years ----------

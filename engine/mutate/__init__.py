@@ -55,7 +55,9 @@ from .archive import export_client, import_client, inspect_archive
 from .decisions import (
     close_year, reopen_year, set_election, set_status, set_writeoff,
 )
-from .norms import set_coefficient_row, set_parameter_row, set_rate_row
+from .norms import (
+    set_category_row, set_coefficient_row, set_parameter_row, set_rate_row,
+)
 from .imports import IMPORT_ALIASES, IMPORT_FIELDS, guess_columns, import_assets
 from .groups import (
     assign_group, create_group, delete_group, find_group, next_group_id,
@@ -73,6 +75,7 @@ ACTIONS = {
     "rate.set": set_rate_row,
     "coefficient.set": set_coefficient_row,
     "parameter.set": set_parameter_row,
+    "category.create": set_category_row,
     "asset.create": create_asset,
     "asset.update": update_asset,
     "asset.delete": delete_asset,
@@ -106,6 +109,7 @@ __all__ = [
     "inv_series", "iso_date", "mutate_folder", "next_asset_id", "one_segment",
     "prune_backups", "remove_addition", "remove_repair", "reopen_year",
     "rows_of", "save_rows",
+    "set_category_row",
     "set_coefficient_row", "set_disposal", "set_election", "set_opening",
     "set_parameter_row", "set_rate_row", "set_status", "set_writeoff",
     "slugify", "suggest_inv_no", "transaction", "update_asset",

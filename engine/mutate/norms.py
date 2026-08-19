@@ -193,3 +193,68 @@ def set_parameter_row(root: Path, slug: str, p: dict) -> str:
         raise
     return f"{key} {year}"
 
+
+def set_category_row(root: Path, slug: str, p: dict) -> str:
+    """Add a category the engine did not ship with -- VM 114.3.4
+    `iş heyvanları`, 114.3.5 `geoloji-kəşfiyyat`, or whatever the next
+    amendment adds (§12.4-quater). Rate and repair limit still go through
+    `set_rate_row`, keyed to this code, the same as any built-in category.
+
+    Same installation-wide file as rates.tsv and for the same reason: the tax
+    code is not a per-client setting (§5.1). Append-only in a different sense
+    than rates.tsv -- there is no effective_year to protect a filed return
+    here -- but a code that ends up in some client's assets.tsv must not
+    quietly change meaning later, so this form only adds a row; it never
+    edits or removes one.
+
+    Declining balance only. Straight line (QMA, 114.3.6) needs a term SOURCE
+    in code -- the card's FİM, or the qma_term_unknown parameter -- not just
+    a rate, and §5.1-bis keeps a method itself out of data: rates.tsv carries
+    no method column, so a category added here would otherwise fall to
+    RateRow's field default ("azalan") and silently compute a real QMA on the
+    wrong method.
+    """
+    code = str(p.get("code", "")).strip().lower()
+    if not rates.CATEGORY_CODE_RE.fullmatch(code):
+        raise DataError(
+            "Kod yalnız kiçik latın hərfləri, rəqəm və defisdən ibarət ola "
+            "bilər və hərflə başlamalıdır (məs. 'iy')."
+        )
+    if code in CATEGORY_BY_CODE:
+        raise DataError(
+            f"«{code}» kodu artıq mövcuddur: "
+            f"{CATEGORY_BY_CODE[code].name_az}"
+        )
+    name_az = str(p.get("name_az", "")).strip()
+    if not name_az:
+        raise DataError("Kateqoriyanın adı boş ola bilməz")
+    if str(p.get("kind") or "ev").strip() != "ev":
+        raise DataError(
+            "Yalnız əsas vəsait kateqoriyası əlavə edilə bilər — QMA üçün "
+            "düz xətt cədvəli koddan gəlir və bu formada açılmır."
+        )
+
+    path = root / "categories.tsv"
+    before = path.read_bytes() if path.exists() else None
+    rows = [{h: r.get(h, "") for h in rates.CATEGORIES_HEADER}
+            for r in read_tsv(path)]
+    rows.append({
+        "code": code, "name_az": name_az,
+        "name_ru": str(p.get("name_ru", "")).strip(),
+        "kind": "ev",
+        "law_ref": str(p.get("law_ref", "")).strip(),
+        "note": str(p.get("note", "")).strip(),
+    })
+    write_tsv(path, rates.CATEGORIES_HEADER,
+              [[r.get(h, "") for h in rates.CATEGORIES_HEADER] for r in rows])
+    try:
+        _recompute_everything(root)
+    except BaseException:
+        if before is None:
+            path.unlink(missing_ok=True)
+        else:
+            path.write_bytes(before)
+        rates.refresh(root)
+        raise
+    return code
+

@@ -6,6 +6,8 @@ effective_year. Otherwise an engine update would retroactively change a
 return that has already been filed.
 """
 
+import re
+
 from decimal import Decimal
 from typing import Dict, List, NamedTuple
 
@@ -27,38 +29,41 @@ class Category(NamedTuple):
     name_az: str
     name_ru: str
     kind: str  # "ev" | "qma"
+    # Which article the category comes from, so a table can cite the law
+    # instead of a year nobody typed.
+    law_ref: str = ""
 
 
-CATEGORIES: List[Category] = [
-    Category("bt", "Binalar, tikililər", "Здания, сооружения", "ev"),
-    Category("ma", "Maşınlar, avadanlıq", "Машины, оборудование", "ev"),
-    Category("nv", "Nəqliyyat vasitələri", "Транспортные средства", "ev"),
-    Category("ym", "Yük maşınları", "Грузовые машины", "ev"),
-    Category("yt", "Yüksək texnologiya", "Высокие технологии", "ev"),
-    Category("dg", "Digər əsas vəsaitlər", "Прочие основные средства", "ev"),
-    Category("it", "İcarəyə götürülmüş ƏV-in təmiri", "Ремонт арендованных ОС", "ev"),
-    Category("qma-m", "QMA — FİM məlum", "НМА — срок известен", "qma"),
-    Category("qma-n", "QMA — FİM nəməlum", "НМА — срок неизвестен", "qma"),
+# The nine categories the engine ships with. Frozen: nothing here is ever
+# renamed or removed at runtime, only added to (below).
+_BUILTIN_CATEGORIES: List[Category] = [
+    Category("bt", "Binalar, tikililər", "Здания, сооружения", "ev", "VM m.114.3.1"),
+    Category("ma", "Maşınlar, avadanlıq", "Машины, оборудование", "ev", "VM m.114.3.2"),
+    Category("nv", "Nəqliyyat vasitələri", "Транспортные средства", "ev", "VM m.114.3.3"),
+    Category("ym", "Yük maşınları", "Грузовые машины", "ev", "VM m.114.3.3"),
+    Category("yt", "Yüksək texnologiya", "Высокие технологии", "ev", "VM m.114.3.2-1"),
+    Category("dg", "Digər əsas vəsaitlər", "Прочие основные средства", "ev", "VM m.114.3.7"),
+    Category("it", "İcarəyə götürülmüş ƏV-in təmiri", "Ремонт арендованных ОС", "ev",
+              "VM m.115.3-115.8"),
+    Category("qma-m", "QMA — FİM məlum", "НМА — срок известен", "qma", "VM m.114.3.6"),
+    Category("qma-n", "QMA — FİM nəməlum", "НМА — срок неизвестен", "qma", "VM m.114.3.6"),
 ]
 
+# LIVE, combined tables: built-in categories plus whatever the owner appended
+# in categories.tsv (§12.4-quater -- 114.3.4 `iş heyvanları`, 114.3.5
+# `geoloji-kəşfiyyat`, or a category a future amendment adds, none of which
+# used to be reachable without a new release). `refresh()` rebuilds and swaps
+# these in place, the same discipline as USER_RATES below (§8.0): a reader
+# must see the old table or the new one, never a half-built one.
+CATEGORIES: List[Category] = list(_BUILTIN_CATEGORIES)
 CATEGORY_BY_CODE: Dict[str, Category] = {c.code: c for c in CATEGORIES}
-EV_CODES = [c.code for c in CATEGORIES if c.kind == "ev"]
-QMA_CODES = [c.code for c in CATEGORIES if c.kind == "qma"]
+EV_CODES: List[str] = [c.code for c in CATEGORIES if c.kind == "ev"]
+QMA_CODES: List[str] = [c.code for c in CATEGORIES if c.kind == "qma"]
 
-
-# Where each category comes from in the code, so the table can cite the law
-# instead of a year nobody typed. Kept next to the rates it explains.
-LAW_REF: Dict[str, str] = {
-    "bt": "VM m.114.3.1",
-    "ma": "VM m.114.3.2",
-    "nv": "VM m.114.3.3",
-    "ym": "VM m.114.3.3",       # trucks are not a category of their own
-    "yt": "VM m.114.3.2-1",
-    "dg": "VM m.114.3.7",
-    "it": "VM m.115.3-115.8",
-    "qma-m": "VM m.114.3.6",
-    "qma-n": "VM m.114.3.6",
-}
+# A code an owner may append. Lower-case ASCII only: it is a TSV field, an
+# HTML option value, and part of every asset row that uses it forever after,
+# so it needs to survive all three without escaping.
+CATEGORY_CODE_RE = re.compile(r"[a-z][a-z0-9-]{0,19}")
 
 
 class RateRow(NamedTuple):
@@ -220,6 +225,7 @@ USER_SOURCE: set = set()          # keys that came from the files, for the UI
 RATES_HEADER = ["effective_year", "category", "max_rate", "repair_limit", "note"]
 COEFF_HEADER = ["effective_year", "status", "coefficient", "note"]
 PARAM_HEADER = ["effective_year", "key", "value", "note"]
+CATEGORIES_HEADER = ["code", "name_az", "name_ru", "kind", "law_ref", "note"]
 
 # Every file that carries the owner's reading of the law. Named once because
 # it is read in four places -- refresh, archive export, archive inspect,
@@ -227,7 +233,7 @@ PARAM_HEADER = ["effective_year", "key", "value", "note"]
 # listed two files after parameters.tsv appeared, so a changed write-off
 # threshold would not have travelled with the client. That is precisely the
 # silent divergence the archive exists to prevent (§8.2).
-NORM_FILES = ("rates.tsv", "coefficients.tsv", "parameters.tsv")
+NORM_FILES = ("categories.tsv", "rates.tsv", "coefficients.tsv", "parameters.tsv")
 
 
 def _num(v: str) -> Decimal | None:
@@ -261,9 +267,44 @@ def refresh(root) -> None:
     new_params: List[ParamRow] = []
     new_source: set = set()
 
+    # -- categories: built-ins plus whatever the owner appended -------------
+    # Read first: rates.tsv below validates its `category` column against
+    # this, so a category and its rate can be added and take effect together.
+    new_categories: List[Category] = list(_BUILTIN_CATEGORIES)
+    new_by_code: Dict[str, Category] = {c.code: c for c in new_categories}
+    for r in read_tsv(root / "categories.tsv"):
+        code = (r.get("code") or "").strip()
+        if not CATEGORY_CODE_RE.fullmatch(code):
+            raise ValueError(
+                f"categories.tsv: kod {code!r} yalnız kiçik latın hərfləri, "
+                f"rəqəm və defisdən ibarət ola bilər"
+            )
+        if code in new_by_code:
+            raise ValueError(f"categories.tsv: kod artıq mövcuddur: {code!r}")
+        name_az = (r.get("name_az") or "").strip()
+        if not name_az:
+            raise ValueError(f"categories.tsv: {code!r} üçün ad boşdur")
+        kind = (r.get("kind") or "").strip()
+        if kind != "ev":
+            # QMA's schedule is straight line with the term coming from the
+            # card (FİM) or the qma_term_unknown parameter -- a form of
+            # formula, which §5.1-bis keeps out of data. A category added
+            # here would silently get "azalan" (RateRow's field default,
+            # since rates.tsv carries no method column) -- the wrong method
+            # for a real QMA, not merely an unsupported one.
+            raise ValueError(
+                f"categories.tsv: {code!r} — kind yalnız 'ev' ola bilər"
+            )
+        cat_obj = Category(code, name_az, (r.get("name_ru") or "").strip(),
+                           kind, (r.get("law_ref") or "").strip())
+        new_categories.append(cat_obj)
+        new_by_code[code] = cat_obj
+    new_ev = [c.code for c in new_categories if c.kind == "ev"]
+    new_qma = [c.code for c in new_categories if c.kind == "qma"]
+
     for r in read_tsv(root / "rates.tsv"):
         cat = (r.get("category") or "").strip()
-        if cat not in CATEGORY_BY_CODE:
+        if cat not in new_by_code:
             raise ValueError(f"rates.tsv: naməlum kateqoriya {cat!r}")
         year = int(r["effective_year"])
         new_rates.append(RateRow(year, cat, _num(r.get("max_rate", "")),
@@ -291,7 +332,16 @@ def refresh(root) -> None:
         new_source.add(("param", year, key))
 
     # A malformed file raises above, before anything is swapped in: a bad edit
-    # leaves the previous table standing rather than emptying it.
+    # leaves the previous table standing rather than emptying it. Categories
+    # swap in alongside the rest for the same reason -- these are imported by
+    # name in several modules (storage, mutate, calc), so the SAME list/dict
+    # objects are mutated in place rather than rebound, or those modules would
+    # keep looking at the table from before the refresh.
+    CATEGORIES[:] = new_categories
+    CATEGORY_BY_CODE.clear()
+    CATEGORY_BY_CODE.update(new_by_code)
+    EV_CODES[:] = new_ev
+    QMA_CODES[:] = new_qma
     USER_RATES[:] = new_rates
     USER_MULTIPLIERS[:] = new_mult
     USER_PARAMETERS[:] = new_params
@@ -403,7 +453,7 @@ def table_for(year: int) -> list[dict]:
             "effective_year": st.effective_year,
             "until": years[i + 1] - 1 if i + 1 < len(years) else None,
             "changes": len(years),
-            "law_ref": LAW_REF.get(c.code, ""),
+            "law_ref": c.law_ref,
             "max_rate": _pct(st.max_rate),
             "repair_limit": _pct(st.repair_limit),
             # Printed beside the rate rather than left implicit: for `qma-n`
