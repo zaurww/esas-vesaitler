@@ -159,10 +159,27 @@ async function submitModal(e){
     closeModal();
     CTX = await (await fetch('/api/context')).json();
     // A newly created client is not in the picker yet; rebuild and select it.
-    const cs = document.getElementById('client');
+    //
+    // Rebuilding the options drops the selection back to the FIRST client, so
+    // whoever was being worked on has to be put back by hand. Without that,
+    // saving an asset moved the screen to another firm entirely -- the
+    // alphabetically first one -- and the next card would be entered there.
+    // Nothing was lost, but the write landed somewhere the user was not
+    // looking, which is the silent kind of wrong (§2.1).
+    const cs = document.getElementById('client'), ys = document.getElementById('year');
+    const keep = cs.value, keepYear = ys.value;
     cs.innerHTML = CTX.clients.map(c =>
       `<option value="${c.slug}">${esc(c.name)} · ${esc(c.slug)}</option>`).join('');
     if (NEWCLIENT){ cs.value = NEWCLIENT; NEWCLIENT = null; fillYears(); }
+    else if (keep){
+      cs.value = keep;
+      // The year list can move with the write -- a purchase makes a year
+      // reachable, closing one adds its mark -- so it is rebuilt as well. But
+      // the year on screen is where the user is, and a save must not carry
+      // them off it, so it is restored whenever it still exists.
+      fillYears();
+      if ([...ys.options].some(o => o.value === keepYear)) ys.value = keepYear;
+    }
     await load();
   } catch (err) {
     // A wizard step transition is not a failure -- keep the modal open.
