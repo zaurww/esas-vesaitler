@@ -215,15 +215,22 @@ const GRID_COLS = [
   {f:'inv_no',           t:'İnv.№',             w:100},
   {f:'name',             t:'Adı *',             w:180},
   {f:'in_date',          t:'Alış tarixi',       w:100, ph:'GG.AA.YYYY'},
+  // The two money columns sit TOGETHER, and that adjacency is load-bearing.
+  // «FİM (il)» used to stand between them, which quietly broke the ordinary
+  // way people paste: an Excel selection of cost+residual is one rectangle,
+  // and pasting it at «İlkin dəyər» dropped the residual into FİM while
+  // «Qalıq» stayed empty. The row still imported -- with a past purchase date
+  // it is a valid "new" row -- and came out reading «tam amortizasiya
+  // olunub», the one silent wrong answer §2.1 rules out.
   {f:'cost',             t:'İlkin dəyər',       w:118, num:true},
-  // Only a QMA with a known term uses it (m.114.3.6), and for everything else
-  // it stays empty -- but it must be HERE, because the grid and the form are
-  // one and the same act of creating a card (§11.2).
-  {f:'useful_life',      t:'FİM (il)',          w: 84},
   // The heading is uppercased by the stylesheet, so it needs the room its
   // own lower-case text does not suggest.
   {f:'opening_residual', t:() => `Qalıq (${IMP.year} əvv.)`,
                                                 w:158, num:true},
+  // Only a QMA with a known term uses it (m.114.3.6), and for everything else
+  // it stays empty -- but it must be HERE, because the grid and the form are
+  // one and the same act of creating a card (§11.2).
+  {f:'useful_life',      t:'FİM (il)',          w: 84},
   {f:'counterparty',     t:'Kontragent',        w:140},
   {f:'e_qaime',          t:'E-qaimə №',         w:120},
   {f:'serial_no',        t:'Seriya № / VIN',    w:140},
@@ -494,6 +501,23 @@ async function impPreview(){
       tuta bilməyəcək.` : ''}
       <br>Sıfırdan başlamaq üçün: ⚙ → «Bütün ƏV-ləri sil».</div>` : '';
 
+  // A row bought in an EARLIER year with no opening residual is accepted by
+  // every rule -- name, category and date are all there -- and then computes
+  // to nothing: no acquisition this year, no balance carried in, so the card
+  // arrives already reading «tam amortizasiya olunub». That is a legitimate
+  // state (a genuinely spent asset) and also exactly what a mis-landed
+  // residual column looks like, so it is called out BEFORE the button
+  // rather than discovered afterwards one card at a time (§2.1).
+  const spent = rep.rows.filter(r => r.ok && r.mode === 'new' && r.in_date
+                                  && +r.in_date.slice(0, 4) < IMP.year);
+  const spentNote = spent.length ? `<div class="note"><strong>${spent.length}
+      ƏV ${IMP.year} ilindən əvvəl alınıb, lakin «Qalıq (${IMP.year} əvv.)»
+      sütunu boşdur.</strong> Belə kartlar «tam amortizasiya olunub» kimi
+      hesablanacaq — amortizasiya 0. Doğrudan da tam amortizasiya
+      olunubsa, bu düzgündür; əks halda geri qayıdıb qalıq sütununu
+      doldurun.<br>${spent.slice(0, 5).map(r => esc(r.name)).join(', ')}${
+      spent.length > 5 ? ` … və daha ${spent.length - 5}` : ''}</div>` : '';
+
   const summary = bad
     ? `<div class="note"><strong>${bad} sətirdə problem var.</strong>
         İdxal ya bütövlükdə keçir, ya da heç keçmir — belə ki, yarımçıq
@@ -505,7 +529,7 @@ async function impPreview(){
         ${auto ? `${auto} ƏV üçün inventar nömrəsi avtomatik veriləcək.<br>` : ''}
         ${rep.groups_created ? `${rep.groups_created} yeni növ yaradılacaq.` : ''}</div>`;
 
-  impBox(3, already + summary + `
+  impBox(3, already + summary + spentNote + `
     <div class="scroll imp" style="max-height:42vh"><table><thead><tr>
       <th>#</th><th>İnv.№</th><th>Adı</th><th>Kateqoriya</th>
       <th class="num">İlkin dəyər</th><th class="num">Qalıq dəyər</th>

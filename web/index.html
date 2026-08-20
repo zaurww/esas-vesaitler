@@ -22,7 +22,12 @@
   <a class="btn" id="export" href="#">⬇ Excel-ə ixrac</a>
 </header>
 
-<div class="modal" id="modal" onclick="if(event.target===this) closeModal()">
+<!-- No click-outside-to-close: the box does not fill the backdrop (padding,
+     centered, a short grid does not reach 88vh), so a stray click while
+     switching windows -- Excel open alongside, mid-paste -- landed on the
+     backdrop and silently discarded an in-progress import with no undo.
+     Closing stays explicit: the ✕ or "İmtina" button. -->
+<div class="modal" id="modal">
   <div class="box">
     <h2><span id="mtitle">—</span>
       <button class="closebtn" onclick="closeModal()">✕</button></h2>

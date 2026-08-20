@@ -196,11 +196,19 @@ def update_asset(root: Path, slug: str, p: dict) -> str:
         row = next((r for r in assets if r["asset_id"] == aid), None)
         if row is None:
             raise DataError(f"ƏV tapılmadı: {aid}")
+        category = category_of(p.get("category"))
+        # Same rule create_asset already applies to a `carried` card: only a
+        # QMA/`it` schedule needs a year zero (§4). Requiring it unconditionally
+        # here meant a legacy asset brought in without a known purchase date
+        # could never be edited again -- not even to fix its name -- because
+        # the very form that was supposed to let you fill the date in later
+        # also refused to save without one.
+        is_qma = CATEGORY_BY_CODE[category].kind == "qma"
         new = {
             "inv_no": str(p.get("inv_no", "")).strip(),
             "name": str(p.get("name", "")).strip(),
-            "category": category_of(p.get("category")),
-            "in_date": iso_date(p.get("in_date"), "Alış tarixi"),
+            "category": category,
+            "in_date": iso_date(p.get("in_date"), "Alış tarixi", required=is_qma),
             "cost": dec(p.get("cost"), "İlkin dəyər"),
             "useful_life": ("" if life is None else str(life)),
             "counterparty": str(p.get("counterparty", "")).strip(),

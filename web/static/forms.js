@@ -61,12 +61,28 @@ function qmaToggle(){
     const cb = confirm.querySelector('input');
     if (cb) cb.required = isIt && !editing;
   }
+  // A QMA/`it` schedule needs a year zero no matter how the card entered the
+  // books (§4), so its date stays required through edits too. Everything
+  // else follows create_asset's own rule -- required for a fresh purchase
+  // (mode "new"), optional otherwise -- read from the form's own hidden
+  // `mode` field rather than the closure variable in formAsset(), which this
+  // function does not have access to.
+  const dateInp = f.elements['in_date'];
+  if (dateInp){
+    const modeVal = f.elements['mode'] ? f.elements['mode'].value : 'new';
+    dateInp.required = isQma(cat) || modeVal === 'new';
+  }
 }
 
 /* ---- asset: new / carried over / group pool ---- */
 function formAsset(card){
   const edit = !!card;
-  let mode = 'new';
+  // "new / carried / pool" is a choice only made at creation -- assets.tsv
+  // never remembers it afterward. Defaulting an edit to 'new' anyway forced
+  // a purchase date, and the full new-card field set, onto a card that was
+  // deliberately entered without one: a legacy pool, or a carried-over asset
+  // whose original date nobody has. Read the card's own shape instead.
+  let mode = edit ? (card.is_legacy_pool ? 'pool' : 'carried') : 'new';
   const year = REPORT.year;
 
   const render = () => {
@@ -174,13 +190,26 @@ function formAsset(card){
     // fact: a residual carried from last year is computed (§2), and putting a
     // computed number in a form would turn it into stored data the moment
     // someone pressed save. For that case, point at the deliberate act.
-    if (edit && card.opening_source === 'explicit'){
+    // 'none' joins 'explicit' here, and that is the point rather than an
+    // afterthought. A card with no stored balance and nothing carried in
+    // reads «tam amortizasiya olunub» -- and after an import that lost its
+    // residual column, that is exactly what a whole sheet looks like. The
+    // form used to answer that with nothing at all: no field, no hint, no
+    // mention of «Açılış qalığı» next door. The figure is wrong, it is on
+    // screen, and the form for fixing it stayed silent about it (§6.1).
+    if (edit && card.opening_source !== 'carried'){
+      const stored = card.opening_source === 'explicit';
       h += `<input type="hidden" name="opening_edit" value="1">
             <input type="hidden" name="opening_year" value="${year}">` +
         fld('opening_residual',`Qalıq dəyər — ${year} ilin əvvəlinə (AZN)`,
-            {type:'number',step:'0.01',value:card.opening,
-             hint:'Əl ilə daxil edilmiş açılış qalığı (idxal da bura yazır). '
-                + 'Boş buraxsanız sətir silinir və qalıq əvvəlki ildən hesablanır.'});
+            {type:'number',step:'0.01',value: stored ? card.opening : '',
+             hint: stored
+               ? 'Əl ilə daxil edilmiş açılış qalığı (idxal da bura yazır). '
+               + 'Boş buraxsanız sətir silinir və qalıq əvvəlki ildən hesablanır.'
+               : `Bu ƏV üçün ${year} ilin əvvəlinə qalıq yazılmayıb və əvvəlki `
+               + 'ildən də köçürülməyib — ona görə kart «tam amortizasiya '
+               + 'olunub» kimi görünür. Son bəyannamədəki qalıq dəyəri '
+               + 'buraya yazın.'});
     }
     if (edit && card.opening_source === 'carried'){
       h += `<div class="fld"><div class="h">Qalıq (${year} ilin əvvəlinə)
