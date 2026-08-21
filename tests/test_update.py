@@ -43,12 +43,20 @@ class VersionTuple(unittest.TestCase):
 class CheckLatest(unittest.TestCase):
 
     def test_a_newer_tag_is_reported_available(self):
-        fetch = lambda url: {"tag_name": "v0.10.0",
+        # A literal "v0.10.0" used to sit here as "some tag newer than
+        # ENGINE_VERSION" -- true only while the real version stayed below
+        # it, and it silently stopped being newer the day ENGINE_VERSION
+        # reached 0.10.0 itself (a false negative this test would not have
+        # caught on its own). Derived from the real version instead, so the
+        # test stays meaningful regardless of what ENGINE_VERSION is.
+        major, minor, patch = version_tuple(ENGINE_VERSION)
+        newer = f"v{major + 1}.0.0"
+        fetch = lambda url: {"tag_name": newer,
                              "zipball_url": "https://example/zip",
-                             "html_url": "https://example/releases/tag/v0.10.0"}
+                             "html_url": f"https://example/releases/tag/{newer}"}
         r = check_latest(fetch)
         self.assertTrue(r["available"])
-        self.assertEqual(r["latest"], "0.10.0")
+        self.assertEqual(r["latest"], newer.lstrip("v"))
         self.assertEqual(r["current"], ENGINE_VERSION)
         self.assertEqual(r["zip_url"], "https://example/zip")
 
