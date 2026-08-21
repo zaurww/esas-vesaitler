@@ -48,6 +48,7 @@ from .numbering import (
 from .assets import (
     clear_assets,
     MODES, add_addition, add_repair, create_asset, delete_asset,
+    delete_assets_many,
     remove_addition, remove_repair, set_disposal, set_opening, update_asset,
 )
 from .clients import create_client, update_client
@@ -79,6 +80,7 @@ ACTIONS = {
     "asset.create": create_asset,
     "asset.update": update_asset,
     "asset.delete": delete_asset,
+    "asset.delete_many": delete_assets_many,
     "asset.clear": clear_assets,
     "opening.set": set_opening,
     "disposal.set": set_disposal,
@@ -104,7 +106,8 @@ __all__ = [
     "create_asset",
     "assign_group", "create_group", "delete_group", "find_group",
     "next_group_id", "update_group",
-    "create_client", "dec", "delete_asset", "export_client", "guard_open_year",
+    "create_client", "dec", "delete_asset", "delete_assets_many",
+    "export_client", "guard_open_year",
     "guess_columns", "import_assets", "import_client", "inspect_archive",
     "inv_series", "iso_date", "mutate_folder", "next_asset_id", "one_segment",
     "prune_backups", "remove_addition", "remove_repair", "reopen_year",

@@ -545,6 +545,54 @@ class StartOver(TempRoot):
         self.assertEqual(rep["existing"], 3)
 
 
+class DeleteMany(TempRoot):
+    """Bulk delete -- picking several mis-imported cards and removing them in
+    one action instead of one at a time (§5.3-bis: same reasoning as
+    set_writeoff and group.assign taking a list)."""
+
+    def asset(self, name="Dəzgah"):
+        mutate.create_asset(self.root, self.slug, {
+            "mode": "new", "category": "ma", "name": name,
+            "in_date": "2024-04-01", "cost": "1000"})
+        return self.client().assets[-1].asset_id
+
+    def test_deletes_several_cards_and_what_hangs_off_them(self):
+        keep = self.asset("Qalan")
+        a1, a2 = self.asset("Bir"), self.asset("İki")
+        mutate.add_repair(self.root, self.slug, {
+            "asset_id": a1, "year": 2024, "date": "2024-06-01", "amount": "50"})
+        mutate.delete_assets_many(self.root, self.slug,
+                                  {"asset_ids": [a1, a2]})
+        d = self.client()
+        self.assertEqual({a.asset_id for a in d.assets}, {keep})
+        self.assertEqual(d.repairs, [])
+
+    def test_is_one_transaction_with_a_changelog_line_per_card(self):
+        a1, a2 = self.asset("Bir"), self.asset("İki")
+        mutate.delete_assets_many(self.root, self.slug,
+                                  {"asset_ids": [a1, a2]})
+        snaps = [p.name for p in self.backups_dir().iterdir()
+                 if p.name.endswith("asset.delete_many")]
+        self.assertEqual(len(snaps), 1)
+        log = read_tsv(self.root / "clients" / self.slug / "changelog.tsv")
+        deleted = [r for r in log if r["action"] == "asset.delete_many"]
+        self.assertEqual(len(deleted), 2)
+
+    def test_an_empty_list_is_refused(self):
+        with self.assertRaises(DataError):
+            mutate.delete_assets_many(self.root, self.slug, {"asset_ids": []})
+
+    def test_an_unknown_id_leaves_everything_untouched(self):
+        """Checked before a single row is written, same as create_asset's own
+        opening-balance check (assets.py) -- a partial bulk delete would be
+        worse than refusing the whole batch."""
+        a1 = self.asset("Bir")
+        with self.assertRaises(DataError):
+            mutate.delete_assets_many(self.root, self.slug,
+                                      {"asset_ids": [a1, "AV-999"]})
+        self.assertEqual(len(self.client().assets), 1)
+
+
 class Groups(TempRoot):
     """«Növ» -- the client's own classification beside the tax one (§13.1).
 

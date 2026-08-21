@@ -256,8 +256,16 @@ function impGrid(rows){
   const open = document.getElementById('gridwrap');
   const scroll = open ? open.scrollTop : 0;
 
+  // The category <select> used to have no blank option, so an untouched cell
+  // silently held whatever category impCats() lists first -- a paste that
+  // never touched this column (or forgot the "Bütün sətirlərin kateqoriyası"
+  // dropdown above) landed real rows on that category with nothing on screen
+  // to say so. A blank first option makes "not chosen yet" a visible state
+  // instead of an invisible default (§2.1), and impGridTotals() below flags
+  // any filled row that is still sitting on it.
   const cell = (r, c) => GRID_COLS[c].f === 'category'
-    ? `<select data-r="${r}" data-c="${c}">${
+    ? `<select data-r="${r}" data-c="${c}">
+        <option value="" ${!data[r][c] ? 'selected' : ''}>— seçin —</option>${
         impCats().map(k => `<option value="${k.code}"
           ${data[r][c] === k.code ? 'selected' : ''}>${esc(k.code)}</option>`).join('')
       }</select>`
@@ -309,6 +317,14 @@ function impGrid(rows){
     if (!IMP.grid.some(impGridFilled))
       throw new Error('Heç bir sətir doldurulmayıb');
     IMP.rows = IMP.grid.filter(impGridFilled);
+    // Refused here, not just flagged in the totals row: a category can be a
+    // legal-looking value (the first real option) sitting there because
+    // nobody chose it, and letting that reach the preview is the same silent
+    // wrong answer §2.1 rules out elsewhere in this file.
+    const noCat = IMP.rows.filter(r => !String(r[gcol('category')] || '').trim()).length;
+    if (noCat) throw new Error(`${noCat} sətirdə kateqoriya seçilməyib — `
+      + `qırmızı işarəli xanalarda seçin, ya da yuxarıda "Bütün sətirlərin `
+      + `kateqoriyası" ilə hamısına tətbiq edin.`);
     IMP.map = {}; GRID_COLS.forEach((c, i) => { IMP.map[c.f] = i; });
     IMP.catmap = {};
     await impPreview();
@@ -394,13 +410,20 @@ function impGridTotals(){
   impGridRead();
   const money = GRID_COLS.map((c, i) => [c, i]).filter(([c]) => c.num);
   const ni = gcol('name');
+  const ci = gcol('category');
   const sum = {}, bad = {};
   money.forEach(([, i]) => { sum[i] = 0; bad[i] = 0; });
-  let rows = 0, noName = 0;
+  let rows = 0, noName = 0, noCat = 0;
   IMP.grid.forEach((row, r) => {
     if (!impGridFilled(row)) return;
     rows++;
     if (!String(row[ni] ?? '').trim()) noName++;
+    // Marked the same way a bad number is -- a category left on "— seçin —"
+    // is exactly as silent a wrong answer as one nobody chose on purpose.
+    const catMissing = !String(row[ci] ?? '').trim();
+    if (catMissing) noCat++;
+    const catEl = document.querySelector(`#gridbody [data-r="${r}"][data-c="${ci}"]`);
+    if (catEl) catEl.classList.toggle('badnum', catMissing);
     for (const [, i] of money){
       const v = impGridNum(row[i]);
       const el = document.querySelector(`#gridbody [data-r="${r}"][data-c="${i}"]`);
@@ -421,6 +444,7 @@ function impGridTotals(){
   const badnum = money.reduce((n, [, i]) => n + bad[i], 0);
   const problems = [];
   if (noName) problems.push(`${noName} sətirdə ad yoxdur`);
+  if (noCat) problems.push(`${noCat} sətirdə kateqoriya seçilməyib`);
   if (badnum) problems.push(`${badnum} rəqəm oxunmur`);
   document.getElementById('gridbad').innerHTML = problems.length
     ? `<span class="badtag">${esc(problems.join('; '))}</span>` : '';

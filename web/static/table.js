@@ -45,6 +45,61 @@ const ANN_COLS = [
 // how this person works, not a click to be repeated every morning.
 let HIDECOLS = new Set(JSON.parse(localStorage.getItem('ev.hidecols') || '[]'));
 
+// Multi-select for bulk delete. NOT persisted like HIDECOLS -- a set of
+// asset_ids is only meaningful for the report currently on screen, and
+// carrying it across a client/year switch would delete the wrong cards.
+let SELMODE = false;
+let SELECTED = new Set();
+
+function toggleSelMode(){
+  SELMODE = !SELMODE;
+  if (!SELMODE) SELECTED.clear();
+  render();
+}
+function selRefreshBar(){
+  const btn = document.getElementById('seldelbtn');
+  if (!btn) return;
+  btn.textContent = SELECTED.size ? `Seçilmişləri sil (${SELECTED.size})` : 'Seçilmişləri sil';
+  btn.disabled = !SELECTED.size;
+}
+function selToggle(id, on){
+  if (on) SELECTED.add(id); else SELECTED.delete(id);
+  selRefreshBar();
+}
+function selAllVisible(on){
+  document.querySelectorAll('.selpick').forEach(el => {
+    el.checked = on;
+    if (on) SELECTED.add(el.value); else SELECTED.delete(el.value);
+  });
+  selRefreshBar();
+}
+
+/* Same shape as clients.js's formClearAssets() and report.js's bulkWriteoff():
+   name the cards, warn what goes with them, ask once. asset.delete_many
+   backs the folder up before touching anything (§8.1), same as a single
+   delete. */
+function bulkDeleteAssets(){
+  const ids = [...SELECTED];
+  if (!ids.length) return fail('Heç bir ƏV seçilməyib.');
+  const cards = REPORT.categories.flatMap(c => c.cards)
+    .filter(c => ids.includes(c.asset_id));
+  openModal(`${ids.length} ƏV silinsin?`,
+    `<div class="h">Seçilmiş ƏV-lərlə birlikdə onlara aid <strong>bütün</strong>
+     sətirlər silinir: açılış qalığı, xaricetmə, təmir, dəyər artımı, silinmə
+     qərarı, fərdi dərəcə. Əməliyyatdan əvvəl ehtiyat nüsxə götürülür.</div>
+     <div class="h" style="margin-top:10px;max-height:160px;overflow:auto">${
+       cards.map(c => esc((c.inv_no ? c.inv_no + ' · ' : '') + c.name)).join('<br>')
+     }</div>`,
+    // Cleared only on success -- a failed post leaves the modal open (§base.js
+    // submitModal) and the same ids selected, so a retry does not have to be
+    // re-picked from the table.
+    async () => {
+      const r = await post('asset.delete_many', {asset_ids: ids});
+      SELECTED.clear();
+      return r;
+    }, 'Sil');
+}
+
 /* A straight-line card states a TERM, never a bare percentage.
 
    The charge is base / years remaining, so a cell reading "20%" beside a base
@@ -129,8 +184,16 @@ function cardOrder(cards){
 
 function viewAnnual(d){
   const cols = ANN_COLS.filter(c => !HIDECOLS.has(c.k));
-  const head = ['','İnv.№','Adı','Alış tarixi', ...cols.map(c => c.h)];
-  const span = 4 + cols.length;
+  // One extra leading column while picking cards for bulk delete -- it has to
+  // count into every colspan below it (category banner, group subtotal,
+  // category and grand total), the same trap §11.3 already names: a colspan
+  // written as a literal goes stale the moment a column is added in front.
+  const lead = 4 + (SELMODE ? 1 : 0);
+  const head = [
+    ...(SELMODE ? [`<input type="checkbox" style="width:auto"
+        onclick="selAllVisible(this.checked)" title="hamısını seç">`] : []),
+    '', 'İnv.№', 'Adı', 'Alış tarixi', ...cols.map(c => c.h)];
+  const span = lead + cols.length;
   let rows = '';
   for (const cat of cats(d)){
     const cards = cat.cards.filter(match);
@@ -163,7 +226,7 @@ function viewAnnual(d){
         continue;
       }
       if (c.__group_total){
-        rows += `<tr class="subtotal"><td colspan="4">${esc(c.__group_name)}
+        rows += `<tr class="subtotal"><td colspan="${lead}">${esc(c.__group_name)}
           — aralıq yekun</td>${totCells(cols, c.__group_total)}</tr>`;
         continue;
       }
@@ -174,6 +237,10 @@ function viewAnnual(d){
       rows += `<tr class="${cls}" onclick="openCard('${c.asset_id}')"
         title="${c.retired ? esc(RETIRED_AZ[c.retired_kind] || '') + ' · ' + c.retired_year
                 : c.threshold_next ? esc(c.threshold_next_reason) : ''}">
+        ${SELMODE ? `<td onclick="event.stopPropagation()"><input type="checkbox"
+              class="selpick" value="${c.asset_id}" style="width:auto"
+              ${SELECTED.has(c.asset_id) ? 'checked' : ''}
+              onchange="selToggle('${c.asset_id}',this.checked)"></td>` : ''}
         <td>${c.retired ? '·' : c.threshold_hit ? '⚠' : c.threshold_next ? '◐'
              : (c.disposal_type ? '→' : '')}</td>
         <td>${esc(c.inv_no)}</td>
@@ -189,7 +256,7 @@ function viewAnnual(d){
     // what the category holds -- otherwise three visible rows sit under a
     // total of forty, which is wrong and looks entirely plausible.
     const narrowed = FILTER || GRPFILTER;
-    rows += `<tr class="total"><td colspan="4">${esc(cat.name_az)} — yekun${
+    rows += `<tr class="total"><td colspan="${lead}">${esc(cat.name_az)} — yekun${
       narrowed ? ' <span class="rate">süzgəcə görə</span>' : ''}</td>
       ${totCells(cols, narrowed ? sumCards(cards) : cat)}</tr>`;
   }
@@ -202,7 +269,7 @@ function viewAnnual(d){
       ? Object.fromEntries(SUM_KEYS.map(k =>
           [k, shown.reduce((s,c) => s + parseFloat(c[k]), 0).toFixed(2)]))
       : d.totals;
-  rows += `<tr class="total"><td colspan="4">C Ə M İ${
+  rows += `<tr class="total"><td colspan="${lead}">C Ə M İ${
     narrowed ? ' (süzgəcə görə)' : CATFILTER ? ' (seçilmiş kateqoriya)' : ''}</td>
     ${totCells(cols, t)}</tr>`;
   const retired = d.categories.flatMap(c => c.cards).filter(c => c.retired).length;
@@ -223,12 +290,21 @@ function viewAnnual(d){
         <input type="checkbox" style="width:auto" ${GROUPBY ? 'checked' : ''}
           onchange="toggleGroupBy(this.checked)"> Növ üzrə aralıq yekunlar</label>`
     : '';
-  const bar = `<div class="tbar">${toggle}${groupSwitch}
+  // Hidden on a closed year for the same reason card.js hides "Redaktə" and
+  // "Sil" there (§6.2): the year's facts are sealed, and offering an action
+  // that only ever ends in a write invites clicking it to find out.
+  const selBar = d.is_closed ? '' : (SELMODE
+    ? `<button class="tagbtn" onclick="toggleSelMode()">Seçimi bağla</button>
+       <button id="seldelbtn" class="tagbtn" style="color:var(--neg)"
+         ${SELECTED.size ? '' : 'disabled'} onclick="bulkDeleteAssets()">${
+         SELECTED.size ? `Seçilmişləri sil (${SELECTED.size})` : 'Seçilmişləri sil'}</button>`
+    : `<button class="tagbtn" onclick="toggleSelMode()">Bir neçəsini seç…</button>`);
+  const bar = `<div class="tbar">${toggle}${groupSwitch}${selBar}
     <button class="tagbtn" onclick="colPicker()">Sütunlar${
       HIDECOLS.size ? ` (${ANN_COLS.length - cols.length} gizli)` : ''}</button>
     </div>${picker}`;
   return bar + `<div class="card"><div class="scroll"><table><thead><tr>${
-    head.map((h,i) => `<th class="${i>3?'num':''}">${h}</th>`).join('')
+    head.map((h,i) => `<th class="${i>=lead?'num':''}">${h}</th>`).join('')
   }</tr></thead><tbody>${rows}</tbody></table></div></div>`;
 }
 

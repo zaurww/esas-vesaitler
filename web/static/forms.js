@@ -74,9 +74,49 @@ function qmaToggle(){
   }
 }
 
+/* A bulk import that applied the wrong category to a whole batch leaves
+   inv_no behind when the category is fixed one card at a time: update_asset
+   changes the category but never touches inv_no (§4 -- it is the client's
+   own, editable, reused-after-disposal number, not derived from the
+   category), so a card corrected from `yt` to `dg` keeps reading YT-0001.
+   That is not wrong -- inv_no is not required to match the category -- but
+   it is exactly the state a corrected-in-a-hurry batch is left in, so it is
+   called out rather than left for someone to notice on the next filing.
+   Narrow on purpose: it fires only when THIS edit changed the category away
+   from the one the card was created with AND the number still carries that
+   old category's own code as a prefix -- a client's own numbering scheme
+   (never sharing the category's code) never trips it.
+
+   Reads FORM_CARD rather than taking a parameter so that suggestInv() -- a
+   plain click handler with no access to formAsset()'s own `card` closure --
+   can refresh the hint too, after it changes the very field the hint is
+   about. */
+let FORM_CARD = null;
+function invMismatchHint(){
+  const card = FORM_CARD;
+  if (!card) return;
+  const f = document.getElementById('mform');
+  const box = document.getElementById('invhint');
+  if (!f || !box || !f.category) return;
+  const oldPrefix = String(card.category || '').toUpperCase() + '-';
+  const inv = String(f.elements['inv_no'] ? f.elements['inv_no'].value : '')
+    .trim().toUpperCase();
+  const changed = f.category.value !== card.category;
+  if (changed && inv.startsWith(oldPrefix)){
+    box.hidden = false;
+    box.innerHTML = `Nömrə (<strong>${esc(f.elements['inv_no'].value)}</strong>)
+      hələ köhnə kateqoriyaya uyğundur — yeni kateqoriyaya uyğun nömrə üçün
+      <a href="#" onclick="suggestInv();return false">«növbəti»</a> düyməsini
+      basın, ya da nömrəni əl ilə dəyişin.`;
+  } else {
+    box.hidden = true;
+  }
+}
+
 /* ---- asset: new / carried over / group pool ---- */
 function formAsset(card){
   const edit = !!card;
+  FORM_CARD = card || null;
   // "new / carried / pool" is a choice only made at creation -- assets.tsv
   // never remembers it afterward. Defaulting an edit to 'new' anyway forced
   // a purchase date, and the full new-card field set, onto a card that was
@@ -112,7 +152,8 @@ function formAsset(card){
               onclick="suggestInv()">növbəti</button>
           </div>
           <div class="h">Boş buraxsanız, mövcud nömrələməyə uyğun olaraq
-            <strong>avtomatik verilir</strong>.</div></div>
+            <strong>avtomatik verilir</strong>.</div>
+          <div id="invhint" class="h" style="color:var(--neg)" hidden></div></div>
         ${fld('in_date','Alış tarixi',{type:'date',value:card&&card.in_date,
               req:mode==='new'})}</div>`;
       h += fld('name','Adı',{value:card&&card.name,req:true,placeholder:'Toyota Camry 2.5'});
@@ -227,9 +268,11 @@ function formAsset(card){
     // and addEventListener would stack a handler each time.
     // One handler for both: the category select decides whether the term
     // field is on screen, and the count decides what the batch costs.
-    document.getElementById('mbody').oninput = () => { batchTotal(); qmaToggle(); };
+    document.getElementById('mbody').oninput =
+      () => { batchTotal(); qmaToggle(); invMismatchHint(); };
     batchTotal();
     qmaToggle();
+    invMismatchHint();
   };
   window.ASSETMODE = m => { mode = m; render(); };
   render();
@@ -246,6 +289,7 @@ async function suggestInv(){
   const j = await r.json();
   const box = document.querySelector('#mbody input[name=inv_no]');
   if (j.inv_no){ box.value = j.inv_no; box.focus(); }
+  invMismatchHint();
 }
 
 /* ---- opening balance of an existing card ---- */

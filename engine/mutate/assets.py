@@ -335,6 +335,40 @@ def clear_assets(root: Path, slug: str, p: dict) -> str:
     return f"{n} ƏV silindi"
 
 
+def delete_assets_many(root: Path, slug: str, p: dict) -> str:
+    """Delete several cards in one transaction.
+
+    Picking them off one at a time was the only way in, and for a handful of
+    mis-imported cards that means a delete_asset call each -- §8.1 backs up
+    the whole folder and recomputes every open year per write, so five clicks
+    became five backups and five recomputations for one bookkeeper action.
+    Same reasoning as set_writeoff and group.assign taking a list (§5.3-bis,
+    §13.1): the transaction is one, the changelog still gets a line per card.
+    """
+    ids = [str(a) for a in (p.get("asset_ids") or [])]
+    if not ids:
+        raise DataError("Heç bir ƏV seçilməyib")
+    id_set = set(ids)
+    with transaction(root, slug, "asset.delete_many") as tx:
+        assets = rows_of(root, slug, "assets.tsv")
+        by_id = {r["asset_id"]: r for r in assets}
+        missing = [aid for aid in ids if aid not in by_id]
+        if missing:
+            raise DataError(f"ƏV tapılmadı: {', '.join(missing)}")
+        for name in DEPENDENT:
+            rows = rows_of(root, slug, name)
+            kept = [r for r in rows if r.get("asset_id") not in id_set]
+            if len(kept) != len(rows):
+                tx.log("", name, f"{len(rows) - len(kept)} sətir", "silindi")
+                save_rows(root, slug, name, kept)
+        for aid in ids:
+            row = by_id[aid]
+            tx.log(aid, "asset", f"{row['inv_no']} {row['name']}", "silindi")
+        save_rows(root, slug, "assets.tsv",
+                  [r for r in assets if r["asset_id"] not in id_set])
+    return f"{len(ids)} ƏV silindi"
+
+
 def delete_asset(root: Path, slug: str, p: dict) -> str:
     """Delete the asset AND everything that references it.
 

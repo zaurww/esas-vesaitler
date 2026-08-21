@@ -142,7 +142,8 @@
     position:sticky; bottom:0; background:#eceff4; font-weight:700;
     padding:7px 8px; border-top:2px solid var(--line);
   }
-  .scroll.imp.grid td input.badnum{background:var(--warn-bg); font-weight:600}
+  .scroll.imp.grid td input.badnum,
+  .scroll.imp.grid td select.badnum{background:var(--warn-bg); font-weight:600}
   /* the client's own grouping: a partition of the rows, deliberately lighter
      than the category banner above it -- it is not a tax line (§13.1) */
   tr.grp td{background:#f4f7fb; font-weight:600; color:var(--accent);
