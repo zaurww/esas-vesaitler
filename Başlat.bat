@@ -7,7 +7,10 @@ cd /d "%~dp0"
 where python >nul 2>nul
 if errorlevel 1 (
   echo.
-  echo   Python tapilmadi. python.org saytindan qurasdirin
+  echo   Python tapilmadi. Once "Qurasdir.bat" faili ishe salin -- o,
+  echo   Python-u ozu qurar ve masaustunde qisayol yaradar.
+  echo.
+  echo   Elle qurmaq isteseniz: python.org saytindan qurasdirin
   echo   ve "Add python.exe to PATH" secimini isaretleyin.
   echo.
   pause
