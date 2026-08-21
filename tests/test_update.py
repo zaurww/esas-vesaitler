@@ -14,6 +14,7 @@ No real network call anywhere here: `fetch` is always a stand-in.
 from __future__ import annotations
 
 import io
+import json
 import shutil
 import tempfile
 import unittest
@@ -21,7 +22,10 @@ import zipfile
 from pathlib import Path
 
 from engine.rates import ENGINE_VERSION, version_tuple
-from web.update import PRESERVE, apply_update, check_latest
+from web.update import (
+    PRESERVE, apply_update, check_latest, clear_pending_verify,
+    read_pending_verify, rollback_update,
+)
 
 
 class VersionTuple(unittest.TestCase):
@@ -126,7 +130,11 @@ class ApplyUpdate(unittest.TestCase):
         blob = _github_zip("zaurww-esas-vesaitler-abc123", {"ev.py": "NEW EV"})
         apply_update(self.root, blob, from_version="0.9.0", to_version="0.10.0")
         app_backups = self.root / "backups" / "_app"
-        snapshots = list(app_backups.iterdir())
+        # pending_verify.json now lives alongside the snapshot directories
+        # (see PendingVerify below) -- filtered out here because it is a
+        # marker file, not a backup, and counting it as one would make this
+        # assertion pass or fail depending on an unrelated feature.
+        snapshots = [p for p in app_backups.iterdir() if p.is_dir()]
         self.assertEqual(len(snapshots), 1)
         self.assertIn("0.9.0", snapshots[0].name)
         self.assertIn("0.10.0", snapshots[0].name)
@@ -156,6 +164,141 @@ class ApplyUpdate(unittest.TestCase):
         this test failing first."""
         from engine.rates import NORM_FILES
         self.assertTrue(set(NORM_FILES) <= PRESERVE)
+
+    def test_apply_leaves_a_pending_verify_marker(self):
+        """The marker is what makes web/app.py's startup check (§9) run at
+        all -- without it, an update that silently changed a number would
+        never be re-checked against anything."""
+        blob = _github_zip("zaurww-esas-vesaitler-abc123", {"ev.py": "NEW EV"})
+        apply_update(self.root, blob, from_version="0.9.0", to_version="0.10.0")
+        pending = read_pending_verify(self.root)
+        self.assertIsNotNone(pending)
+        self.assertEqual(pending["from_version"], "0.9.0")
+        self.assertEqual(pending["to_version"], "0.10.0")
+        backup_dir = self.root / "backups" / "_app" / pending["backup_dir"]
+        self.assertTrue((backup_dir / "_manifest.json").is_file())
+
+    def test_a_newly_added_top_level_file_is_recorded_as_added_not_replaced(self):
+        """requirements.txt is the real precedent (CLAUDE.md §11f): a file
+        that did not exist before an update has nothing to restore it FROM,
+        so rollback must delete it rather than look for a backup copy."""
+        blob = _github_zip("zaurww-esas-vesaitler-abc123", {
+            "ev.py": "NEW EV", "requirements.txt": "openpyxl>=3.1,<4\n",
+        })
+        apply_update(self.root, blob, from_version="0.9.0", to_version="0.10.0")
+        pending = read_pending_verify(self.root)
+        backup_dir = self.root / "backups" / "_app" / pending["backup_dir"]
+        manifest = json.loads((backup_dir / "_manifest.json").read_text())
+        self.assertIn("ev.py", manifest["replaced"])
+        self.assertIn("requirements.txt", manifest["added"])
+        self.assertNotIn("requirements.txt", manifest["replaced"])
+
+
+class PendingVerify(unittest.TestCase):
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp())
+
+    def tearDown(self):
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def test_nothing_pending_on_a_fresh_installation(self):
+        self.assertIsNone(read_pending_verify(self.root))
+
+    def test_clearing_an_absent_marker_does_not_raise(self):
+        # A double-clear (e.g. the UI calling it after an already-cleared
+        # state) must be a no-op, not an error -- the same "courtesy, not a
+        # calculation" reasoning as check_latest's broad except.
+        clear_pending_verify(self.root)
+
+    def test_an_unreadable_marker_reads_as_nothing_pending(self):
+        marker = self.root / "backups" / "_app" / "pending_verify.json"
+        marker.parent.mkdir(parents=True)
+        marker.write_text("{not valid json")
+        self.assertIsNone(read_pending_verify(self.root))
+
+
+class RollbackUpdate(unittest.TestCase):
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp())
+        (self.root / "ev.py").write_text("OLD EV")
+        (self.root / "engine").mkdir()
+        (self.root / "engine" / "rates.py").write_text("OLD RATES CODE")
+        (self.root / "clients" / "demo-avto").mkdir(parents=True)
+        (self.root / "clients" / "demo-avto" / "config.toml").write_text("REAL CLIENT")
+
+    def tearDown(self):
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def _apply(self, files: dict[str, str], **kw) -> dict:
+        blob = _github_zip("zaurww-esas-vesaitler-abc123", files)
+        apply_update(self.root, blob, **kw)
+        return read_pending_verify(self.root)
+
+    def test_a_replaced_file_is_restored(self):
+        pending = self._apply({"ev.py": "NEW EV"},
+                              from_version="0.9.0", to_version="0.10.0")
+        backup_dir = self.root / "backups" / "_app" / pending["backup_dir"]
+        rollback_update(self.root, backup_dir)
+        self.assertEqual((self.root / "ev.py").read_text(), "OLD EV")
+
+    def test_a_replaced_directory_is_restored(self):
+        pending = self._apply({"engine/rates.py": "NEW RATES CODE"})
+        backup_dir = self.root / "backups" / "_app" / pending["backup_dir"]
+        rollback_update(self.root, backup_dir)
+        self.assertEqual((self.root / "engine" / "rates.py").read_text(),
+                         "OLD RATES CODE")
+
+    def test_a_file_the_update_added_is_removed_not_left_behind(self):
+        """It did not exist before this update, so "rolled back" means gone
+        -- restoring nothing would leave a file from a version that, after
+        the rollback, the installation no longer claims to be running."""
+        pending = self._apply({
+            "ev.py": "NEW EV", "requirements.txt": "openpyxl>=3.1,<4\n",
+        })
+        backup_dir = self.root / "backups" / "_app" / pending["backup_dir"]
+        rollback_update(self.root, backup_dir)
+        self.assertFalse((self.root / "requirements.txt").exists())
+
+    def test_clients_are_never_touched_by_a_rollback_either(self):
+        pending = self._apply({"ev.py": "NEW EV"})
+        backup_dir = self.root / "backups" / "_app" / pending["backup_dir"]
+        rollback_update(self.root, backup_dir)
+        self.assertEqual(
+            (self.root / "clients" / "demo-avto" / "config.toml").read_text(),
+            "REAL CLIENT")
+
+    def test_the_pending_verify_marker_is_cleared_by_a_successful_rollback(self):
+        pending = self._apply({"ev.py": "NEW EV"})
+        backup_dir = self.root / "backups" / "_app" / pending["backup_dir"]
+        rollback_update(self.root, backup_dir)
+        self.assertIsNone(read_pending_verify(self.root))
+
+    def test_the_rollback_itself_leaves_a_way_back(self):
+        """Symmetry with apply_update's own discipline (§8.1): what a
+        rollback discards -- here, the NEW ev.py -- is backed up too, not
+        just overwritten, in case the rollback turns out to be the mistake."""
+        pending = self._apply({"ev.py": "NEW EV"})
+        backup_dir = self.root / "backups" / "_app" / pending["backup_dir"]
+        rollback_update(self.root, backup_dir)
+        undo_dirs = [p for p in (self.root / "backups" / "_app").iterdir()
+                     if p.is_dir() and "rollback-of" in p.name]
+        self.assertEqual(len(undo_dirs), 1)
+        self.assertEqual((undo_dirs[0] / "ev.py").read_text(), "NEW EV")
+
+    def test_a_missing_backup_directory_is_refused_not_silently_ignored(self):
+        with self.assertRaises(ValueError):
+            rollback_update(self.root, self.root / "backups" / "_app" / "no-such-thing")
+
+    def test_a_directory_without_a_manifest_is_refused(self):
+        """Anything under backups/_app/ that we did not write ourselves --
+        for instance a hand-copied folder -- must not be treated as one of
+        our own update snapshots."""
+        stray = self.root / "backups" / "_app" / "not-ours"
+        stray.mkdir(parents=True)
+        with self.assertRaises(ValueError):
+            rollback_update(self.root, stray)
 
 
 if __name__ == "__main__":

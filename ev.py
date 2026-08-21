@@ -7,6 +7,8 @@
     python ev.py close <client> <year>    close the year -> opening balances for year+1
     python ev.py verify <client>          recompute closed years, diff against stored
     python ev.py test                     run the engine's control examples
+    python ev.py golden                   check demo-avto's output against tests/golden/
+    python ev.py golden --update          regenerate tests/golden/ after a deliberate change
 """
 
 from __future__ import annotations
@@ -18,11 +20,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
-from engine.calc import MONTHS_AZ, CalcError, compute_year, money  # noqa: E402
+from engine.calc import MONTHS_AZ, CalcError, compute_year  # noqa: E402
 from engine.excel import build_workbook  # noqa: E402
 from engine.rates import ENGINE_VERSION  # noqa: E402
 from engine.storage import (  # noqa: E402
-    OPENING_HEADER, DataError, append_tsv, list_clients, load_client, read_tsv,
+    OPENING_HEADER, DataError, append_tsv, list_clients, load_client,
 )
 
 
@@ -115,26 +117,17 @@ def cmd_close(slug: str, year: int) -> None:
 def cmd_verify(slug: str) -> None:
     """Recompute every closed year and diff against the stored balances.
 
-    Falls straight out of the event-sourced design (§2): a cheap regression
-    detector across engine versions.
+    The logic itself lives in engine.mutate.verify_client now -- moved,
+    unchanged, so the self-update's post-update check (web/app.py, §9) calls
+    the same function this command has always printed, instead of growing a
+    second copy that could drift from it.
     """
-    data = load_client(ROOT, slug)
-    stored: dict[tuple[int, str], str] = {}
-    for row in read_tsv(ROOT / "clients" / slug / "opening_balances.tsv"):
-        if row.get("source") == "year_close":
-            stored[(int(row["year"]), row["asset_id"])] = row["residual"].strip()
-    bad = 0
-    for year in sorted(data.closed_years()):
-        r = compute_year(data, year)
-        for c in r.cards:
-            key = (year + 1, c.asset_id)
-            if key not in stored:
-                continue
-            if f"{money(c.closing):.2f}" != f"{float(stored[key]):.2f}":
-                bad += 1
-                print(f"  ✗ {year}→{year+1} {c.asset_id}: "
-                      f"saxlanmış {stored[key]} ≠ yenidən hesablanmış {money(c.closing):.2f}")
-    print("  ✓ bütün bağlı illər uyğundur" if not bad else f"  {bad} uyğunsuzluq")
+    from engine.mutate import verify_client
+    bad = verify_client(ROOT, slug)
+    for m in bad:
+        print(f"  ✗ {m['year']}→{m['year'] + 1} {m['asset_id']}: "
+              f"saxlanmış {m['stored']} ≠ yenidən hesablanmış {m['recomputed']}")
+    print("  ✓ bütün bağlı illər uyğundur" if not bad else f"  {len(bad)} uyğunsuzluq")
 
 
 def cmd_test() -> int:
@@ -149,6 +142,39 @@ def cmd_test() -> int:
                                                 top_level_dir=str(ROOT))
     result = unittest.TextTestRunner(verbosity=2).run(suite)
     return 0 if result.wasSuccessful() else 1
+
+
+def cmd_golden(update: bool) -> int:
+    """Check -- or, with --update, regenerate -- tests/golden/demo-avto.json.
+
+    `test` (above) already runs this as part of the suite (tests/test_golden.py)
+    when a snapshot exists; this command is the one that produces it in the
+    first place, or moves it after a deliberate change. Never hand-edit the
+    JSON file: it is generated output, and the only thing worth reading by
+    hand is the diff `git diff` shows after this runs.
+    """
+    from tests.golden import DEMO_SLUG, client_snapshot, golden_path, write_golden
+    if not (ROOT / "clients" / DEMO_SLUG).is_dir():
+        print(f"  {DEMO_SLUG} yoxdur -- yoxlanacaq heç nə yoxdur")
+        return 0
+    if update:
+        path = write_golden(ROOT, DEMO_SLUG)
+        print(f"  yazıldı: {path}")
+        print("  `git diff` ilə nəyin dəyişdiyinə baxın")
+        return 0
+    import json
+    path = golden_path(DEMO_SLUG)
+    if not path.is_file():
+        print(f"  {path} yoxdur — əvvəlcə `python ev.py golden --update` işə salın")
+        return 1
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    current = client_snapshot(ROOT, DEMO_SLUG)
+    if current == saved:
+        print("  ✓ golden snapshot ilə üst-üstə düşür")
+        return 0
+    print("  ✗ golden snapshot ilə uyğunsuzluq — "
+          "`python ev.py golden --update` ilə yeniləyin və diffi oxuyun")
+    return 1
 
 
 def _utf8_console() -> None:
@@ -202,6 +228,8 @@ def main(argv: list[str]) -> int:
             cmd_verify(argv[1])
         elif cmd == "test":
             return cmd_test()
+        elif cmd == "golden":
+            return cmd_golden(update="--update" in argv[1:])
         else:
             print(__doc__)
             return 2

@@ -42,9 +42,13 @@ jobs:
 
       - run: python ev.py test
 
-      # clients/demo-avto is committed on purpose and the control examples
-      # read it (§13.5). Reading is all they may do: a test that writes into
-      # the repository's own client would make the next run's numbers depend
-      # on the previous one.
-      - name: the committed client is unchanged
+      # clients/demo-avto and tests/golden/demo-avto.json are both committed
+      # on purpose -- the control examples and the golden snapshot
+      # (tests/test_golden.py) read them. Reading is all either may do: a
+      # test that writes into the repository's own client, or regenerates
+      # the snapshot on the runner, would make the next run's numbers
+      # depend on the previous one. `python ev.py golden --update` is a
+      # human's decision, made locally and committed -- never something CI
+      # runs on its own.
+      - name: the committed client and golden snapshot are unchanged
         run: git diff --exit-code

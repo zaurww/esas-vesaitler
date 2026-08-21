@@ -38,7 +38,7 @@ something narrower it can import the submodule directly; both work.
 from .core import (
     BACKUP_KEEP_ALWAYS, BACKUP_KEEP_COUNT, BACKUP_KEEP_DAYS, HEADERS, Tx,
     guard_open_year, mutate_folder, one_segment, prune_backups, rows_of,
-    save_rows, transaction,
+    save_rows, transaction, verify_all, verify_client,
 )
 from .parse import category_of, dec, iso_date
 from .numbering import (
@@ -116,5 +116,5 @@ __all__ = [
     "set_coefficient_row", "set_disposal", "set_election", "set_opening",
     "set_parameter_row", "set_rate_row", "set_status", "set_writeoff",
     "slugify", "suggest_inv_no", "transaction", "update_asset",
-    "update_client",
+    "update_client", "verify_all", "verify_client",
 ]

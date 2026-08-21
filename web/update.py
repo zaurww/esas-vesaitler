@@ -52,6 +52,17 @@ _RELEASES_URL = f"https://github.com/{GITHUB_REPO}/releases"
 PRESERVE = {"clients", "backups", "rates.tsv", "coefficients.tsv",
             "parameters.tsv", "categories.tsv"}
 
+# Written into each update's own backup_dir, so rollback_update can find it
+# again later without re-deriving what changed from a "before" state that,
+# by the time a rollback is requested, no longer exists on disk.
+_MANIFEST = "_manifest.json"
+
+# One marker per installation, not per update: only the most recent update
+# can still be pending verification -- an update overwrites its predecessor's
+# files, so an older marker would point at a backup_dir that is no longer
+# "one step back" from what is on disk.
+_PENDING_VERIFY = "pending_verify.json"
+
 
 def _http_get_json(url: str) -> dict:
     req = urllib.request.Request(url, headers={
@@ -136,6 +147,14 @@ def apply_update(root: Path, zip_bytes: bytes, *,
             raise ValueError("Yenilənəcək fayl tapılmadı")
 
         backup_dir.mkdir(parents=True)
+        # Which top-level entries existed before (backed up, and restorable
+        # by rollback_update) versus were newly added by this update (nothing
+        # to restore them FROM -- rollback_update deletes them instead,
+        # because the old version never had them). Recorded rather than
+        # re-derived at rollback time: by then the "before" state is gone,
+        # overwritten by exactly the write this manifest is describing.
+        replaced: list[str] = []
+        added: list[str] = []
         for p in entries:
             dest = root / p.name
             if dest.exists():
@@ -145,12 +164,120 @@ def apply_update(root: Path, zip_bytes: bytes, *,
                 else:
                     shutil.copy2(dest, backup_dir / p.name)
                     dest.unlink()
+                replaced.append(p.name)
+            else:
+                added.append(p.name)
             if p.is_dir():
                 shutil.copytree(p, dest)
             else:
                 shutil.copy2(p, dest)
+
+        (backup_dir / _MANIFEST).write_text(json.dumps({
+            "from_version": from_version, "to_version": to_version,
+            "replaced": replaced, "added": added,
+        }, ensure_ascii=False), encoding="utf-8")
     finally:
         shutil.rmtree(extract_dir, ignore_errors=True)
 
+    _write_pending_verify(root, backup_dir.name, from_version, to_version)
+
     return (f"Yeniləmə tətbiq olundu ({from_version} → {to_version or '?'}). "
             f"Pəncərəni bağlayıb «Başlat.bat»-ı yenidən açın.")
+
+
+def _pending_verify_path(root: Path) -> Path:
+    return root / "backups" / "_app" / _PENDING_VERIFY
+
+
+def _write_pending_verify(root: Path, backup_dir_name: str,
+                           from_version: str, to_version: str) -> None:
+    """Leave a note for the NEXT process start: "check the closed years".
+
+    Why a file and not just doing the check right here, inside apply_update:
+    this process still has the OLD engine's modules already imported.
+    Overwriting the .py files on disk does not change what is running in
+    memory (the same reason self-restart is not attempted, CLAUDE.md §9) --
+    a check run right now would verify the old engine against itself and
+    always pass. The check that means something runs when the app is next
+    started and actually imports the new code, which is web/app.py's job.
+    """
+    path = _pending_verify_path(root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({
+        "backup_dir": backup_dir_name,
+        "from_version": from_version,
+        "to_version": to_version,
+    }, ensure_ascii=False), encoding="utf-8")
+
+
+def read_pending_verify(root: Path) -> dict | None:
+    """Is there an update since the last successful post-update check?
+
+    None both when there is nothing pending and when the marker is unreadable
+    (deleted by hand, truncated by a crash mid-write) -- either way there is
+    nothing this process can act on, and a startup check must not itself
+    raise over a courtesy file (the same broad-except reasoning as
+    check_latest's).
+    """
+    path = _pending_verify_path(root)
+    if not path.is_file():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def clear_pending_verify(root: Path) -> None:
+    _pending_verify_path(root).unlink(missing_ok=True)
+
+
+def rollback_update(root: Path, backup_dir: Path) -> str:
+    """Undo one apply_update() by restoring what it replaced.
+
+    Held to the same discipline apply_update itself follows -- and that
+    engine.mutate.core.transaction follows for every client write (§8.1):
+    back up what is about to be discarded before touching it, so a rollback
+    is itself reversible rather than a second irreversible leap.
+
+    Raises ValueError if backup_dir does not look like one of our own
+    update backups -- refusing is the right failure here (§2.1); silently
+    doing nothing while claiming success would leave the broken update in
+    place with no way back.
+    """
+    manifest_path = backup_dir / _MANIFEST
+    if not backup_dir.is_dir() or not manifest_path.is_file():
+        raise ValueError(f"Bərpa nöqtəsi tapılmadı: {backup_dir.name}")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    undo_dir = root / "backups" / "_app" / f"{stamp}-rollback-of-{backup_dir.name}"
+    undo_dir.mkdir(parents=True)
+
+    # Clear out the current (post-update) state first -- both what will be
+    # restored from backup_dir and what this update added and has no
+    # "before" version of at all.
+    for name in [*manifest["replaced"], *manifest["added"]]:
+        dest = root / name
+        if not dest.exists():
+            continue
+        if dest.is_dir():
+            shutil.copytree(dest, undo_dir / name)
+            shutil.rmtree(dest)
+        else:
+            shutil.copy2(dest, undo_dir / name)
+            dest.unlink()
+
+    # Only "replaced" entries come back -- "added" ones simply stay removed,
+    # because the version being rolled back TO never had them either.
+    for name in manifest["replaced"]:
+        src, dest = backup_dir / name, root / name
+        if src.is_dir():
+            shutil.copytree(src, dest)
+        else:
+            shutil.copy2(src, dest)
+
+    clear_pending_verify(root)
+    return (f"Geri qaytarıldı ({manifest['to_version'] or '?'} → "
+            f"{manifest['from_version']}). Pəncərəni bağlayıb "
+            f"«Başlat.bat»-ı yenidən açın.")

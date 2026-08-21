@@ -6,9 +6,12 @@ recomputes from events (CLAUDE.md §2, §3).
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import sys
 import threading
+import urllib.request
 import webbrowser
 from datetime import date as dt_date, datetime
 from decimal import Decimal
@@ -25,19 +28,121 @@ from engine.calc import (  # noqa: E402
 from engine.excel import build_import_template, build_workbook  # noqa: E402
 from engine.mutate import (  # noqa: E402
     ACTIONS, IMPORT_FIELDS, export_client, guess_columns, rows_of,
-    suggest_inv_no,
+    suggest_inv_no, verify_all,
 )
 from engine import rates  # noqa: E402
 from engine.rates import CATEGORIES, CATEGORY_BY_CODE, ENGINE_VERSION  # noqa: E402
 from engine.storage import DataError, list_clients, load_client  # noqa: E402
-from web.update import apply_update, check_latest, download  # noqa: E402
+from web.update import (  # noqa: E402
+    apply_update, check_latest, clear_pending_verify, download,
+    read_pending_verify, rollback_update,
+)
 
 INDEX = Path(__file__).resolve().parent / "index.html"
 STATIC = Path(__file__).resolve().parent / "static"
 
+# --- who is already running -------------------------------------------
+#
+# Two copies of this program on the SAME clients/ folder is a data-loss bug,
+# not a nuisance. _STATE_LOCK below serialises requests inside one process
+# (§8.0); across processes there is no lock at all, and
+# engine.mutate.core.transaction backs up, writes, reloads and rolls back on
+# its own view of the folder -- so one process's rollback silently erases the
+# other's write, and its write lands on data read before that write. A lost
+# write with no error is exactly the failure §2.1 exists to forbid.
+#
+# Two copies in two DIFFERENT folders are legitimate: separate client sets,
+# nothing shared. So identity is the folder, never the port.
+
+_APP_MARKER = "esas-vesaitler"
+
+
+def _install_id(root: Path) -> str:
+    """Stable short id for one installation folder.
+
+    Hashed rather than sent as a path: the probe answers any local program
+    that asks, and where a bookkeeper keeps client tax data is not something
+    to hand out for free (§3). A hash still compares exactly, which is all a
+    caller needs. normcase first -- the same folder can be spelled with
+    different case on Windows ("D:\\..." vs "d:\\...") and would otherwise
+    look like a second installation.
+    """
+    return hashlib.sha256(
+        os.path.normcase(str(root)).encode("utf-8")).hexdigest()[:16]
+
+
+def instance_marker() -> dict:
+    """Answer to "who holds this port?" -- served at /api/instance."""
+    return {"app": _APP_MARKER, "install": _install_id(ROOT),
+            "version": ENGINE_VERSION, "pid": os.getpid()}
+
+
+def _probe(port: int, timeout: float = 1.0) -> dict | None:
+    """Ask whatever holds `port` whether it is one of us. None = it is not."""
+    try:
+        with urllib.request.urlopen(
+                f"http://127.0.0.1:{port}/api/instance", timeout=timeout) as r:
+            # Capped read: an unrelated local server may answer with anything
+            # at all, and a probe must not become a way to feed this process a
+            # gigabyte before it has even started.
+            return json.loads(r.read(4096).decode("utf-8"))
+    except Exception:
+        # Nothing listening, not HTTP, not JSON, too slow -- all the same
+        # answer to the caller. Broad like update.check_latest's and for the
+        # same reason: this is a courtesy at startup, not a calculation.
+        return None
+
+
+def _same_installation(info: dict | None) -> bool:
+    """Is `info` another copy of us serving the same folder as this one?"""
+    return (isinstance(info, dict)
+            and info.get("app") == _APP_MARKER
+            and info.get("install") == _install_id(ROOT))
+
+
 _STATE_LOCK = threading.RLock()
 _closed_cache: set = set()
 _has_opening = False
+
+# Result of the post-update check (see _run_startup_verify below), set once
+# when this process starts serving and read by /api/update-status. None
+# means "nothing to report" -- either no update is pending, or this process
+# has not finished its startup check yet.
+_startup_verify: dict | None = None
+
+
+def _run_startup_verify(root: Path) -> dict | None:
+    """If an update is pending verification, run it now and report the result.
+
+    Called once, right as this process becomes the one actually serving
+    (serve(), after a successful bind) -- never from a handoff process that
+    only opens a browser and exits, and never on every request, because
+    verify_all recomputes every closed year of every client and that cost
+    belongs at startup, not on the hot path.
+
+    Loud either way, matching §2.1: a clean result is printed too, not just
+    silence, because "did the update check anything at all" should not be a
+    question the accountant has to take on faith.
+    """
+    pending = read_pending_verify(root)
+    if pending is None:
+        return None
+    bad = verify_all(root)
+    if not bad:
+        print(f"  yeniləmə yoxlanıldı ({pending['from_version']} → "
+              f"{pending['to_version']}): bağlı illər uyğundur")
+        clear_pending_verify(root)
+        return {"ok": True, "from_version": pending["from_version"],
+                "to_version": pending["to_version"]}
+    total = sum(len(v) for v in bad.values())
+    print(f"  ⚠ yeniləmədən sonra {total} uyğunsuzluq tapıldı "
+          f"({pending['from_version']} → {pending['to_version']}) -- bax UI-də")
+    # The marker is deliberately left in place: the problem is not fixed by
+    # having been noticed, and clearing it here would make a rollback offered
+    # later (once, from the UI) look unprompted the next time this page loads.
+    return {"ok": False, "mismatches": bad,
+            "from_version": pending["from_version"],
+            "to_version": pending["to_version"]}
 # Card fields the calculation never reads -- counterparty, e-invoice, serial,
 # the client's own group.
 # One dict rather than one global per field: they are all "what the card says
@@ -509,6 +614,15 @@ class Handler(BaseHTTPRequestHandler):
     # nothing here. A `compute_year` on a 5 000-card client takes under a
     # second, and nobody else is waiting.
     def do_GET(self):
+        # The instance probe answers BEFORE the lock, deliberately. It reads
+        # nothing mutable -- two constants and a pid -- and a copy that is
+        # starting up needs the answer now: if this instance were mid-recompute
+        # and holding the lock, a probe that blocked past its timeout would be
+        # read as "not ours", and the newcomer would start a second writer on
+        # this very folder. The check would fail exactly when it matters.
+        if urlparse(self.path).path == "/api/instance":
+            self._json(instance_marker())
+            return
         with _STATE_LOCK:
             self._get()
 
@@ -680,6 +794,14 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(check_latest())
                 return
 
+            if url.path == "/api/update-status":
+                # The check already ran once, at this process's own startup
+                # (serve() -> _run_startup_verify) -- this just hands the
+                # result to whichever browser tab asks. {} rather than the
+                # bare word "no": the frontend only has to test truthiness.
+                self._json(_startup_verify or {})
+                return
+
             self._json({"error": "not found"}, 404)
 
         except (DataError, CalcError) as e:
@@ -709,6 +831,22 @@ class Handler(BaseHTTPRequestHandler):
                 blob = download(check["zip_url"])
                 message = apply_update(ROOT, blob, from_version=ENGINE_VERSION,
                                        to_version=check["latest"])
+                return self._json({"ok": True, "message": message})
+            if url.path == "/api/update-rollback":
+                # backup_dir comes from the SERVER's own pending-verify
+                # marker, never from the request body -- the same reasoning
+                # as update-apply not trusting a client-sent zip_url: this
+                # writes to the installation itself, so what gets restored
+                # must be something this process already decided on, not
+                # something a request asked for.
+                pending = read_pending_verify(ROOT)
+                if pending is None:
+                    return self._json(
+                        {"error": "Geri qaytarılacaq yeniləmə yoxdur"}, 400)
+                backup_dir = ROOT / "backups" / "_app" / pending["backup_dir"]
+                message = rollback_update(ROOT, backup_dir)
+                global _startup_verify
+                _startup_verify = None
                 return self._json({"ok": True, "message": message})
             if url.path != "/api/action":
                 return self._json({"error": "not found"}, 404)
@@ -745,29 +883,55 @@ class LocalServer(ThreadingHTTPServer):
     daemon_threads = True
 
 
-def serve(port: int = 8777, open_browser: bool = True,
-          tries: int = 12) -> None:
-    """Start the local UI.
+def _bind_or_handoff(port: int, tries: int, probe=_probe):
+    """Bind a port -- or discover that this installation already holds one.
 
-    If the port is taken -- an older copy still running, or another program --
-    step up until a free one is found rather than dying with a stack trace.
-    The accountant should not have to know what a port is.
+    Returns (server, port), or (None, port) meaning "we are already serving
+    there; do not start a second one".
+
+    Stepping up to the next free port survives, because a busy port is often
+    somebody else entirely. What is new is that a busy port gets ASKED who it
+    is first: an unrelated service or a second installation is stepped over as
+    before, but our own folder is handed off to instead of duplicated.
     """
-    httpd = None
     for candidate in range(port, port + tries):
         try:
-            httpd = LocalServer(("127.0.0.1", candidate), Handler)
-            port = candidate
-            break
+            return LocalServer(("127.0.0.1", candidate), Handler), candidate
         except OSError:
+            if _same_installation(probe(candidate)):
+                return None, candidate
             continue
-    if httpd is None:
-        raise SystemExit(
-            f"portlar {port}-{port + tries - 1} məşğuldur — "
-            f"başqa bir nüsxə işləyir?"
-        )
+    raise SystemExit(
+        f"portlar {port}-{port + tries - 1} məşğuldur — "
+        f"başqa bir proqram onları tutub?"
+    )
 
+
+def serve(port: int = 8777, open_browser: bool = True,
+          tries: int = 12) -> None:
+    """Start the local UI -- unless this installation is already serving.
+
+    The step-up used to be unconditional, so a second double-click on
+    Başlat.bat started a SECOND server on the same clients/ folder. That is
+    a lost write waiting to happen, not a port nuisance -- see the note above
+    _APP_MARKER. Now the newcomer hands off to the copy already running and
+    stops, which is also what the user meant by double-clicking again: show
+    me the program.
+    """
+    httpd, port = _bind_or_handoff(port, tries)
     url = f"http://127.0.0.1:{port}/"
+
+    if httpd is None:
+        print(f"Əsas Vəsaitlər artıq işləyir · {url}")
+        print("  brauzerdə açılır — bu pəncərəni bağlaya bilərsiniz")
+        print("  proqramı dayandırmaq üçün əvvəlki pəncərəni bağlayın")
+        if open_browser:
+            webbrowser.open(url)
+        return
+
+    global _startup_verify
+    _startup_verify = _run_startup_verify(ROOT)
+
     print(f"Əsas Vəsaitlər · engine {ENGINE_VERSION}")
     print(f"  {url}")
     print("  dayandırmaq üçün: Ctrl+C")

@@ -16,7 +16,7 @@ from tests.support import EngineTest, rates
 
 from engine import mutate
 from engine.calc import CalcError, compute_year
-from engine.storage import DataError, load_client, read_tsv
+from engine.storage import DataError, OPENING_HEADER, load_client, read_tsv, write_tsv
 
 
 class TempRoot(EngineTest):
@@ -899,6 +899,62 @@ class ItCards(TempRoot):
             "category": "it", "in_date": "2024-03-01", "cost": "5000",
             "useful_life": "5"})
         self.assertEqual(self.client().assets[0].name, "Ofis təmiri (2)")
+
+
+class Verify(TempRoot):
+    """engine.mutate.verify_client / verify_all: recompute closed years and
+    diff against the seal (§6.2). The same mechanism `ev.py verify` has
+    always printed, and now also what the self-update's post-update check
+    (web/app.py, §9) calls -- so a mismatch here is a mismatch there too."""
+
+    def close_2024(self) -> str:
+        mutate.create_asset(self.root, self.slug, {
+            "mode": "new", "category": "ma", "name": "A", "cost": "1000",
+            "in_date": "2024-01-01"})
+        mutate.close_year(self.root, self.slug, {"year": 2024})
+        return self.client().assets[0].asset_id
+
+    def _tamper_seal(self, slug: str, asset_id: str, residual: str) -> None:
+        """Hand-edit the sealed opening balance -- standing in for what a
+        genuine engine regression would produce: a recomputed figure that no
+        longer agrees with what was filed."""
+        path = self.root / "clients" / slug / "opening_balances.tsv"
+        rows = read_tsv(path)
+        for row in rows:
+            if row["source"] == "year_close" and row["asset_id"] == asset_id:
+                row["residual"] = residual
+        write_tsv(path, OPENING_HEADER,
+                 [[row[h] for h in OPENING_HEADER] for row in rows])
+
+    def test_a_freshly_closed_year_has_no_mismatches(self):
+        self.close_2024()
+        self.assertEqual(mutate.verify_client(self.root, self.slug), [])
+
+    def test_a_tampered_seal_is_caught(self):
+        aid = self.close_2024()
+        self._tamper_seal(self.slug, aid, "999999.99")
+        bad = mutate.verify_client(self.root, self.slug)
+        self.assertEqual(len(bad), 1)
+        self.assertEqual(bad[0]["asset_id"], aid)
+        self.assertEqual(bad[0]["stored"], "999999.99")
+        self.assertNotEqual(bad[0]["recomputed"], "999999.99")
+
+    def test_verify_all_lists_only_the_client_with_a_mismatch(self):
+        aid = self.close_2024()
+        mutate.create_client(self.root, "", {
+            "client_name": "Second MMC", "voen": "222", "start_year": 2024,
+            "status": "orta"})
+        second = "second-mmc"
+        mutate.create_asset(self.root, second, {
+            "mode": "new", "category": "ma", "name": "B", "cost": "500",
+            "in_date": "2024-01-01"})
+        mutate.close_year(self.root, second, {"year": 2024})
+
+        self._tamper_seal(self.slug, aid, "1.00")
+
+        bad = mutate.verify_all(self.root)
+        self.assertEqual(set(bad.keys()), {self.slug})
+        self.assertEqual(len(bad[self.slug]), 1)
 
 
 if __name__ == "__main__":

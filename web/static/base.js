@@ -40,6 +40,7 @@ async function boot(){
   document.getElementById('year').onchange = load;
   fillYears(); load();
   checkUpdate();      // fire-and-forget -- must never delay or block boot()
+  checkPendingVerify(); // same -- must never delay or block boot()
 }
 
 /* Once per page load, never a repeating timer (§9): a worker who leaves the
@@ -80,6 +81,89 @@ function openUpdateModal(u){
       throw new Error('__stay__');
     },
     'Yüklə və qur');
+}
+
+/* The post-update check (§9, web/app.py's _run_startup_verify): this
+   process already ran it once, at its own startup, against every closed
+   year of every client. This just asks for the result and shows it -- once
+   per page load, like checkUpdate, and just as quiet on a network-shaped
+   failure. Unlike checkUpdate this is not a courtesy: a "not ok" result
+   means a filed year's numbers no longer agree with what was sealed, and it
+   stays on screen (in #updateProblem, outside what load()/fail() rebuild)
+   until the accountant acts on it or dismisses it. */
+async function checkPendingVerify(){
+  try {
+    const r = await fetch('/api/update-status');
+    const u = await r.json();
+    if (!Object.keys(u).length) return;   // nothing pending
+    u.ok ? showVerifyOk(u) : showVerifyProblem(u);
+  } catch (e) { /* quiet -- see above */ }
+}
+
+function showVerifyOk(u){
+  const box = document.getElementById('updateProblem');
+  box.className = '';
+  box.style.cssText =
+    'display:block;background:#eef3f9;border:1px solid #8fa8c8;' +
+    'color:#2c4a70;padding:10px 16px;border-radius:var(--radius);margin-bottom:12px';
+  box.innerHTML = `Yeniləmə yoxlanıldı (${esc(u.from_version)} →
+    ${esc(u.to_version)}): bağlı illərin rəqəmləri öncəki nəticələrlə
+    üst-üstə düşür.
+    <button class="ghost" style="margin-left:10px"
+      onclick="document.getElementById('updateProblem').style.display='none'"
+      >Bağla</button>`;
+}
+
+function showVerifyProblem(u){
+  VERIFY_PROBLEM = u;
+  const box = document.getElementById('updateProblem');
+  box.style.cssText = 'display:block;margin-bottom:12px';
+  box.className = 'err';
+  const total = Object.values(u.mismatches).reduce((n, l) => n + l.length, 0);
+  box.innerHTML = `<strong>Yeniləmədən sonra ${total} uyğunsuzluq
+    tapıldı</strong> (${esc(u.from_version)} → ${esc(u.to_version)}) — bağlı
+    illərin rəqəmləri artıq təqdim edilmiş bəyannamədəki ilə üst-üstə
+    düşmür.
+    <div class="acts" style="margin-top:8px">
+      <button class="danger" onclick="openVerifyProblemModal()"
+        >Təfərrüat və geri qaytarma</button>
+    </div>`;
+}
+
+let VERIFY_PROBLEM = null;
+
+function openVerifyProblemModal(){
+  const u = VERIFY_PROBLEM;
+  const rows = Object.entries(u.mismatches)
+    .flatMap(([slug, list]) => list.map(m => ({slug, ...m})));
+  const shown = rows.slice(0, 20);
+  const table = `<table style="width:100%;font-size:12.5px;border-collapse:collapse">
+    <tr><th style="text-align:left">Müştəri</th><th style="text-align:left">İl</th>
+      <th style="text-align:left">Obyekt</th><th style="text-align:right">Saxlanmış</th>
+      <th style="text-align:right">Yenidən hesablanmış</th></tr>
+    ${shown.map(m => `<tr><td>${esc(m.slug)}</td><td>${m.year}→${m.year + 1}</td>
+      <td>${esc(m.asset_id)}</td><td style="text-align:right">${esc(m.stored)}</td>
+      <td style="text-align:right">${esc(m.recomputed)}</td></tr>`).join('')}
+  </table>${rows.length > shown.length
+    ? `<div class="h">... və daha ${rows.length - shown.length}</div>` : ''}`;
+  openModal(`Yeniləmə problemi — ${esc(u.from_version)} → ${esc(u.to_version)}`,
+    `<div class="h">Bağlı illərin bəzi obyektləri yeniləmədən sonra artıq
+      təqdim edilmiş bəyannamədəki rəqəmlə üst-üstə düşmür. Ən təhlükəsiz
+      addım — köhnə versiyaya geri qayıtmaq; bu, yeni versiyanın öz faylını da
+      bəkaplayır, ona görə geri qaytarma özü də geri dönən əməliyyatdır.</div>
+     <div style="max-height:260px;overflow:auto;margin-top:10px">${table}</div>`,
+    async () => {
+      const r = await fetch('/api/update-rollback', {method: 'POST'});
+      const j = await r.json();
+      if (!r.ok || !j.ok) throw new Error(j.error || 'Geri qaytarma alınmadı');
+      document.getElementById('updateProblem').style.display = 'none';
+      document.getElementById('mtitle').textContent = 'Hazırdır';
+      document.getElementById('mbody').innerHTML = `<div class="h">${esc(j.message)}</div>`;
+      document.getElementById('msubmit').style.display = 'none';
+      document.querySelector('#mform .foot .ghost').textContent = 'Bağla';
+      throw new Error('__stay__');
+    },
+    'Geri qaytar');
 }
 
 function fillYears(){

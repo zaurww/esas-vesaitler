@@ -22,6 +22,12 @@
   <a class="btn" id="export" href="#">⬇ Excel-ə ixrac</a>
 </header>
 
+<!-- Outside #error/#view/#side/#kpis on purpose: those are rebuilt by
+     load()/fail() every time the client or year changes (base.js), which
+     would silently drop a warning that must stay up until the user acts on
+     it or dismisses it themselves. -->
+<div id="updateProblem" style="display:none"></div>
+
 <!-- No click-outside-to-close: the box does not fill the backdrop (padding,
      centered, a short grid does not reach 88vh), so a stray click while
      switching windows -- Excel open alongside, mid-paste -- landed on the

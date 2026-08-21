@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from .. import rates
-from ..calc import compute_year
+from ..calc import compute_year, money
 from ..storage import (
     DataError, append_tsv, list_clients, load_client, read_tsv, write_tsv,
 )
@@ -289,6 +289,52 @@ def guard_open_year(root: Path, slug: str, year: int) -> None:
             f"{year} ili bağlıdır — bəyannamə təqdim edilib, dəyişiklik qəbul "
             f"edilmir (CLAUDE.md §6)"
         )
+
+
+def verify_client(root: Path, slug: str) -> list[dict]:
+    """Recompute one client's closed years and diff against their seal.
+
+    Falls straight out of the event-sourced design (§2): a cheap regression
+    detector across engine versions. `ev.py verify` has printed this since
+    §11.4; the logic moved here, unchanged, so the self-update's post-update
+    check (web/app.py, §9) can call the very same thing instead of growing a
+    second copy that could drift from it.
+
+    Returns one dict per mismatch (empty means the seal still holds).
+    """
+    data = load_client(root, slug)
+    stored: dict[tuple[int, str], str] = {}
+    for row in read_tsv(root / "clients" / slug / "opening_balances.tsv"):
+        if row.get("source") == "year_close":
+            stored[(int(row["year"]), row["asset_id"])] = row["residual"].strip()
+    mismatches: list[dict] = []
+    for year in sorted(data.closed_years()):
+        r = compute_year(data, year)
+        for c in r.cards:
+            key = (year + 1, c.asset_id)
+            if key not in stored:
+                continue
+            recomputed = f"{money(c.closing):.2f}"
+            if recomputed != f"{float(stored[key]):.2f}":
+                mismatches.append({
+                    "client": slug, "year": year, "asset_id": c.asset_id,
+                    "stored": stored[key], "recomputed": recomputed,
+                })
+    return mismatches
+
+
+def verify_all(root: Path) -> dict[str, list[dict]]:
+    """verify_client() for every client this installation holds.
+
+    Only clients WITH a mismatch appear in the result. That matters to the
+    caller that matters most here -- the post-update check -- where a clean
+    run must read as clean (an empty dict), not as a wall of empty entries
+    that looks the same as a wall of real ones (§2.1).
+    """
+    return {s: bad for s in list_clients(root)
+            if (bad := verify_client(root, s))}
+
+
 def _recompute_everything(root: Path) -> None:
     """A rate change touches every client, so every client must still compute.
 
