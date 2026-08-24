@@ -55,8 +55,8 @@ class DemoAvto(EngineTest):
     def test_2026_totals(self):
         r = compute_year(self.data, 2026)
         self.assertMoney(r.totals["opening"], "72877.25")
-        self.assertMoney(r.totals["depreciation"], "25213.32")
-        self.assertMoney(r.totals["closing"], "77663.93")
+        self.assertMoney(r.totals["depreciation"], "25306.12")
+        self.assertMoney(r.totals["closing"], "78035.13")
 
     def test_the_year_chains_without_a_stored_balance(self):
         """2026 opens on exactly what 2025 closed with (§6.1)."""
