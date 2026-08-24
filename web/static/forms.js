@@ -323,17 +323,69 @@ function formDisposal(card){
     d => post('disposal.set', d));
 }
 
-/* ---- repair ---- */
-function formRepair(card){
-  openModal(`Təmir xərci — ${card.inv_no || card.name}`,
+/* ---- repair ----
+   `existing`, when given, is one row already in repairs.tsv -- editing and
+   adding go through the same form because they are the same fact, only the
+   row `orig_date` points at differs. An asset can legally carry several
+   repairs (different dates, even different years, see `it` in §5.1), so the
+   key that says WHICH row to replace is the date it was filed under, not the
+   asset alone -- unlike disposal, which is 1:1.
+
+   The card's "Təmir xərci" button is the single door for both actions: it
+   calls this with no `existing`, and the form itself lists whatever is
+   already on file for the asset above the blank fields, each row with its
+   own "düzəlt". Before this, adding lived here and editing lived only in
+   "Tam tarixçə" -- two doors for one fact, and people kept missing the
+   second one. */
+async function formRepair(card, existing){
+  const has = !!existing;
+  let listing = '';
+  if (!has){
+    const slug = document.getElementById('client').value;
+    const h = await (await fetch(`/api/asset-history?client=${slug}&asset_id=${card.asset_id}`)).json();
+    const closedYears = new Set((h.years || []).filter(y => y.closed).map(y => String(y.year)));
+    const reps = (h.events || []).filter(e => e.kind === 'Təmir');
+    if (reps.length){
+      REPAIR_ROWS = reps.map(e => ({asset: card, event: e,
+        editable: !closedYears.has(e.date.slice(0, 4))}));
+      listing = `<div class="h" style="margin-bottom:6px">Qeydə alınmış təmirlər</div>
+        <table style="margin-bottom:14px"><tbody>` +
+        REPAIR_ROWS.map((r, i) => `<tr>
+          <td class="d">${esc(r.event.date)}</td>
+          <td class="num">${money(r.event.amount)}</td>
+          <td>${esc(r.event.note || '')}</td>
+          <td>${r.editable ? `<button type="button" class="ghost"
+              style="padding:2px 10px;font-size:12px"
+              onclick="editRepairRow(${i})">düzəlt</button>`
+            : '<span class="hint">bağlı il</span>'}</td>
+        </tr>`).join('') + `</tbody></table>
+        <div class="h" style="margin-bottom:6px">Yeni təmir</div>`;
+    }
+  }
+  openModal(`Təmir xərci${has ? ' — düzəliş' : ''} — ${card.inv_no || card.name}`,
+    listing +
     `<input type="hidden" name="asset_id" value="${card.asset_id}">` +
+    (has ? `<input type="hidden" name="orig_date" value="${existing.date}">` : '') +
     `<div class="row2">
-      ${fld('date','Tarix',{type:'date',req:true,value:REPORT.year+'-01-01'})}
-      ${fld('amount','Məbləğ (AZN)',{type:'number',step:'0.01',req:true})}</div>` +
-    fld('note','Qeyd',{placeholder:'Mühərrik təmiri'}) +
+      ${fld('date','Tarix',{type:'date',req:true,
+        value: has ? existing.date : REPORT.year+'-01-01'})}
+      ${fld('amount','Məbləğ (AZN)',{type:'number',step:'0.01',req:true,
+        value: has ? existing.amount : ''})}</div>` +
+    fld('note','Qeyd',{placeholder:'Mühərrik təmiri', value: has ? existing.note : ''}) +
     `<div class="h">Limit qrup üzrə hesablanır (m.115); limitdən artıq hissə
-      bu ƏV-in amortizasiya bazasına əlavə olunur.</div>`,
-    d => post('repair.add', d), 'Əlavə et');
+      bu ƏV-in amortizasiya bazasına əlavə olunur.</div>` +
+    (has ? `<label style="font-size:12.5px"><input type="checkbox" name="remove"
+        style="width:auto"> Bu təmiri ləğv et</label>` : ''),
+    d => post('repair.set', d), has ? 'Yadda saxla' : 'Əlavə et');
+}
+
+/* Rows for the "düzəlt" buttons above -- indexed rather than carrying JSON in
+   the onclick attribute, so a note or company name with a quote in it
+   (CLAUDE.md §4, `«Şəfa Tibb» "MMC"`) cannot break the inline handler. */
+let REPAIR_ROWS = [];
+function editRepairRow(i){
+  const { asset, event } = REPAIR_ROWS[i];
+  formRepair(asset, event);
 }
 
 /* ---- capital addition ----
@@ -400,6 +452,9 @@ async function showHistory(id){
   const a = h.asset;
   const last = h.years[h.years.length - 1];
 
+  // Read-only here on purpose -- editing a repair lives in one place, the
+  // card's "Təmir xərci" button (see formRepair), not duplicated onto every
+  // screen that happens to list the same fact.
   const ev = h.events.map(e => `<tr><td class="d">${esc(e.date)}</td>
     <td>${esc(e.kind)}</td><td class="num">${e.amount ? money(e.amount) : ''}</td>
     <td>${esc(e.note||'')}</td></tr>`).join('');

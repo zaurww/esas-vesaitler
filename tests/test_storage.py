@@ -486,9 +486,8 @@ class StartOver(TempRoot):
             "mode": "new", "category": "ma", "name": "Dəzgah",
             "in_date": "2024-04-01", "cost": "1000", "say": "3"})
         self.aid = self.client().assets[0].asset_id
-        mutate.add_repair(self.root, self.slug, {
-            "asset_id": self.aid, "year": 2024, "date": "2024-06-01",
-            "amount": "50"})
+        mutate.set_repair(self.root, self.slug, {
+            "asset_id": self.aid, "date": "2024-06-01", "amount": "50"})
         mutate.set_election(self.root, self.slug, {
             "year": 2024, "category": "ma", "applied_rate": "0.10"})
 
@@ -559,8 +558,8 @@ class DeleteMany(TempRoot):
     def test_deletes_several_cards_and_what_hangs_off_them(self):
         keep = self.asset("Qalan")
         a1, a2 = self.asset("Bir"), self.asset("İki")
-        mutate.add_repair(self.root, self.slug, {
-            "asset_id": a1, "year": 2024, "date": "2024-06-01", "amount": "50"})
+        mutate.set_repair(self.root, self.slug, {
+            "asset_id": a1, "date": "2024-06-01", "amount": "50"})
         mutate.delete_assets_many(self.root, self.slug,
                                   {"asset_ids": [a1, a2]})
         d = self.client()
