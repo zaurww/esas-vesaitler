@@ -1,10 +1,16 @@
 let CARD = null, CAT = null;
+// Set on every call, read once by boot.js's document-level click listener:
+// the click that opens (or switches) the drawer also bubbles to document,
+// and without this flag that same click would read as "outside the drawer"
+// and close what it just opened.
+let DRAWER_JUST_OPENED = false;
 function openCard(id){
   let card = null, cat = null;
   for (const k of REPORT.categories) for (const x of k.cards)
     if (x.asset_id === id){ card = x; cat = k; }
   if (!card) return;
   CARD = card; CAT = cat;
+  DRAWER_JUST_OPENED = true;
   // Two exclusions, and they do not coincide. Art. 115 sets no repair limit
   // for an intangible at all; a rate election is refused only where a
   // schedule replaced the rate -- a `qma-n` in 2025 is still a norm on a

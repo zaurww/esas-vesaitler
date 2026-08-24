@@ -217,6 +217,15 @@
   .drawer.open{transform:none; visibility:visible; transition:transform .18s ease}
   .drawer header{background:var(--accent); position:static}
   .drawer .body{padding:16px; overflow:auto}
+  /* The card's action row (Tam tarixçə, Redaktə, ...) is the first thing in
+     .body, so it scrolled away with everything else once the card grew past
+     one screen. Scoped to .drawer .body rather than the bare .acts class --
+     that class is shared by button rows all over the app (groups.js table
+     cells, report.js filters) that must NOT go sticky. */
+  .drawer .body > .acts{
+    position:sticky; top:0; z-index:5; margin:-16px -16px 14px;
+    padding:14px 16px 10px; background:var(--panel); border-bottom:1px solid var(--line);
+  }
   .step{display:flex; justify-content:space-between; gap:12px; padding:7px 0; border-bottom:1px dashed var(--line)}
   .step .l{color:var(--muted)}
   .step.res{border-bottom:0; border-top:2px solid var(--accent); font-weight:700; margin-top:4px; padding-top:9px}
