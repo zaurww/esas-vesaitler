@@ -210,7 +210,18 @@ async function load(){
 }
 
 function render(){
-  const d = REPORT, t = d.totals;
+  const d = REPORT, t = visibleTotals(d);
+  // Silent once was the failure mode §13.1 already names for the table's own
+  // total row: a narrowed sum that looks exactly like the full one. The tiles
+  // borrow the same wording so a filtered view never claims to be the whole
+  // company without saying so.
+  const narrowed = FILTER || GRPFILTER;
+  document.getElementById('kpisnote').textContent = narrowed
+    ? 'Rəqəmlər süzgəcə görədir, bütün ƏV-ni əhatə etmir'
+    : CATFILTER
+      ? `Rəqəmlər seçilmiş kateqoriyaya aiddir: ${
+          (d.categories.find(c => c.code === CATFILTER) || {}).name_az || ''}`
+      : '';
   document.getElementById('kpis').innerHTML = [
     ['Qalıq — il əvvəli', t.opening, ''],
     ['Daxilolma', t.acquisition, ''],

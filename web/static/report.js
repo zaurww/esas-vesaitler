@@ -161,6 +161,21 @@ const sumCards = cards => Object.fromEntries(SUM_KEYS.map(k =>
 // The sidebar narrows the whole report to one category; the text box narrows
 // it further to matching cards. Both are view state, never engine state.
 const cats = d => d.categories.filter(c => !CATFILTER || c.code === CATFILTER);
+
+/* The company-wide totals, narrowed the same way the annual table's own
+   grand-total row is (§13.1) -- shared so the top KPI tiles and that row
+   can never show two different numbers for what the sidebar/search/group
+   filters currently leave on screen. */
+const visibleTotals = d => {
+  const shown = cats(d);
+  const narrowed = FILTER || GRPFILTER;
+  return narrowed
+    ? sumCards(shown.flatMap(c => c.cards).filter(match))
+    : CATFILTER
+      ? Object.fromEntries(SUM_KEYS.map(k =>
+          [k, shown.reduce((s,c) => s + parseFloat(c[k]), 0).toFixed(2)]))
+      : d.totals;
+};
 // Counts are about the year's live assets. A card kept on screen after its
 // life ended is a record, not a holding, and must not inflate "how many ƏV".
 const liveCards = cat => cat.cards.filter(c => !c.retired);

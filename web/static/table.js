@@ -261,17 +261,10 @@ function viewAnnual(d){
       ${totCells(cols, narrowed ? sumCards(cards) : cat)}</tr>`;
   }
   // With a category picked, the grand total must cover only what is shown.
-  const shown = cats(d);
   const narrowed = FILTER || GRPFILTER;
-  const t = narrowed
-    ? sumCards(shown.flatMap(c => c.cards).filter(match))
-    : CATFILTER
-      ? Object.fromEntries(SUM_KEYS.map(k =>
-          [k, shown.reduce((s,c) => s + parseFloat(c[k]), 0).toFixed(2)]))
-      : d.totals;
   rows += `<tr class="total"><td colspan="${lead}">C Ə M İ${
     narrowed ? ' (süzgəcə görə)' : CATFILTER ? ' (seçilmiş kateqoriya)' : ''}</td>
-    ${totCells(cols, t)}</tr>`;
+    ${totCells(cols, visibleTotals(d))}</tr>`;
   const retired = d.categories.flatMap(c => c.cards).filter(c => c.retired).length;
   const toggle = retired ? `<label style="display:inline-flex;gap:6px;
         align-items:center;cursor:pointer" class="h">
