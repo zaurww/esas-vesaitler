@@ -489,30 +489,33 @@ def set_repair(root: Path, slug: str, p: dict) -> str:
         save_rows(root, slug, "repairs.tsv", rows)
     return aid
 
-def add_addition(root: Path, slug: str, p: dict) -> str:
-    """Capitalise a component or upgrade onto an existing asset."""
+def set_addition(root: Path, slug: str, p: dict) -> str:
+    """Add, correct or remove one capital-addition entry.
+
+    Keyed by (asset_id, date), not asset_id alone -- same reasoning as
+    `set_repair`: an asset can carry several additions in a year. Correcting
+    an amount is remove-the-old plus add-the-new in the SAME transaction.
+    """
     aid = str(p["asset_id"])
-    with transaction(root, slug, "addition.add") as tx:
-        when = iso_date(p.get("date"), "Tarix")
-        year = int(when[:4])
-        guard_open_year(root, slug, year)
-        amount = dec(p.get("amount"), "Məbləğ", allow_zero=False)
+    orig = str(p.get("orig_date", "")).strip()
+    with transaction(root, slug, "addition.set") as tx:
+        if orig:
+            guard_open_year(root, slug, int(orig[:4]))
         rows = rows_of(root, slug, "additions.tsv")
-        rows.append({"year": str(year), "asset_id": aid, "date": when,
-                     "amount": amount, "note": str(p.get("note", "")).strip()})
+        if orig:
+            rows = [r for r in rows
+                    if not (r["asset_id"] == aid and r["date"] == orig)]
+        if not p.get("remove"):
+            when = iso_date(p.get("date"), "Tarix")
+            year = int(when[:4])
+            guard_open_year(root, slug, year)
+            amount = dec(p.get("amount"), "Məbləğ", allow_zero=False)
+            rows.append({"year": str(year), "asset_id": aid, "date": when,
+                         "amount": amount, "note": str(p.get("note", "")).strip()})
+            tx.log(aid, f"addition {when}", "" if not orig else "düzəliş edildi",
+                   amount)
+        else:
+            tx.log(aid, f"addition {orig}", "var", "silindi")
         save_rows(root, slug, "additions.tsv", rows)
-        tx.log(aid, f"addition {when}", "", amount)
-    return aid
-
-
-def remove_addition(root: Path, slug: str, p: dict) -> str:
-    aid, when = str(p["asset_id"]), str(p["date"])
-    with transaction(root, slug, "addition.remove") as tx:
-        guard_open_year(root, slug, int(when[:4]))
-        rows = rows_of(root, slug, "additions.tsv")
-        kept = [r for r in rows
-                if not (r["asset_id"] == aid and r["date"] == when)]
-        tx.log(aid, f"addition {when}", "var", "silindi")
-        save_rows(root, slug, "additions.tsv", kept)
     return aid
 

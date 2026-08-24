@@ -47,9 +47,9 @@ from .numbering import (
 )
 from .assets import (
     clear_assets,
-    MODES, add_addition, create_asset, delete_asset,
+    MODES, create_asset, delete_asset,
     delete_assets_many,
-    remove_addition, set_disposal, set_opening, set_repair, update_asset,
+    set_addition, set_disposal, set_opening, set_repair, update_asset,
 )
 from .clients import create_client, update_client
 from .archive import export_client, import_client, inspect_archive
@@ -85,8 +85,7 @@ ACTIONS = {
     "opening.set": set_opening,
     "disposal.set": set_disposal,
     "repair.set": set_repair,
-    "addition.add": add_addition,
-    "addition.remove": remove_addition,
+    "addition.set": set_addition,
     "writeoff.set": set_writeoff,
     "election.set": set_election,
     "status.set": set_status,
@@ -100,7 +99,7 @@ ACTIONS = {
 __all__ = [
     "ACTIONS", "BACKUP_KEEP_ALWAYS", "BACKUP_KEEP_COUNT", "BACKUP_KEEP_DAYS",
     "BATCH_MAX", "HEADERS", "IMPORT_ALIASES", "IMPORT_FIELDS",
-    "MODES", "Tx", "add_addition", "asset_id_series",
+    "MODES", "Tx", "asset_id_series",
     "batch_count", "category_of", "clear_assets", "close_year",
     "create_asset",
     "assign_group", "create_group", "delete_group", "find_group",
@@ -109,9 +108,9 @@ __all__ = [
     "export_client", "guard_open_year",
     "guess_columns", "import_assets", "import_client", "inspect_archive",
     "inv_series", "iso_date", "mutate_folder", "next_asset_id", "one_segment",
-    "prune_backups", "remove_addition", "reopen_year",
+    "prune_backups", "reopen_year",
     "rows_of", "save_rows",
-    "set_category_row",
+    "set_addition", "set_category_row",
     "set_coefficient_row", "set_disposal", "set_election", "set_opening",
     "set_parameter_row", "set_rate_row", "set_repair", "set_status",
     "set_writeoff",

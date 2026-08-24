@@ -390,21 +390,66 @@ function editRepairRow(i){
 
 /* ---- capital addition ----
    A component bought for an asset already on the books. Not a repair: it is
-   not limited by article 115, it joins the cost in full. */
-function formAddition(card){
-  openModal(`Dəyər artımı — ${card.inv_no || card.name}`,
+   not limited by article 115, it joins the cost in full.
+
+   Same shape as formRepair: `existing`, when given, is one row already in
+   additions.tsv, and the button on the card ("Dəyər artımı") is the single
+   door for both adding and correcting -- it lists what is already on file
+   above the blank fields, each row with its own "düzəlt". */
+async function formAddition(card, existing){
+  const has = !!existing;
+  let listing = '';
+  if (!has){
+    const slug = document.getElementById('client').value;
+    const h = await (await fetch(`/api/asset-history?client=${slug}&asset_id=${card.asset_id}`)).json();
+    const closedYears = new Set((h.years || []).filter(y => y.closed).map(y => String(y.year)));
+    const adds = (h.events || []).filter(e => e.kind === 'Dəyər artımı');
+    if (adds.length){
+      ADDITION_ROWS = adds.map(e => ({asset: card, event: e,
+        editable: !closedYears.has(e.date.slice(0, 4))}));
+      listing = `<div class="h" style="margin-bottom:6px">Qeydə alınmış dəyər artımları</div>
+        <table style="margin-bottom:14px"><tbody>` +
+        ADDITION_ROWS.map((r, i) => `<tr>
+          <td class="d">${esc(r.event.date)}</td>
+          <td class="num">${money(r.event.amount)}</td>
+          <td>${esc(r.event.note || '')}</td>
+          <td>${r.editable ? `<button type="button" class="ghost"
+              style="padding:2px 10px;font-size:12px"
+              onclick="editAdditionRow(${i})">düzəlt</button>`
+            : '<span class="hint">bağlı il</span>'}</td>
+        </tr>`).join('') + `</tbody></table>
+        <div class="h" style="margin-bottom:6px">Yeni dəyər artımı</div>`;
+    }
+  }
+  openModal(`Dəyər artımı${has ? ' — düzəliş' : ''} — ${card.inv_no || card.name}`,
+    listing +
     `<input type="hidden" name="asset_id" value="${card.asset_id}">` +
+    (has ? `<input type="hidden" name="orig_date" value="${existing.date}">` : '') +
     `<div class="row2">
-      ${fld('date','Tarix',{type:'date',req:true,value:REPORT.year+'-01-01'})}
-      ${fld('amount','Məbləğ (AZN)',{type:'number',step:'0.01',req:true})}</div>` +
-    fld('note','Nə alınıb',{placeholder:'Əlavə yaddaş, komponent…'}) +
+      ${fld('date','Tarix',{type:'date',req:true,
+        value: has ? existing.date : REPORT.year+'-01-01'})}
+      ${fld('amount','Məbləğ (AZN)',{type:'number',step:'0.01',req:true,
+        value: has ? existing.amount : ''})}</div>` +
+    fld('note','Nə alınıb',{placeholder:'Əlavə yaddaş, komponent…',
+      value: has ? existing.note : ''}) +
     `<div class="note q" style="margin-top:6px">Təmirdən fərqi: təmir aktivi
       bərpa edir və m.115 limitinə tabedir, dəyər artımı isə aktivi
       <strong>böyüdür</strong> — tam məbləğ ilkin dəyərə və amortizasiya
       bazasına əlavə olunur, limit tətbiq edilmir.<br>
       Vergi baxımından hansı halın hansına aid olması —
-      <strong>CLAUDE.md §12.8, həll olunmayıb</strong>.</div>`,
-    d => post('addition.add', d), 'Əlavə et');
+      <strong>CLAUDE.md §12.8, həll olunmayıb</strong>.</div>` +
+    (has ? `<label style="font-size:12.5px"><input type="checkbox" name="remove"
+        style="width:auto"> Bu dəyər artımını ləğv et</label>` : ''),
+    d => post('addition.set', d), has ? 'Yadda saxla' : 'Əlavə et');
+}
+
+/* Rows for the "düzəlt" buttons above -- indexed rather than carrying JSON in
+   the onclick attribute, so a note with a quote in it (CLAUDE.md §4, `«Şəfa
+   Tibb» "MMC"`) cannot break the inline handler. */
+let ADDITION_ROWS = [];
+function editAdditionRow(i){
+  const { asset, event } = ADDITION_ROWS[i];
+  formAddition(asset, event);
 }
 
 /* ---- rate election ---- */
