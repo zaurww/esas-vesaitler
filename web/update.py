@@ -182,7 +182,8 @@ def apply_update(root: Path, zip_bytes: bytes, *,
     _write_pending_verify(root, backup_dir.name, from_version, to_version)
 
     return (f"Yeniləmə tətbiq olundu ({from_version} → {to_version or '?'}). "
-            f"Pəncərəni bağlayıb «Başlat.bat»-ı yenidən açın.")
+            f"Brauzer sekmesini bağlamaq kifayət etmir — proqramın işlədiyi "
+            f"QARA pəncərəni (konsol) bağlayın və «Başlat.bat»-ı yenidən açın.")
 
 
 def _pending_verify_path(root: Path) -> Path:
@@ -279,5 +280,6 @@ def rollback_update(root: Path, backup_dir: Path) -> str:
 
     clear_pending_verify(root)
     return (f"Geri qaytarıldı ({manifest['to_version'] or '?'} → "
-            f"{manifest['from_version']}). Pəncərəni bağlayıb "
-            f"«Başlat.bat»-ı yenidən açın.")
+            f"{manifest['from_version']}). Brauzer sekmesini bağlamaq "
+            f"kifayət etmir — proqramın işlədiyi QARA pəncərəni (konsol) "
+            f"bağlayın və «Başlat.bat»-ı yenidən açın.")
