@@ -320,18 +320,27 @@ MONTHS_AZ = ["Yanvar", "Fevral", "Mart", "Aprel", "May", "İyun",
              "İyul", "Avqust", "Sentyabr", "Oktyabr", "Noyabr", "Dekabr"]
 
 
-def split_monthly(annual: Decimal) -> list[Decimal]:
-    """Annual amount / 12, rounding remainder pushed into December so the
-    twelve parts add back up to the annual figure exactly.
+def split_monthly(annual: Decimal, start_month: int = 1) -> list[Decimal]:
+    """Annual amount / months held this year, rounding remainder pushed into
+    the last month so the twelve parts add back up to the annual figure
+    exactly.
 
     The monthly split is a VIEW, not a separate calculation: the legally
-    binding number is the annual one (the return is filed once a year, §6).
+    binding number is the annual one, and 114.4/114.6 apply the full-year
+    norm to a mid-year acquisition regardless of which month it lands in
+    (CLAUDE.md §12, item 4 -- "closed by the text"). `start_month` only
+    decides which months this VIEW paints the (unchanged) annual figure
+    across: an asset bought in March did not exist in January, so painting
+    January is misleading even though the annual total is correct either
+    way. `start_month` is 1 for an asset carried from an earlier year --
+    it was on the books for all twelve months.
     """
     if annual == ZERO:
         return [ZERO] * 12
-    per = money(annual / D(12))
-    out = [per] * 11
-    out.append(money(annual - per * 11))
+    months = 13 - start_month
+    per = money(annual / D(months))
+    out = [ZERO] * (start_month - 1) + [per] * (months - 1)
+    out.append(money(annual - per * (months - 1)))
     return out
 
 
@@ -815,7 +824,14 @@ def compute_year(data: ClientData, year: int,
             if c.depreciation > c.base:
                 c.depreciation = money(c.base)
             c.closing = money(c.base - c.depreciation)
-        c.monthly = split_monthly(c.depreciation)
+        # An asset bought within this year starts its monthly view at the
+        # purchase month; one carried from an earlier year was on the books
+        # for all twelve (§ split_monthly).
+        asset = assets[c.asset_id]
+        start_month = (asset.in_date.month
+                       if asset.in_date is not None and asset.in_date.year == year
+                       else 1)
+        c.monthly = split_monthly(c.depreciation, start_month)
 
         # Same test against the closing residual. That residual becomes next
         # year's opening balance, so this is a reliable forecast of which
