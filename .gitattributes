@@ -7,6 +7,22 @@
 *.md   text eol=lf
 *.xlsx binary
 
+# Everything else that is plain source, not just the storage-contract files
+# above -- without these, core.autocrlf on a Windows checkout flags them as
+# modified on every clone even though no byte of content changed (caught
+# because `git diff` showed nothing for them, only a CRLF/LF warning).
+*.js   text eol=lf
+*.css  text eol=lf
+*.json text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+*.txt  text eol=lf
+
+# .bat/.ps1 deliberately NOT normalised here: CLAUDE.md §9 documents a real
+# CRLF/codepage/wildcard-resolution saga around Quraşdır.bat and
+# make_shortcut.ps1 on Windows, and forcing eol=lf on them is untested
+# against that -- leave them exactly as committed.
+
 # Not shipped in release zips (GitHub's zipball_url / "Download ZIP"
 # honour export-ignore) — meaningless without a .git checkout anyway.
 .gitattributes export-ignore
