@@ -9,6 +9,9 @@
     python ev.py test                     run the engine's control examples
     python ev.py golden                   check demo-avto's output against tests/golden/
     python ev.py golden --update          regenerate tests/golden/ after a deliberate change
+    python ev.py release-promote [vX.Y.Z] flip a GitHub release from pre-release to
+                                           publicly "latest" in one step (defaults to
+                                           the tag matching ENGINE_VERSION)
 """
 
 from __future__ import annotations
@@ -177,6 +180,42 @@ def cmd_golden(update: bool) -> int:
     return 1
 
 
+def cmd_release_promote(tag: str | None) -> int:
+    """Flip a GitHub release from pre-release to publicly "latest" -- one step.
+
+    v0.12.1 showed why the old one-flag advice (§9: "снять пометку -- то же
+    движение, которым релиз становится виден всем") was wrong. GitHub's
+    "Latest" badge does not follow release recency on its own -- it is a
+    separate, stickily-assigned flag. `--prerelease=false` alone left
+    /releases/latest answering v0.12.0, so check_latest() (web/update.py)
+    kept telling every user the old version was current, even though v0.12.1
+    was public and not a pre-release. This wraps both flags in one call so
+    the exact step that broke cannot be done half-right again.
+    """
+    import shutil
+    import subprocess
+    tag = tag or f"v{ENGINE_VERSION}"
+    if not shutil.which("gh"):
+        print("  XƏTA: `gh` (GitHub CLI) tapılmadı — https://cli.github.com/")
+        return 1
+    edit = subprocess.run(
+        ["gh", "release", "edit", tag, "--prerelease=false", "--latest"],
+        cwd=str(ROOT),
+    )
+    if edit.returncode != 0:
+        return edit.returncode
+    check = subprocess.run(
+        ["gh", "api", "repos/:owner/:repo/releases/latest", "--jq", ".tag_name"],
+        cwd=str(ROOT), capture_output=True, text=True,
+    )
+    seen = check.stdout.strip()
+    if seen == tag:
+        print(f"  ✓ {tag} indi /releases/latest-də — istifadəçilər onu görəcək")
+        return 0
+    print(f"  ✗ /releases/latest hələ {seen or '(naməlum)'} göstərir, {tag} yox — yoxlayın")
+    return 1
+
+
 def _utf8_console() -> None:
     """Make the console able to print Azerbaijani before anything prints.
 
@@ -230,6 +269,8 @@ def main(argv: list[str]) -> int:
             return cmd_test()
         elif cmd == "golden":
             return cmd_golden(update="--update" in argv[1:])
+        elif cmd == "release-promote":
+            return cmd_release_promote(argv[1] if len(argv) > 1 else None)
         else:
             print(__doc__)
             return 2

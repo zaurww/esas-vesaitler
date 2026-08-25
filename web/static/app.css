@@ -41,9 +41,17 @@
   .btn:hover{background:#e9eef5}
   .ver{font-size:11px; opacity:.65}
   /* A new version is available -- clickable, unlike the plain version text
-     it replaces (§9: checked once per page load, applied only on click). */
-  .ver.upd{opacity:1; color:#0a58ca; cursor:pointer; font-weight:600}
-  .ver.upd:hover{text-decoration:underline}
+     it replaces (§9: checked once per page load, applied only on click).
+     Blue text on this header used to be nearly invisible: the header itself
+     is --accent (dark blue), so a blue badge only differed in brightness,
+     not hue -- the one place on the whole bar that should look alarming
+     read as just another shade of the chrome around it. Red is the only
+     red anywhere in the header, so it cannot blend in the way blue did. */
+  .ver.upd{
+    opacity:1; cursor:pointer; font-weight:700; font-size:13px;
+    color:#fff; background:var(--neg); padding:3px 11px; border-radius:99px;
+  }
+  .ver.upd:hover{background:#8f1e17}
 
   main{padding:18px; max-width:1500px; margin:0 auto}
 
