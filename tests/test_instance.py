@@ -21,6 +21,7 @@ Three things are checked, in order of how far the bug could hide:
 from __future__ import annotations
 
 import socket
+import sys
 import unittest
 from pathlib import Path
 
@@ -53,6 +54,9 @@ class InstallId(unittest.TestCase):
         self.assertNotEqual(_install_id(Path("D:/clients-a")),
                              _install_id(Path("D:/clients-b")))
 
+    # Windows only: elsewhere paths ARE case-sensitive, normcase is a no-op
+    # there by design, and two spellings really are two folders.
+    @unittest.skipUnless(sys.platform == "win32", "Windows path semantics")
     def test_case_insensitive_on_windows_paths(self):
         # "D:\..." and "d:\..." name the same folder on Windows and must
         # hash to the same id, or a case difference alone would look like a
