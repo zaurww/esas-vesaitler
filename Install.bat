@@ -29,28 +29,38 @@ if not exist "ev.py" (
 where python >nul 2>nul
 if not errorlevel 1 goto :havepython
 
-echo   Python tapilmadi. Avtomatik qurulur (winget)...
+echo   Python tapilmadi. Avtomatik qurulur, bir nece deqiqe gozleyin...
 where winget >nul 2>nul
-if errorlevel 1 (
-    echo.
-    echo   XETA: winget tapilmadi, avtomatik qurashdirma mumkun deyil.
-    echo   Elle qurashdirin: https://www.python.org/downloads/
-    echo   Qurarken "Add python.exe to PATH" qutusunu isaretleyin,
-    echo   sonra bu faili yeniden ishe salin.
-    echo.
-    pause
-    exit /b 1
-)
+if errorlevel 1 goto :pydirect
 
 winget install --id Python.Python.3.12 -e --scope user --silent --accept-package-agreements --accept-source-agreements
-if errorlevel 1 (
-    echo.
-    echo   XETA: Python qurulmadi. Elle qurashdirin:
-    echo   https://www.python.org/downloads/
-    echo.
-    pause
-    exit /b 1
-)
+if not errorlevel 1 goto :pathrefresh
+echo   winget alinmadi, Python birbasha python.org-dan yuklenir...
+
+:pydirect
+REM No winget (older Windows 10), or winget failed: fetch the official
+REM installer and run it silently for this user only -- no admin rights,
+REM and PrependPath=1 does what the "Add python.exe to PATH" box does.
+set "PYINST=%TEMP%\python-3.12.10-amd64.exe"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol='Tls12'; Invoke-WebRequest -UseBasicParsing -Uri 'https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe' -OutFile $env:PYINST"
+if errorlevel 1 goto :pyfail
+if not exist "%PYINST%" goto :pyfail
+"%PYINST%" /quiet InstallAllUsers=0 PrependPath=1 Include_launcher=0 Include_test=0
+if errorlevel 1 goto :pyfail
+del "%PYINST%" >nul 2>nul
+goto :pathrefresh
+
+:pyfail
+echo.
+echo   XETA: Python avtomatik qurulmadi. Internet elaqesini yoxlayin
+echo   ve bu faili yeniden ishe salin. Olmasa, elle qurashdirin:
+echo   https://www.python.org/downloads/
+echo   Qurarken "Add python.exe to PATH" qutusunu isaretleyin.
+echo.
+pause
+exit /b 1
+
+:pathrefresh
 
 REM winget updates the registry, not this already-open console's PATH.
 REM Re-read PATH from both hives so "python" is usable without closing

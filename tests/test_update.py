@@ -24,7 +24,7 @@ from pathlib import Path
 from engine.rates import ENGINE_VERSION, version_tuple
 from web.update import (
     PRESERVE, apply_update, check_latest, clear_pending_verify,
-    read_pending_verify, rollback_update,
+    read_pending_verify, remove_obsolete, rollback_update,
 )
 
 
@@ -311,3 +311,50 @@ class RollbackUpdate(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RemoveObsolete(unittest.TestCase):
+    """Old launchers (0.12.2 rename, CLAUDE.md §9) leave an install only once
+    their replacement is there, and never irrecoverably."""
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp())
+        (self.root / "ev.py").write_text("OLD EV")
+        (self.root / "Başlat.bat").write_text("OLD START")
+        (self.root / "Quraşdır.bat").write_text("OLD INSTALL")
+
+    def tearDown(self):
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def test_kept_while_the_replacement_is_missing(self):
+        self.assertEqual(remove_obsolete(self.root), [])
+        self.assertTrue((self.root / "Başlat.bat").is_file())
+        self.assertTrue((self.root / "Quraşdır.bat").is_file())
+
+    def test_only_the_one_with_a_replacement_goes(self):
+        (self.root / "Start.bat").write_text("NEW START")
+        self.assertEqual(remove_obsolete(self.root), ["Başlat.bat"])
+        self.assertFalse((self.root / "Başlat.bat").exists())
+        self.assertTrue((self.root / "Quraşdır.bat").is_file())
+
+    def test_moved_to_a_backup_not_deleted(self):
+        (self.root / "Start.bat").write_text("NEW START")
+        (self.root / "Install.bat").write_text("NEW INSTALL")
+        remove_obsolete(self.root)
+        kept = list((self.root / "backups" / "_app").glob("*-obsolete/Başlat.bat"))
+        self.assertEqual([p.read_text() for p in kept], ["OLD START"])
+        self.assertEqual(remove_obsolete(self.root), [])  # idempotent
+
+    def test_rollback_of_the_update_brings_them_back(self):
+        blob = _github_zip("zaurww-esas-vesaitler-abc123", {
+            "ev.py": "NEW EV", "Start.bat": "NEW START", "Install.bat": "NEW INSTALL",
+        })
+        apply_update(self.root, blob, from_version="0.12.1", to_version="0.12.3")
+        self.assertEqual(sorted(remove_obsolete(self.root)),
+                         sorted(["Başlat.bat", "Quraşdır.bat"]))
+        pending = read_pending_verify(self.root)
+        rollback_update(self.root, self.root / "backups" / "_app" / pending["backup_dir"])
+        self.assertEqual((self.root / "Başlat.bat").read_text(), "OLD START")
+        self.assertEqual((self.root / "Quraşdır.bat").read_text(), "OLD INSTALL")
+        self.assertFalse((self.root / "Start.bat").exists())
+        self.assertEqual((self.root / "ev.py").read_text(), "OLD EV")

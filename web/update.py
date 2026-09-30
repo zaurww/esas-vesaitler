@@ -186,6 +186,63 @@ def apply_update(root: Path, zip_bytes: bytes, *,
             f"QARA pəncərəni (konsol) bağlayın və «Start.bat»-ı yenidən açın.")
 
 
+# Launchers renamed in 0.12.2 (non-ASCII names + LF endings broke cmd.exe,
+# CLAUDE.md §9). apply_update never deletes anything, so installs updated
+# from before 0.12.2 kept both the old and the new pair. Keyed by the file
+# that replaces each one: an old launcher is removed only once its
+# replacement is actually on disk, so an install is never left without one.
+OBSOLETE = {"Başlat.bat": "Start.bat", "Quraşdır.bat": "Install.bat"}
+
+
+def remove_obsolete(root: Path) -> list[str]:
+    """Move launchers this version no longer ships out of the install root.
+
+    Runs at startup of the NEW code, not inside apply_update: apply_update
+    executes in the OLD process (the one that downloaded the update), which
+    knows nothing about this list.
+
+    Moved, not deleted. When an update is still pending its post-update
+    check, the files go into that update's own backup and are listed as
+    "replaced" in its manifest -- so rollback_update puts them back together
+    with everything else and the older version gets its launchers again.
+    Otherwise they go to a backups/_app/<stamp>-obsolete/ folder of their own.
+
+    Never raises: a leftover .bat is untidy, not wrong, and must not keep the
+    program from starting (same reasoning as check_latest's broad except).
+    """
+    try:
+        stale = [old for old, new in OBSOLETE.items()
+                 if (root / old).is_file() and (root / new).is_file()]
+        if not stale:
+            return []
+        pending = read_pending_verify(root)
+        manifest_path = None
+        if pending:
+            dest_dir = root / "backups" / "_app" / pending["backup_dir"]
+            manifest_path = dest_dir / _MANIFEST
+            if not manifest_path.is_file():
+                manifest_path = None
+        if manifest_path is None:
+            stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+            dest_dir = root / "backups" / "_app" / f"{stamp}-obsolete"
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        moved = []
+        for name in stale:
+            shutil.copy2(root / name, dest_dir / name)
+            (root / name).unlink()
+            moved.append(name)
+        if manifest_path is not None:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["replaced"] = [*manifest["replaced"],
+                                    *(n for n in moved if n not in manifest["replaced"])]
+            manifest_path.write_text(json.dumps(manifest, ensure_ascii=False),
+                                     encoding="utf-8")
+        return moved
+    except Exception as e:  # noqa: BLE001 -- see docstring
+        print(f"  köhnə başladıcı fayllar silinmədi: {e}")
+        return []
+
+
 def _pending_verify_path(root: Path) -> Path:
     return root / "backups" / "_app" / _PENDING_VERIFY
 

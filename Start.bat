@@ -12,14 +12,10 @@ cd /d "%~dp0"
 where python >nul 2>nul
 if errorlevel 1 (
   echo.
-  echo   Python tapilmadi. Once "Install.bat" faili ishe salin -- o,
-  echo   Python-u ozu qurar ve masaustunde qisayol yaradar.
+  echo   Python tapilmadi -- qurashdirma avtomatik bashlayir...
   echo.
-  echo   Elle qurmaq isteseniz: python.org saytindan qurasdirin
-  echo   ve "Add python.exe to PATH" secimini isaretleyin.
-  echo.
-  pause
-  exit /b 1
+  call "%~dp0Install.bat"
+  exit /b
 )
 
 REM The one library the program needs. Install.bat installs it, but people

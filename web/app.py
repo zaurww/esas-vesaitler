@@ -35,7 +35,7 @@ from engine.rates import CATEGORIES, CATEGORY_BY_CODE, ENGINE_VERSION  # noqa: E
 from engine.storage import DataError, list_clients, load_client  # noqa: E402
 from web.update import (  # noqa: E402
     apply_update, check_latest, clear_pending_verify, download,
-    read_pending_verify, rollback_update,
+    read_pending_verify, remove_obsolete, rollback_update,
 )
 
 INDEX = Path(__file__).resolve().parent / "index.html"
@@ -930,6 +930,11 @@ def serve(port: int = 8777, open_browser: bool = True,
         return
 
     global _startup_verify
+    # Before the verify: that one clears the pending-update marker, and
+    # remove_obsolete wants it to file the old launchers under that update's
+    # backup, so a rollback brings them back.
+    for name in remove_obsolete(ROOT):
+        print(f"  köhnə fayl silindi: {name} (backups/_app-da saxlanılıb)")
     _startup_verify = _run_startup_verify(ROOT)
 
     print(f"Əsas Vəsaitlər · engine {ENGINE_VERSION}")
