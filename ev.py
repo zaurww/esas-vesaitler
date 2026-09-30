@@ -24,7 +24,16 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
 from engine.calc import MONTHS_AZ, CalcError, compute_year  # noqa: E402
-from engine.excel import build_workbook  # noqa: E402
+try:
+    from engine.excel import build_workbook  # noqa: E402
+except ModuleNotFoundError as e:
+    # Happens on a fresh machine when the launcher is started before
+    # Install.bat -- say what to do instead of showing a traceback.
+    if e.name != "openpyxl":
+        raise
+    sys.exit("\n  XETA: 'openpyxl' kitabxanasi qurulmayib.\n"
+             "  Install.bat faylini ishe salin, ve ya:\n"
+             "      python -m pip install -r requirements.txt\n")
 from engine.rates import ENGINE_VERSION  # noqa: E402
 from engine.storage import (  # noqa: E402
     OPENING_HEADER, DataError, append_tsv, list_clients, load_client,
@@ -223,7 +232,7 @@ def _utf8_console() -> None:
     ANSI codepage, where `ə ğ ı ş` simply do not exist. `python ev.py calc`
     from an ordinary cmd window therefore died on UnicodeEncodeError halfway
     through the first category -- not with a wrong number, but with a
-    traceback where a report should be. Başlat.bat sets `chcp 65001` and
+    traceback where a report should be. Start.bat sets `chcp 65001` and
     PYTHONIOENCODING, so the UI never showed this; the CLI is reached
     without it.
 

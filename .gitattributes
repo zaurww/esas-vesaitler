@@ -18,10 +18,13 @@
 *.yaml text eol=lf
 *.txt  text eol=lf
 
-# .bat/.ps1 deliberately NOT normalised here: CLAUDE.md §9 documents a real
-# CRLF/codepage/wildcard-resolution saga around Quraşdır.bat and
-# make_shortcut.ps1 on Windows, and forcing eol=lf on them is untested
-# against that -- leave them exactly as committed.
+# .bat files are stored with CRLF, byte for byte (-text: no conversion in
+# either direction, so GitHub's release zip carries CRLF too). They used to
+# be committed with bare LF, and cmd.exe misparses LF-only batch files:
+# on a user's machine Başlat.bat printed "'cho' is not recognized" -- the
+# line offsets drifted after "chcp 65001". CLAUDE.md §9.
+*.bat -text
+# .ps1 left as committed: PowerShell reads LF fine.
 
 # Not shipped in release zips (GitHub's zipball_url / "Download ZIP"
 # honour export-ignore) — meaningless without a .git checkout anyway.

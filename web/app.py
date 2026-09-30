@@ -912,7 +912,7 @@ def serve(port: int = 8777, open_browser: bool = True,
     """Start the local UI -- unless this installation is already serving.
 
     The step-up used to be unconditional, so a second double-click on
-    Başlat.bat started a SECOND server on the same clients/ folder. That is
+    Start.bat started a SECOND server on the same clients/ folder. That is
     a lost write waiting to happen, not a port nuisance -- see the note above
     _APP_MARKER. Now the newcomer hands off to the copy already running and
     stops, which is also what the user meant by double-clicking again: show

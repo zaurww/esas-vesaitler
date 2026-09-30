@@ -1,7 +1,7 @@
 """Check GitHub for a newer release and, on request, replace the app's own
 source files with it (CLAUDE.md §9).
 
-Distribution stays plain Python source (Başlat.bat + `python ev.py`), not a
+Distribution stays plain Python source (Start.bat + `python ev.py`), not a
 compiled .exe: overwriting a .py file on disk is safe once Python has
 already read it -- no lock survives import, unlike a running .exe -- so no
 helper process or self-restart is needed. The trade-off this accepts: the
@@ -183,7 +183,7 @@ def apply_update(root: Path, zip_bytes: bytes, *,
 
     return (f"Yeniləmə tətbiq olundu ({from_version} → {to_version or '?'}). "
             f"Brauzer sekmesini bağlamaq kifayət etmir — proqramın işlədiyi "
-            f"QARA pəncərəni (konsol) bağlayın və «Başlat.bat»-ı yenidən açın.")
+            f"QARA pəncərəni (konsol) bağlayın və «Start.bat»-ı yenidən açın.")
 
 
 def _pending_verify_path(root: Path) -> Path:
@@ -282,4 +282,4 @@ def rollback_update(root: Path, backup_dir: Path) -> str:
     return (f"Geri qaytarıldı ({manifest['to_version'] or '?'} → "
             f"{manifest['from_version']}). Brauzer sekmesini bağlamaq "
             f"kifayət etmir — proqramın işlədiyi QARA pəncərəni (konsol) "
-            f"bağlayın və «Başlat.bat»-ı yenidən açın.")
+            f"bağlayın və «Start.bat»-ı yenidən açın.")

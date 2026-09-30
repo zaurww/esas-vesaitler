@@ -1,4 +1,4 @@
-# Creates the desktop shortcut for the setup script (Qurasdir.bat).
+# Creates the desktop shortcut for the setup script (Install.bat).
 #
 # Kept as its own file rather than inlined in the .bat: nesting a
 # PowerShell one-liner inside a batch caret-continued line means every

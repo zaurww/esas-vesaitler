@@ -12,7 +12,7 @@
 #                   was only ever run on 3.13 -- until this job that floor was
 #                   a claim, not a fact.
 #
-# PYTHONIOENCODING is deliberately NOT set here. Başlat.bat sets it for the
+# PYTHONIOENCODING is deliberately NOT set here. Start.bat sets it for the
 # UI, and that is exactly how `ev.py calc` came to die on an ANSI codepage
 # without anyone noticing (see test_the_console_report_survives_an_ansi_codepage).
 # A runner that quietly fixes the environment cannot find that class of bug.

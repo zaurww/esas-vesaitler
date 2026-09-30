@@ -1,6 +1,6 @@
 """Single-instance handoff (CLAUDE.md §9 launcher note, added after Zaur
 
-flagged that a second double-click on Başlat.bat silently started a second
+flagged that a second double-click on Start.bat silently started a second
 writer on the same clients/ folder -- see web/app.py's note above
 _APP_MARKER for why that is a lost-write bug, not a port nuisance).
 
