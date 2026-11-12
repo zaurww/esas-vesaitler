@@ -188,6 +188,12 @@ def import_assets(root: Path, slug: str, p: dict) -> Any:
                     cost = dec(cost_raw or "0", "İlkin dəyər")
                     if mode == "new" and not in_date:
                         raise DataError("Alış tarixi tələb olunur")
+                    # The same rule as «+ Yeni ƏV» (§6.2): a purchase dated
+                    # inside a closed year rewrites a filed return. Per row,
+                    # so the preview names the rows instead of refusing the
+                    # sheet over a year most of it does not touch.
+                    if in_date:
+                        guard_open_year(root, slug, int(in_date[:4]))
 
                     # A name that is not in the dictionary yet creates the
                     # group -- the client's sheet is where these names come
@@ -249,7 +255,11 @@ def import_assets(root: Path, slug: str, p: dict) -> Any:
                     f"{len(report['errors'])} sətirdə xəta var — heç nə yazılmadı. "
                     f"Import ya bütövlükdə keçir, ya da heç keçmir."
                 )
-            if year:
+            # The opening year is read only by rows that carry a residual. It
+            # used to be guarded whatever the rows held, so a sheet of 2026
+            # purchases was refused because the grid's year box still said a
+            # closed 2025 -- a field none of those rows uses.
+            if year and any(r.get("residual") for r in report["rows"]):
                 guard_open_year(root, slug, year)
             report["groups_created"] = len(groups) - before
             if len(groups) != before:

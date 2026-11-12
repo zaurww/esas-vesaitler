@@ -195,6 +195,33 @@ class WriteProtection(TempRoot):
                 "in_date": "2024-06-01"})
         self.assertEqual(len(self.client().assets), 1)
 
+    def test_an_import_of_new_purchases_ignores_the_residual_year(self):
+        """Regression: the grid's «Qalıq hansı ilin əvvəlinə» still said the
+        closed year, and a sheet of next year's purchases -- no residual in
+        any row -- was refused over a field none of its rows reads."""
+        self.close_2024()
+        rep = mutate.import_assets(self.root, self.slug, {
+            "opening_year": 2024,
+            "rows": [{"name": "Kabel", "category": "ma",
+                      "in_date": "2025-03-10", "cost": "550"}]})
+        self.assertEqual(rep["created"], 1)
+        self.assertEqual(len(self.client().assets), 2)
+
+    def test_an_import_cannot_acquire_into_a_closed_year_either(self):
+        """The same rule as «+ Yeni ƏV»; the import did not check the
+        purchase date at all. Refused per row, so the preview names it."""
+        self.close_2024()
+        rep = mutate.import_assets(self.root, self.slug, {
+            "rows": [{"name": "Kabel", "category": "ma",
+                      "in_date": "2024-06-01", "cost": "550"}],
+            "dry_run": True})
+        self.assertEqual(len(rep["errors"]), 1)
+        with self.assertRaises(DataError):
+            mutate.import_assets(self.root, self.slug, {
+                "rows": [{"name": "Kabel", "category": "ma",
+                          "in_date": "2024-06-01", "cost": "550"}]})
+        self.assertEqual(len(self.client().assets), 1)
+
     def test_a_later_year_is_still_open(self):
         self.close_2024()
         mutate.set_status(self.root, self.slug,
