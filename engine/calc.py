@@ -31,10 +31,7 @@ from typing import Optional
 
 from . import rates
 from .model import ClientData
-from .rates import (
-    CATEGORIES, CATEGORY_BY_CODE, ENGINE_VERSION, EV_CODES, FORMAT_VERSION,
-    QMA_CODES, STATUS_NAMES, multiplier, statutory,
-)
+from .rates import ENGINE_VERSION, FORMAT_VERSION, STATUS_NAMES, Norms
 
 D = Decimal
 ZERO = D("0")
@@ -259,6 +256,9 @@ class YearResult:
     # other deducting from it, so they are kept apart from the totals above.
     disposal_gain: Decimal = ZERO     # 114.7 -- added to income
     disposal_loss: Decimal = ZERO     # 114.9 -- deducted from income
+    # How 114.8 was worded in the norms this year was computed with -- read by
+    # the declaration below, which must not consult a later snapshot.
+    threshold_text: str = ""
 
     @property
     def disposed_cards(self) -> list[CardResult]:
@@ -291,7 +291,7 @@ class YearResult:
             DeclarationLine("m.115.1", "Təmir xərcləri — hədd daxilində",
                             z("repair_deductible"), "deduction"),
             DeclarationLine("m.114.8",
-                            f"Birdəfəlik silinmə ({threshold_label(self.year)})",
+                            f"Birdəfəlik silinmə ({self.threshold_text})",
                             z("writeoff"), "deduction"),
             DeclarationLine("m.114.9", "Təqdim edilmədən zərər",
                             self.disposal_loss, "deduction"),
@@ -345,7 +345,8 @@ def split_monthly(annual: Decimal, start_month: int = 1) -> list[Decimal]:
 
 
 def threshold_test(card: "CardResult", residual: Decimal, year: int,
-                   cost_at: Decimal | None = None) -> tuple[bool, str]:
+                   cost_at: Decimal | None = None,
+                   norms: Norms | None = None) -> tuple[bool, str]:
     """The one-off write-off test of art. 114.8, as it stood in `year`.
 
     Both figures come from the parameter table rather than from constants, so
@@ -358,8 +359,9 @@ def threshold_test(card: "CardResult", residual: Decimal, year: int,
     """
     if residual <= ZERO:
         return False, ""
-    abs_limit = rates.parameter(year, "threshold_abs")
-    pct_limit = rates.parameter(year, "threshold_pct")
+    norms = norms or rates.current()
+    abs_limit = norms.parameter(year, "threshold_abs")
+    pct_limit = norms.parameter(year, "threshold_pct")
     reasons = []
     if residual < abs_limit:
         reasons.append(f"qalıq {residual:.2f} < {abs_limit:g} AZN")
@@ -375,14 +377,16 @@ def threshold_test(card: "CardResult", residual: Decimal, year: int,
     return bool(reasons), "; ".join(reasons)
 
 
-def threshold_label(year: int) -> str:
+def threshold_label(year: int, norms: Norms | None = None) -> str:
     """How the test is named in messages -- "500/5%" is only today's wording."""
-    return (f"{rates.parameter(year, 'threshold_abs'):g}/"
-            f"{rates.parameter(year, 'threshold_pct'):.0%}")
+    norms = norms or rates.current()
+    return (f"{norms.parameter(year, 'threshold_abs'):g}/"
+            f"{norms.parameter(year, 'threshold_pct'):.0%}")
 
 
 def compute_year(data: ClientData, year: int,
-                 _cache: dict | None = None) -> YearResult:
+                 _cache: dict | None = None,
+                 norms: Norms | None = None) -> YearResult:
     """Compute one year.
 
     Opening balances resolve PER ASSET, most specific first:
@@ -400,6 +404,16 @@ def compute_year(data: ClientData, year: int,
     """
     if _cache is None:
         _cache = {}
+    # ONE reading of the law for the whole calculation, every year of the
+    # chain included (§8.0). Taken once and kept in the cache, so a refresh
+    # in another thread cannot change the rates halfway through a client.
+    # A cache built under one snapshot must not be reused under another.
+    held = _cache.get("__norms__")
+    if held is None:
+        held = _cache["__norms__"] = norms or rates.current()
+    elif norms is not None and norms is not held:
+        raise ValueError("compute_year: cache belongs to a different Norms")
+    norms = held
     if year in _cache:
         return _cache[year]
     # The years this one carries from, oldest first, computed bottom-up so
@@ -417,7 +431,7 @@ def compute_year(data: ClientData, year: int,
     for y in reversed(chain):
         compute_year(data, y, _cache)
     try:
-        return _compute_one(data, year, _cache)
+        return _compute_one(data, year, _cache, norms)
     except LookupError as e:
         # A year the rate tables do not reach (before 2001 for the norms,
         # before 2019 for the coefficients). It used to surface as a bare
@@ -428,7 +442,8 @@ def compute_year(data: ClientData, year: int,
         ) from None
 
 
-def _compute_one(data: ClientData, year: int, _cache: dict) -> YearResult:
+def _compute_one(data: ClientData, year: int, _cache: dict,
+                 norms: Norms) -> YearResult:
     """One year, with every earlier year it carries from already in _cache."""
     status_row = data.status_for(year)
     if status_row is None:
@@ -437,7 +452,7 @@ def _compute_one(data: ClientData, year: int, _cache: dict) -> YearResult:
             f"sahibkarlıq statusu olmadan normaya tətbiq olunan əmsal məlum deyil"
         )
 
-    mult = multiplier(year, status_row.status)
+    mult = norms.multiplier(year, status_row.status)
     if not status_row.use_coefficient:
         # The right is waived for the year: the ceiling drops to the plain
         # article 114.3 norm and the report stops suggesting the coefficient.
@@ -477,7 +492,7 @@ def _compute_one(data: ClientData, year: int, _cache: dict) -> YearResult:
         if r.year == year:
             repairs[r.asset_id] = repairs.get(r.asset_id, ZERO) + r.amount
     # Art. 115 sets its limit per CATEGORY OF FIXED ASSET; a QMA belongs to
-    # none of them, so the repair loop below (EV_CODES) would step straight
+    # none of them, so the repair loop below (ev_codes) would step straight
     # over such a row and the money would disappear without a word -- the one
     # failure §2.1 rules out. Refused here instead, where the row can be named.
     # `it` is excluded the same way but for a different reason: its own card
@@ -485,7 +500,7 @@ def _compute_one(data: ClientData, year: int, _cache: dict) -> YearResult:
     # would be a top-up the statute does not describe.
     for aid in repairs:
         a = assets.get(aid)
-        if a is not None and CATEGORY_BY_CODE[a.category].kind == "qma":
+        if a is not None and norms.by_code[a.category].kind == "qma":
             if a.category == "it":
                 raise CalcError(
                     f"{a.inv_no or aid}: icarə təmiri kartına əlavə təmir "
@@ -542,13 +557,13 @@ def _compute_one(data: ClientData, year: int, _cache: dict) -> YearResult:
                 )
             return int(life)
         if code == "qma-n":
-            return int(rates.parameter(year, "qma_term_unknown"))
+            return int(norms.parameter(year, "qma_term_unknown"))
         raise CalcError(
             f"{code}: düz xətt metodu üçün müddət mənbəyi müəyyən edilməyib"
         )
 
     def resolve_rate(code: str, asset_id: str = "", asset=None) -> RateInfo:
-        st = statutory(year, code)
+        st = norms.statutory(year, code)
         # 114.3-2 and 114.3-3 grant the coefficient "əsas vəsaitlərə
         # münasibətdə" -- with respect to FIXED assets. A QMA is not one
         # (art. 118), so its ceiling is the plain norm and the taxpayer's
@@ -556,7 +571,7 @@ def _compute_one(data: ClientData, year: int, _cache: dict) -> YearResult:
         # reason: m.115.6-1 is a self-contained deduction outside art. 114
         # altogether, with no coefficient article of its own to reach it --
         # not because the leased asset itself is not an əsas vəsait.
-        is_qma = CATEGORY_BY_CODE[code].kind == "qma"
+        is_qma = norms.by_code[code].kind == "qma"
         coefficient = D("1") if is_qma else mult.coefficient
         election = data.election_for(year, code, asset_id)
 
@@ -640,16 +655,16 @@ def _compute_one(data: ClientData, year: int, _cache: dict) -> YearResult:
     # reads a FİM).
     def has_schedule(code: str) -> bool:
         # A category the owner just added (§12.4-quater) may not have a rate
-        # row yet -- statutory() raises rather than guessing one (§2.1), and
+        # row yet -- norms.statutory() raises rather than guessing one (§2.1), and
         # that must not crash the whole year; it is "not priceable" exactly
         # like `it` was before its rate existed.
         try:
-            st = statutory(year, code)
+            st = norms.statutory(year, code)
         except LookupError:
             return False
         return st.method == "duz" or st.max_rate is not None
 
-    priceable = {c.code for c in CATEGORIES if has_schedule(c.code)}
+    priceable = {c.code for c in norms.categories if has_schedule(c.code)}
 
     # An asset counts as having STARTED once it was bought, or once a balance
     # was recorded for it, in this year or any earlier one. The distinction
@@ -672,7 +687,7 @@ def _compute_one(data: ClientData, year: int, _cache: dict) -> YearResult:
     # -- step 1: opening balances and acquisitions --------------------------
     cards: dict[str, CardResult] = {}
     for aid, asset in assets.items():
-        if CATEGORY_BY_CODE[asset.category].kind not in ("ev", "qma"):
+        if norms.by_code[asset.category].kind not in ("ev", "qma"):
             continue
         if aid in explicit:
             open_val, open_src = explicit[aid], "explicit"
@@ -720,13 +735,13 @@ def _compute_one(data: ClientData, year: int, _cache: dict) -> YearResult:
                 c.retired_kind = "amortizasiya"
 
     # -- step 3: art. 115 repairs (limit per group, spend recorded per asset)
-    for code in EV_CODES:
+    for code in norms.ev_codes:
         group = [c for c in cards.values() if c.category == code]
         group_repairs = {c.asset_id: repairs.get(c.asset_id, ZERO) for c in group}
         actual_total = sum(group_repairs.values(), ZERO)
         if actual_total == ZERO:
             continue
-        st = statutory(year, code)
+        st = norms.statutory(year, code)
         if st.repair_limit is None:
             continue
         opening_total = sum((c.opening for c in group), ZERO)
@@ -753,7 +768,7 @@ def _compute_one(data: ClientData, year: int, _cache: dict) -> YearResult:
     for c in cards.values():
         if c.category not in priceable:
             try:
-                statutory(year, c.category)
+                norms.statutory(year, c.category)
             except LookupError:
                 # No rate row anywhere for this year -- an owner-added
                 # category (§12.4-quater) that is missing its rates.tsv row,
@@ -805,14 +820,14 @@ def _compute_one(data: ClientData, year: int, _cache: dict) -> YearResult:
         # art. 114/114.8 altogether, and a straight line needs no cut-off
         # anyway -- it ends by arriving at zero, which the declining balance
         # never does on its own.
-        if CATEGORY_BY_CODE[c.category].kind == "ev":
+        if norms.by_code[c.category].kind == "ev":
             c.threshold_hit, c.threshold_reason = threshold_test(
                 c, c.opening, year,
-                c.cost_prior)               # start of year: before this year's
+                c.cost_prior, norms)               # start of year: before this year's
                                             # additions existed
 
         if (c.asset_id in writeoffs
-                and CATEGORY_BY_CODE[c.category].kind == "qma"):
+                and norms.by_code[c.category].kind == "qma"):
             if c.category == "it":
                 raise CalcError(
                     f"{c.inv_no or c.asset_id}: icarə təmiri kartı üçün "
@@ -867,15 +882,15 @@ def _compute_one(data: ClientData, year: int, _cache: dict) -> YearResult:
         # write-off would happen. With the threshold hardcoded this could not
         # go wrong; now that an amendment can move it, forecasting a 2027
         # write-off against the 2026 threshold would be simply wrong.
-        if not c.written_off and CATEGORY_BY_CODE[c.category].kind == "ev":
+        if not c.written_off and norms.by_code[c.category].kind == "ev":
             c.threshold_next, c.threshold_next_reason = threshold_test(
-                c, c.closing, year + 1)
+                c, c.closing, year + 1, norms=norms)
 
     # -- roll the cards up into categories ----------------------------------
     # QMA categories sit in the same list as the fixed ones, on purpose: art.
     # 118.2 deducts them as amortisation computed under art. 114, so they are
     # part of the same declaration line and must be part of the same total.
-    for code in EV_CODES + QMA_CODES:
+    for code in norms.ev_codes + norms.qma_codes:
         group = sorted(
             (c for c in cards.values() if c.category == code),
             # Spent cards sink to the bottom of their group: they are there to
@@ -887,8 +902,8 @@ def _compute_one(data: ClientData, year: int, _cache: dict) -> YearResult:
         cat_rate = resolve_rate(code)         # the category default
         cat = CategoryResult(
             code=code,
-            name_az=CATEGORY_BY_CODE[code].name_az,
-            name_ru=CATEGORY_BY_CODE[code].name_ru,
+            name_az=norms.by_code[code].name_az,
+            name_ru=norms.by_code[code].name_ru,
             rate=cat_rate,
             cards=group,
             # Measured against the category rate, not just card against card.
@@ -903,7 +918,7 @@ def _compute_one(data: ClientData, year: int, _cache: dict) -> YearResult:
                   "repair_deductible", "repair_capitalized", "disposed",
                   "depreciation", "writeoff", "closing"):
             setattr(cat, f, sum((getattr(c, f) for c in group), ZERO))
-        st = statutory(year, code)
+        st = norms.statutory(year, code)
         if st.repair_limit is not None:
             cat.repair_limit_pct = st.repair_limit
             cat.repair_limit = money(cat.opening * st.repair_limit)
@@ -962,7 +977,7 @@ def _compute_one(data: ClientData, year: int, _cache: dict) -> YearResult:
     if mult.coefficient > D("1"):
         unused = [cat for cat in result.categories
                   if not cat.mixed_rates and not cat.rate.coefficient_used
-                  and CATEGORY_BY_CODE[cat.code].kind == "ev"]
+                  and norms.by_code[cat.code].kind == "ev"]
         if unused:
             result.warnings.append(
                 f"{STATUS_NAMES[status_row.status]} əmsalı (×{mult.coefficient}) "
@@ -982,13 +997,13 @@ def _compute_one(data: ClientData, year: int, _cache: dict) -> YearResult:
     # The test is named after its own figures rather than a literal "500/5%":
     # once those can be amended, a hardcoded label would go on describing a
     # rule the program is no longer applying.
-    label = threshold_label(year)
-    label_next = threshold_label(year + 1)
+    label = threshold_label(year, norms)
+    label_next = threshold_label(year + 1, norms)
     for c in result.cards:
         if not c.is_legacy_pool and c.cost == ZERO and c.opening > ZERO:
             result.warnings.append(
                 f"{c.inv_no or c.name}: ilkin dəyər məlum deyil — {label} "
-                f"testinin yalnız {rates.parameter(year, 'threshold_abs'):g} AZN "
+                f"testinin yalnız {norms.parameter(year, 'threshold_abs'):g} AZN "
                 f"hissəsi tətbiq oluna bilər."
             )
     for c in result.threshold_next_cards:
@@ -1021,6 +1036,7 @@ def _compute_one(data: ClientData, year: int, _cache: dict) -> YearResult:
                 f"sonunadək analoji aktivə yenidən investisiya edilirsə, "
                 f"m.144.1.3-ə görə fərq nəzərə alınmaya bilər — yoxlayın."
             )
+    result.threshold_text = threshold_label(year, norms)
     result.carried_from_prev = any(
         c.opening_source == "carried" for c in result.cards)
     _cache[year] = result
@@ -1140,7 +1156,8 @@ def rate_matrix(data: ClientData, years: list[int]) -> RateMatrix:
     """
     years = sorted(years)
     out = RateMatrix(years=years, closed=sorted(data.closed_years() & set(years)))
-    cache: dict[int, YearResult] = {}
+    norms = rates.current()
+    cache: dict = {"__norms__": norms}
     per_year: dict[int, YearResult] = {}
     for y in years:
         try:
@@ -1159,10 +1176,10 @@ def rate_matrix(data: ClientData, years: list[int]) -> RateMatrix:
                 deviating.setdefault(card.asset_id,
                                      (card.category, card.inv_no, card.name))
 
-    for code in EV_CODES + QMA_CODES:
-        cat_name = CATEGORY_BY_CODE[code].name_az
+    for code in norms.ev_codes + norms.qma_codes:
+        cat_name = norms.by_code[code].name_az
         series = RateSeries(key=code, kind="category", name=cat_name,
-                            law_ref=rates.CATEGORY_BY_CODE[code].law_ref, category=code)
+                            law_ref=norms.by_code[code].law_ref, category=code)
         seen = False
         for y in years:
             res = per_year.get(y)

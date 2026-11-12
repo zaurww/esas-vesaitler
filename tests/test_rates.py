@@ -241,3 +241,41 @@ class RateMatrix(EngineTest):
 if __name__ == "__main__":
     import unittest
     unittest.main()
+
+
+class NormsSnapshot(EngineTest):
+    """§8.0: a calculation reads ONE immutable reading of the law, however
+    many refreshes happen while it runs."""
+
+    def test_a_snapshot_cannot_be_changed(self):
+        n = rates.current()
+        with self.assertRaises(AttributeError):
+            n.user_rates = ()
+        with self.assertRaises(TypeError):
+            n.by_code["zz"] = n.by_code["ma"]
+
+    def test_a_refresh_mid_calculation_does_not_reach_it(self):
+        data = client(assets=[asset("A", "ym", "1000", in_year=2024)])
+        cache: dict = {}
+        compute_year(data, 2024, cache)          # takes the shipped snapshot
+        owner_rates("effective_year\tcategory\tmax_rate\trepair_limit\tnote\n"
+                    "2025\tym\t0.10\t\t\n")
+        r_held = compute_year(data, 2025, cache)  # same calculation, same law
+        r_fresh = compute_year(data, 2025)        # a new one sees the edit
+        self.assertEqual(card_of(r_held, "A").rate, D("0.25"))
+        self.assertEqual(card_of(r_fresh, "A").rate, D("0.10"))
+
+    def test_an_explicit_snapshot_is_used(self):
+        data = client(assets=[asset("A", "ym", "1000", in_year=2024)])
+        shipped = rates.current()
+        owner_rates("effective_year\tcategory\tmax_rate\trepair_limit\tnote\n"
+                    "2024\tym\t0.10\t\t\n")
+        r = compute_year(data, 2024, norms=shipped)
+        self.assertEqual(card_of(r, "A").rate, D("0.25"))
+
+    def test_a_cache_cannot_be_reused_under_other_norms(self):
+        data = client()
+        cache: dict = {}
+        compute_year(data, 2024, cache)
+        with self.assertRaises(ValueError):
+            compute_year(data, 2025, cache, norms=rates.Norms())

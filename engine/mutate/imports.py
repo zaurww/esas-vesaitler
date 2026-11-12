@@ -10,7 +10,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from ..rates import CATEGORY_BY_CODE
+from .. import rates
 from ..storage import DataError, check_qma
 
 from .assets import life_of
@@ -168,7 +168,7 @@ def import_assets(root: Path, slug: str, p: dict) -> Any:
                     # confirmation lives (mutate.assets.create_asset).
                     if category == "it":
                         raise DataError(
-                            f"{CATEGORY_BY_CODE[category].name_az}: idxal "
+                            f"{rates.current().by_code[category].name_az}: idxal "
                             f"vasitəsilə əlavə edilmir — «+ Yeni ƏV» "
                             f"formasından, hər təmir ili üçün ayrıca kart "
                             f"yaradın (m.115.6-1)."

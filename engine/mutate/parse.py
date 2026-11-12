@@ -18,7 +18,7 @@ from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from ..rates import CATEGORY_BY_CODE
+from .. import rates
 from ..storage import DataError
 
 D = Decimal
@@ -117,7 +117,7 @@ def iso_date(value: Any, field: str, *, required: bool = True) -> str:
 
 def category_of(value: Any, field: str = "category") -> str:
     v = str(value or "").strip()
-    if v not in CATEGORY_BY_CODE:
+    if v not in rates.current().by_code:
         raise DataError(f"{field}: naməlum kateqoriya {v!r}")
     return v
 

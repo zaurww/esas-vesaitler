@@ -18,7 +18,7 @@ from .model import (
     Addition, Asset, ClientData, Disposal, Group, OpeningBalance, RateElection,
     Repair, TaxpayerStatus, WriteOff,
 )
-from .rates import CATEGORY_BY_CODE
+from . import rates
 
 D = Decimal
 
@@ -89,10 +89,10 @@ def check_qma(category: str, *, in_date, useful_life, is_legacy_pool,
     Raising from both sides is deliberate (§8): the files are plain text and
     people edit them.
     """
-    if CATEGORY_BY_CODE[category].kind != "qma":
+    if rates.current().by_code[category].kind != "qma":
         return
     w = f"{where}: " if where else ""
-    name = CATEGORY_BY_CODE[category].name_az
+    name = rates.current().by_code[category].name_az
     if is_legacy_pool:
         if category == "it":
             raise DataError(
@@ -126,10 +126,10 @@ def check_qma(category: str, *, in_date, useful_life, is_legacy_pool,
 
 def _category(value: str, where: str) -> str:
     v = (value or "").strip()
-    if v not in CATEGORY_BY_CODE:
+    if v not in rates.current().by_code:
         raise DataError(
             f"{where}: naməlum kateqoriya {value!r}; "
-            f"mümkün olanlar: {', '.join(CATEGORY_BY_CODE)}"
+            f"mümkün olanlar: {', '.join(rates.current().by_code)}"
         )
     return v
 

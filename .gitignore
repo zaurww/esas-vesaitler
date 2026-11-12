@@ -18,3 +18,5 @@ backups/
 # Internal decision log — local only, not on the public repo.
 # Still read by Claude Code every session; just never committed.
 /CLAUDE.md
+# Its journal of stages and releases, moved out to keep CLAUDE.md small.
+/HISTORY.md

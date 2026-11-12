@@ -12,7 +12,6 @@ from decimal import Decimal
 from pathlib import Path
 
 from .. import rates
-from ..rates import CATEGORY_BY_CODE
 from ..storage import DataError, read_tsv, write_tsv
 
 from .core import _recompute_everything
@@ -44,7 +43,7 @@ def set_rate_row(root: Path, slug: str, p: dict) -> str:
         newest = max(years) if years else None
         if newest is not None and year <= newest:
             raise DataError(
-                f"«{rates.CATEGORY_BY_CODE[cat].name_az}» üzrə {newest}-ci ildən "
+                f"«{rates.current().by_code[cat].name_az}» üzrə {newest}-ci ildən "
                 f"qüvvədə olan norma var. Yeni norma {newest + 1} və ya sonrakı "
                 f"ildən qüvvəyə minə bilər — keçmiş illər təqdim edilmiş "
                 f"bəyannamələrdir və dəyişdirilmir."
@@ -220,10 +219,10 @@ def set_category_row(root: Path, slug: str, p: dict) -> str:
             "Kod yalnız kiçik latın hərfləri, rəqəm və defisdən ibarət ola "
             "bilər və hərflə başlamalıdır (məs. 'iy')."
         )
-    if code in CATEGORY_BY_CODE:
+    if code in rates.current().by_code:
         raise DataError(
             f"«{code}» kodu artıq mövcuddur: "
-            f"{CATEGORY_BY_CODE[code].name_az}"
+            f"{rates.current().by_code[code].name_az}"
         )
     name_az = str(p.get("name_az", "")).strip()
     if not name_az:

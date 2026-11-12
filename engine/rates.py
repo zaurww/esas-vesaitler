@@ -9,6 +9,7 @@ return that has already been filed.
 import re
 
 from decimal import Decimal
+from types import MappingProxyType
 from typing import Dict, List, NamedTuple
 
 D = Decimal
@@ -73,17 +74,6 @@ _BUILTIN_CATEGORIES: List[Category] = [
     Category("qma-m", "QMA — FİM məlum", "НМА — срок известен", "qma", "VM m.114.3.6"),
     Category("qma-n", "QMA — FİM nəməlum", "НМА — срок неизвестен", "qma", "VM m.114.3.6"),
 ]
-
-# LIVE, combined tables: built-in categories plus whatever the owner appended
-# in categories.tsv (§12.4-quater -- 114.3.4 `iş heyvanları`, 114.3.5
-# `geoloji-kəşfiyyat`, or a category a future amendment adds, none of which
-# used to be reachable without a new release). `refresh()` rebuilds and swaps
-# these in place, the same discipline as USER_RATES below (§8.0): a reader
-# must see the old table or the new one, never a half-built one.
-CATEGORIES: List[Category] = list(_BUILTIN_CATEGORIES)
-CATEGORY_BY_CODE: Dict[str, Category] = {c.code: c for c in CATEGORIES}
-EV_CODES: List[str] = [c.code for c in CATEGORIES if c.kind == "ev"]
-QMA_CODES: List[str] = [c.code for c in CATEGORIES if c.kind == "qma"]
 
 # A code an owner may append. Lower-case ASCII only: it is a TSV field, an
 # HTML option value, and part of every asset row that uses it forever after,
@@ -267,11 +257,6 @@ STATUS_NAMES = {
 # (effective_year, category) the owner's row wins, and the report says so.
 # ---------------------------------------------------------------------------
 
-USER_RATES: List[RateRow] = []
-USER_MULTIPLIERS: List[MultiplierRow] = []
-USER_PARAMETERS: List[ParamRow] = []
-USER_SOURCE: set = set()          # keys that came from the files, for the UI
-
 RATES_HEADER = ["effective_year", "category", "max_rate", "repair_limit", "note"]
 COEFF_HEADER = ["effective_year", "status", "coefficient", "note"]
 PARAM_HEADER = ["effective_year", "key", "value", "note"]
@@ -291,114 +276,6 @@ def _num(v: str) -> Decimal | None:
     return None if v in ("", "-") else D(v)
 
 
-def refresh(root) -> None:
-    """Re-read the owner's rate files. Called before every calculation, so an
-    edit takes effect on the next page load without restarting anything.
-
-    The new tables are built to the side and swapped in at the end. Clearing
-    the live lists first left a window in which the owner's rows did not
-    exist, and a concurrent calculation reading through that window fell back
-    to the shipped default -- a WRONG figure, silently, which is the one
-    failure mode §2.1 refuses. Measured before the fix: with one owner row for
-    `ym`, a reader running beside 200 refreshes saw the default 8% instead of
-    the owner's 9% in 47% of reads.
-
-    Slice assignment is one operation per list, so a reader sees either the
-    old table or the new one, never a half-built one. The caller still holds a
-    lock across read-then-compute (web/app.py) -- that is a different problem:
-    this only guarantees each table is never torn.
-    """
-    from .storage import read_tsv          # local import: storage imports us
-    from pathlib import Path
-
-    root = Path(root)
-    new_rates: List[RateRow] = []
-    new_mult: List[MultiplierRow] = []
-    new_params: List[ParamRow] = []
-    new_source: set = set()
-
-    # -- categories: built-ins plus whatever the owner appended -------------
-    # Read first: rates.tsv below validates its `category` column against
-    # this, so a category and its rate can be added and take effect together.
-    new_categories: List[Category] = list(_BUILTIN_CATEGORIES)
-    new_by_code: Dict[str, Category] = {c.code: c for c in new_categories}
-    for r in read_tsv(root / "categories.tsv"):
-        code = (r.get("code") or "").strip()
-        if not CATEGORY_CODE_RE.fullmatch(code):
-            raise ValueError(
-                f"categories.tsv: kod {code!r} yalnız kiçik latın hərfləri, "
-                f"rəqəm və defisdən ibarət ola bilər"
-            )
-        if code in new_by_code:
-            raise ValueError(f"categories.tsv: kod artıq mövcuddur: {code!r}")
-        name_az = (r.get("name_az") or "").strip()
-        if not name_az:
-            raise ValueError(f"categories.tsv: {code!r} üçün ad boşdur")
-        kind = (r.get("kind") or "").strip()
-        if kind != "ev":
-            # QMA's schedule is straight line with the term coming from the
-            # card (FİM) or the qma_term_unknown parameter -- a form of
-            # formula, which §5.1-bis keeps out of data. A category added
-            # here would silently get "azalan" (RateRow's field default,
-            # since rates.tsv carries no method column) -- the wrong method
-            # for a real QMA, not merely an unsupported one.
-            raise ValueError(
-                f"categories.tsv: {code!r} — kind yalnız 'ev' ola bilər"
-            )
-        cat_obj = Category(code, name_az, (r.get("name_ru") or "").strip(),
-                           kind, (r.get("law_ref") or "").strip())
-        new_categories.append(cat_obj)
-        new_by_code[code] = cat_obj
-    new_ev = [c.code for c in new_categories if c.kind == "ev"]
-    new_qma = [c.code for c in new_categories if c.kind == "qma"]
-
-    for r in read_tsv(root / "rates.tsv"):
-        cat = (r.get("category") or "").strip()
-        if cat not in new_by_code:
-            raise ValueError(f"rates.tsv: naməlum kateqoriya {cat!r}")
-        year = int(r["effective_year"])
-        new_rates.append(RateRow(year, cat, _num(r.get("max_rate", "")),
-                                 _num(r.get("repair_limit", "")),
-                                 (r.get("note") or "").strip()))
-        new_source.add(("rate", year, cat))
-
-    for r in read_tsv(root / "coefficients.tsv"):
-        st = (r.get("status") or "").strip()
-        if st not in STATUS_NAMES:
-            raise ValueError(f"coefficients.tsv: naməlum status {st!r}")
-        year = int(r["effective_year"])
-        new_mult.append(MultiplierRow(year, st, D(r["coefficient"]),
-                                      (r.get("note") or "").strip()))
-        new_source.add(("coef", year, st))
-
-    for r in read_tsv(root / "parameters.tsv"):
-        key = (r.get("key") or "").strip()
-        if key not in PARAM_DEFS:
-            raise ValueError(f"parameters.tsv: naməlum parametr {key!r}")
-        year = int(r["effective_year"])
-        new_params.append(ParamRow(year, key, D(str(r["value"]).strip()
-                                                .replace(",", ".")),
-                                   (r.get("note") or "").strip()))
-        new_source.add(("param", year, key))
-
-    # A malformed file raises above, before anything is swapped in: a bad edit
-    # leaves the previous table standing rather than emptying it. Categories
-    # swap in alongside the rest for the same reason -- these are imported by
-    # name in several modules (storage, mutate, calc), so the SAME list/dict
-    # objects are mutated in place rather than rebound, or those modules would
-    # keep looking at the table from before the refresh.
-    CATEGORIES[:] = new_categories
-    CATEGORY_BY_CODE.clear()
-    CATEGORY_BY_CODE.update(new_by_code)
-    EV_CODES[:] = new_ev
-    QMA_CODES[:] = new_qma
-    USER_RATES[:] = new_rates
-    USER_MULTIPLIERS[:] = new_mult
-    USER_PARAMETERS[:] = new_params
-    USER_SOURCE.clear()
-    USER_SOURCE.update(new_source)
-
-
 def _latest(rows, year: int, key_fn, key_value):
     """Row with the greatest effective_year <= year."""
     found = None
@@ -410,157 +287,8 @@ def _latest(rows, year: int, key_fn, key_value):
     return found
 
 
-def statutory(year: int, category: str) -> RateRow:
-    """The owner's rows take precedence over the shipped defaults."""
-    row = _latest(USER_RATES, year, lambda r: r.category, category)
-    base = _latest(STATUTORY_RATES, year, lambda r: r.category, category)
-    if row is None:
-        row = base
-    elif base is not None and row.effective_year >= base.effective_year:
-        # a partially filled row falls back to the default for the blank field
-        row = RateRow(row.effective_year, category,
-                      row.max_rate if row.max_rate is not None else base.max_rate,
-                      row.repair_limit if row.repair_limit is not None
-                      else base.repair_limit,
-                      row.note,
-                      # rates.tsv has no method column, so an owner row would
-                      # otherwise fall to the field default and quietly move a
-                      # QMA back onto the declining balance.
-                      base.method)
-    if row is None:
-        raise LookupError(
-            f"нет статутной ставки для категории {category!r} на {year} год"
-        )
-    return row
-
-
-def multiplier(year: int, status: str) -> MultiplierRow:
-    row = _latest(USER_MULTIPLIERS, year, lambda r: r.status, status)
-    if row is None:
-        row = _latest(MULTIPLIERS, year, lambda r: r.status, status)
-    if row is None:
-        raise LookupError(
-            f"нет коэффициента для статуса {status!r} на {year} год"
-        )
-    return row
-
-
 def _pct(v: Decimal | None) -> str | None:
     return None if v is None else f"{v:.4f}"
-
-
-def rate_years(category: str) -> list[int]:
-    """Every year the rate for this category changes, oldest first."""
-    return sorted({r.effective_year for r in STATUTORY_RATES
-                   if r.category == category}
-                  | {r.effective_year for r in USER_RATES
-                     if r.category == category})
-
-
-def history(category: str) -> list[dict]:
-    """The whole life of one category's rate, as ranges rather than start years.
-
-    "2001" on its own answers nothing; "2001-2025" answers the question the
-    user actually has. Built by resolving each change year through statutory(),
-    so it cannot drift from what the calculation uses.
-    """
-    years = rate_years(category)
-    out = []
-    for i, y in enumerate(years):
-        st = statutory(y, category)
-        user = _latest(USER_RATES, y, lambda r: r.category, category)
-        out.append({
-            "since": y,
-            "until": years[i + 1] - 1 if i + 1 < len(years) else None,
-            "max_rate": _pct(st.max_rate),
-            "repair_limit": _pct(st.repair_limit),
-            "method": st.method,
-            "source": "user" if user is not None else "engine",
-            "note": (user.note if user is not None else st.note) or "",
-        })
-    return out
-
-
-def table_for(year: int) -> list[dict]:
-    """The effective table for one year, with where each number came from.
-
-    `law_ref` and `changes` exist so the UI can stop showing a bare
-    effective_year: with a single row the year is noise (and, until §12.2 is
-    settled, a placeholder nobody verified), while the article reference is
-    the fact the accountant can check.
-    """
-    out = []
-    for c in CATEGORIES:
-        try:
-            st = statutory(year, c.code)
-        except LookupError:
-            continue
-        user = _latest(USER_RATES, year, lambda r: r.category, c.code)
-        years = rate_years(c.code)
-        i = max((n for n, y in enumerate(years) if y <= year), default=0)
-        out.append({
-            "code": c.code, "name_az": c.name_az, "name_ru": c.name_ru,
-            "effective_year": st.effective_year,
-            "until": years[i + 1] - 1 if i + 1 < len(years) else None,
-            "changes": len(years),
-            "law_ref": c.law_ref,
-            "max_rate": _pct(st.max_rate),
-            "repair_limit": _pct(st.repair_limit),
-            # Printed beside the rate rather than left implicit: for `qma-n`
-            # the same 10% means two different calculations depending on the
-            # year, and a screen that shows only "10%" cannot say which.
-            "method": st.method,
-            "kind": c.kind,
-            "source": "user" if user is not None else "engine",
-            "note": (user.note if user is not None else st.note) or "",
-            "history": history(c.code),
-        })
-    return out
-
-
-def parameter(year: int, key: str) -> Decimal:
-    """A numeric figure the tax code fixes, as it stood in `year`.
-
-    Fails loudly rather than falling back to a plausible number: a missing
-    threshold would otherwise silently write off nothing, or everything.
-    """
-    row = _latest(USER_PARAMETERS, year, lambda r: r.key, key)
-    if row is None:
-        row = _latest(PARAMETERS, year, lambda r: r.key, key)
-    if row is None:
-        raise LookupError(f"{year} ili üçün «{key}» parametri təyin edilməyib")
-    return row.value
-
-
-def param_years(key: str) -> list[int]:
-    return sorted({r.effective_year for r in PARAMETERS if r.key == key}
-                  | {r.effective_year for r in USER_PARAMETERS if r.key == key})
-
-
-def parameters_for(year: int) -> list[dict]:
-    out = []
-    for key, (label, law_ref, kind) in PARAM_DEFS.items():
-        user = _latest(USER_PARAMETERS, year, lambda r: r.key, key)
-        eff = _latest(USER_PARAMETERS, year, lambda r: r.key, key) \
-            or _latest(PARAMETERS, year, lambda r: r.key, key)
-        years = param_years(key)
-        i = max((n for n, y in enumerate(years) if y <= year), default=0)
-        out.append({
-            "key": key, "label": label, "law_ref": law_ref, "kind": kind,
-            "value": str(parameter(year, key)),
-            "effective_year": eff.effective_year if eff else None,
-            "until": years[i + 1] - 1 if i + 1 < len(years) else None,
-            "changes": len(years),
-            "note": (user.note if user is not None else "") or "",
-            "source": "user" if user is not None else "engine",
-        })
-    return out
-
-
-def coef_years(status: str) -> list[int]:
-    return sorted({r.effective_year for r in MULTIPLIERS if r.status == status}
-                  | {r.effective_year for r in USER_MULTIPLIERS
-                     if r.status == status})
 
 
 def coef_law_ref(year: int, status: str) -> str:
@@ -578,16 +306,363 @@ def coef_law_ref(year: int, status: str) -> str:
     return ""
 
 
+class Norms:
+    """One complete, immutable reading of the law: the shipped defaults plus
+    the owner's rows from the installation's norm files (§5.1).
+
+    This replaced module-level lists that refresh() emptied and refilled in
+    place (§8.0). Those were process-wide state under a "stateless" engine:
+    every calculation read whatever the tables held at that instant, a
+    concurrent refresh could change them halfway through a year, and the only
+    defence was a lock around every request. A Norms object never changes
+    after it is built, so a calculation that takes one snapshot at its start
+    reads the same law for every card and every year it touches -- by
+    construction, not by locking. Two snapshots can also live side by side
+    (an archive's norms beside the local ones, §8.2).
+    """
+
+    __slots__ = ("categories", "by_code", "ev_codes", "qma_codes",
+                 "user_rates", "user_multipliers", "user_params", "user_source")
+
+    def __init__(self, categories=(), user_rates=(), user_multipliers=(),
+                 user_params=(), user_source=frozenset()):
+        cats = tuple(categories) or tuple(_BUILTIN_CATEGORIES)
+        object.__setattr__(self, "categories", cats)
+        object.__setattr__(self, "by_code",
+                           MappingProxyType({c.code: c for c in cats}))
+        object.__setattr__(self, "ev_codes",
+                           tuple(c.code for c in cats if c.kind == "ev"))
+        object.__setattr__(self, "qma_codes",
+                           tuple(c.code for c in cats if c.kind == "qma"))
+        object.__setattr__(self, "user_rates", tuple(user_rates))
+        object.__setattr__(self, "user_multipliers", tuple(user_multipliers))
+        object.__setattr__(self, "user_params", tuple(user_params))
+        object.__setattr__(self, "user_source", frozenset(user_source))
+
+    def __setattr__(self, name, value):
+        raise AttributeError("Norms is immutable -- build a new one")
+
+    # -- building -----------------------------------------------------------
+
+    @classmethod
+    def load(cls, root) -> "Norms":
+        """Read the owner's norm files under `root`. Raises on a malformed
+        file, so a bad edit never replaces a good snapshot."""
+        from .storage import read_tsv          # local import: storage imports us
+        from pathlib import Path
+
+        root = Path(root)
+        new_rates: List[RateRow] = []
+        new_mult: List[MultiplierRow] = []
+        new_params: List[ParamRow] = []
+        new_source: set = set()
+
+        # Categories first: rates.tsv below validates its `category` column
+        # against them, so a category and its rate take effect together.
+        new_categories: List[Category] = list(_BUILTIN_CATEGORIES)
+        new_by_code: Dict[str, Category] = {c.code: c for c in new_categories}
+        for r in read_tsv(root / "categories.tsv"):
+            code = (r.get("code") or "").strip()
+            if not CATEGORY_CODE_RE.fullmatch(code):
+                raise ValueError(
+                    f"categories.tsv: kod {code!r} yalnız kiçik latın hərfləri, "
+                    f"rəqəm və defisdən ibarət ola bilər"
+                )
+            if code in new_by_code:
+                raise ValueError(f"categories.tsv: kod artıq mövcuddur: {code!r}")
+            name_az = (r.get("name_az") or "").strip()
+            if not name_az:
+                raise ValueError(f"categories.tsv: {code!r} üçün ad boşdur")
+            kind = (r.get("kind") or "").strip()
+            if kind != "ev":
+                # QMA's schedule is straight line with the term coming from
+                # the card (FİM) or the qma_term_unknown parameter -- a form
+                # of formula, which §5.1-bis keeps out of data. A category
+                # added here would silently get "azalan" (RateRow's default,
+                # since rates.tsv carries no method column).
+                raise ValueError(
+                    f"categories.tsv: {code!r} — kind yalnız 'ev' ola bilər"
+                )
+            cat_obj = Category(code, name_az, (r.get("name_ru") or "").strip(),
+                               kind, (r.get("law_ref") or "").strip())
+            new_categories.append(cat_obj)
+            new_by_code[code] = cat_obj
+
+        for r in read_tsv(root / "rates.tsv"):
+            cat = (r.get("category") or "").strip()
+            if cat not in new_by_code:
+                raise ValueError(f"rates.tsv: naməlum kateqoriya {cat!r}")
+            year = int(r["effective_year"])
+            new_rates.append(RateRow(year, cat, _num(r.get("max_rate", "")),
+                                     _num(r.get("repair_limit", "")),
+                                     (r.get("note") or "").strip()))
+            new_source.add(("rate", year, cat))
+
+        for r in read_tsv(root / "coefficients.tsv"):
+            st = (r.get("status") or "").strip()
+            if st not in STATUS_NAMES:
+                raise ValueError(f"coefficients.tsv: naməlum status {st!r}")
+            year = int(r["effective_year"])
+            new_mult.append(MultiplierRow(year, st, D(r["coefficient"]),
+                                          (r.get("note") or "").strip()))
+            new_source.add(("coef", year, st))
+
+        for r in read_tsv(root / "parameters.tsv"):
+            key = (r.get("key") or "").strip()
+            if key not in PARAM_DEFS:
+                raise ValueError(f"parameters.tsv: naməlum parametr {key!r}")
+            year = int(r["effective_year"])
+            new_params.append(ParamRow(year, key, D(str(r["value"]).strip()
+                                                    .replace(",", ".")),
+                                       (r.get("note") or "").strip()))
+            new_source.add(("param", year, key))
+
+        return cls(new_categories, new_rates, new_mult, new_params, new_source)
+
+    # -- lookups --------------------------------------------------------------
+
+    def category(self, code: str) -> Category:
+        return self.by_code[code]
+
+    def statutory(self, year: int, category: str) -> RateRow:
+        """The owner's rows take precedence over the shipped defaults."""
+        row = _latest(self.user_rates, year, lambda r: r.category, category)
+        base = _latest(STATUTORY_RATES, year, lambda r: r.category, category)
+        if row is None:
+            row = base
+        elif base is not None and row.effective_year >= base.effective_year:
+            # a partially filled row falls back to the default for the blank
+            # field
+            row = RateRow(row.effective_year, category,
+                          row.max_rate if row.max_rate is not None
+                          else base.max_rate,
+                          row.repair_limit if row.repair_limit is not None
+                          else base.repair_limit,
+                          row.note,
+                          # rates.tsv has no method column, so an owner row
+                          # would otherwise fall to the field default and
+                          # quietly move a QMA back onto the declining balance.
+                          base.method)
+        if row is None:
+            raise LookupError(
+                f"нет статутной ставки для категории {category!r} на {year} год"
+            )
+        return row
+
+    def multiplier(self, year: int, status: str) -> MultiplierRow:
+        row = _latest(self.user_multipliers, year, lambda r: r.status, status)
+        if row is None:
+            row = _latest(MULTIPLIERS, year, lambda r: r.status, status)
+        if row is None:
+            raise LookupError(
+                f"нет коэффициента для статуса {status!r} на {year} год"
+            )
+        return row
+
+    def parameter(self, year: int, key: str) -> Decimal:
+        """A numeric figure the tax code fixes, as it stood in `year`.
+
+        Fails loudly rather than falling back to a plausible number: a missing
+        threshold would otherwise silently write off nothing, or everything.
+        """
+        row = _latest(self.user_params, year, lambda r: r.key, key)
+        if row is None:
+            row = _latest(PARAMETERS, year, lambda r: r.key, key)
+        if row is None:
+            raise LookupError(f"{year} ili üçün «{key}» parametri təyin edilməyib")
+        return row.value
+
+    def rate_years(self, category: str) -> list[int]:
+        """Every year the rate for this category changes, oldest first."""
+        return sorted({r.effective_year for r in STATUTORY_RATES
+                       if r.category == category}
+                      | {r.effective_year for r in self.user_rates
+                         if r.category == category})
+
+    def param_years(self, key: str) -> list[int]:
+        return sorted({r.effective_year for r in PARAMETERS if r.key == key}
+                      | {r.effective_year for r in self.user_params
+                         if r.key == key})
+
+    def coef_years(self, status: str) -> list[int]:
+        return sorted({r.effective_year for r in MULTIPLIERS
+                       if r.status == status}
+                      | {r.effective_year for r in self.user_multipliers
+                         if r.status == status})
+
+    # -- the norms screen -----------------------------------------------------
+
+    def history(self, category: str) -> list[dict]:
+        """The whole life of one category's rate, as ranges rather than start
+        years. "2001" on its own answers nothing; "2001-2025" answers the
+        question the user actually has. Built through statutory(), so it
+        cannot drift from what the calculation uses.
+        """
+        years = self.rate_years(category)
+        out = []
+        for i, y in enumerate(years):
+            st = self.statutory(y, category)
+            user = _latest(self.user_rates, y, lambda r: r.category, category)
+            out.append({
+                "since": y,
+                "until": years[i + 1] - 1 if i + 1 < len(years) else None,
+                "max_rate": _pct(st.max_rate),
+                "repair_limit": _pct(st.repair_limit),
+                "method": st.method,
+                "source": "user" if user is not None else "engine",
+                "note": (user.note if user is not None else st.note) or "",
+            })
+        return out
+
+    def table_for(self, year: int) -> list[dict]:
+        """The effective table for one year, with where each number came
+        from. `law_ref` and `changes` exist so the UI can stop showing a bare
+        effective_year: the article reference is the fact the accountant can
+        check.
+        """
+        out = []
+        for c in self.categories:
+            try:
+                st = self.statutory(year, c.code)
+            except LookupError:
+                continue
+            user = _latest(self.user_rates, year, lambda r: r.category, c.code)
+            years = self.rate_years(c.code)
+            i = max((n for n, y in enumerate(years) if y <= year), default=0)
+            out.append({
+                "code": c.code, "name_az": c.name_az, "name_ru": c.name_ru,
+                "effective_year": st.effective_year,
+                "until": years[i + 1] - 1 if i + 1 < len(years) else None,
+                "changes": len(years),
+                "law_ref": c.law_ref,
+                "max_rate": _pct(st.max_rate),
+                "repair_limit": _pct(st.repair_limit),
+                # Printed beside the rate rather than left implicit: for
+                # `qma-n` the same 10% means two different calculations
+                # depending on the year.
+                "method": st.method,
+                "kind": c.kind,
+                "source": "user" if user is not None else "engine",
+                "note": (user.note if user is not None else st.note) or "",
+                "history": self.history(c.code),
+            })
+        return out
+
+    def parameters_for(self, year: int) -> list[dict]:
+        out = []
+        for key, (label, law_ref, kind) in PARAM_DEFS.items():
+            user = _latest(self.user_params, year, lambda r: r.key, key)
+            eff = user or _latest(PARAMETERS, year, lambda r: r.key, key)
+            years = self.param_years(key)
+            i = max((n for n, y in enumerate(years) if y <= year), default=0)
+            out.append({
+                "key": key, "label": label, "law_ref": law_ref, "kind": kind,
+                "value": str(self.parameter(year, key)),
+                "effective_year": eff.effective_year if eff else None,
+                "until": years[i + 1] - 1 if i + 1 < len(years) else None,
+                "changes": len(years),
+                "note": (user.note if user is not None else "") or "",
+                "source": "user" if user is not None else "engine",
+            })
+        return out
+
+    def coefficients_for(self, year: int) -> list[dict]:
+        out = []
+        for status, name in STATUS_NAMES.items():
+            m = self.multiplier(year, status)
+            user = _latest(self.user_multipliers, year,
+                           lambda r: r.status, status)
+            out.append({"status": status, "name": name,
+                        "effective_year": m.effective_year,
+                        "changes": len(self.coef_years(status)),
+                        "law_ref": coef_law_ref(year, status),
+                        "coefficient": str(m.coefficient),
+                        "note": (user.note if user is not None else m.note) or "",
+                        "source": "user" if user is not None else "engine"})
+        return out
+
+
+# ---------------------------------------------------------------------------
+# The installation's current snapshot.
+#
+# refresh() builds a new Norms and rebinds ONE name -- a single reference
+# assignment, so a reader holds either the old snapshot or the new one,
+# never a half-built table. A calculation calls current() once and keeps what
+# it got (calc.compute_year), so a refresh in the middle of it changes
+# nothing it reads.
+# ---------------------------------------------------------------------------
+
+_CURRENT: Norms = Norms()
+
+
+def current() -> Norms:
+    return _CURRENT
+
+
+def refresh(root) -> Norms:
+    """Re-read the owner's norm files. A malformed file raises before the
+    swap, leaving the previous snapshot standing."""
+    global _CURRENT
+    _CURRENT = Norms.load(root)
+    return _CURRENT
+
+
+# Module-level shortcuts to the current snapshot, for callers that do not hold
+# one -- the norms screen, the write path's validation. Code that computes a
+# year takes a snapshot instead (calc.compute_year).
+def statutory(year: int, category: str) -> RateRow:
+    return _CURRENT.statutory(year, category)
+
+
+def multiplier(year: int, status: str) -> MultiplierRow:
+    return _CURRENT.multiplier(year, status)
+
+
+def parameter(year: int, key: str) -> Decimal:
+    return _CURRENT.parameter(year, key)
+
+
+def rate_years(category: str) -> list[int]:
+    return _CURRENT.rate_years(category)
+
+
+def history(category: str) -> list[dict]:
+    return _CURRENT.history(category)
+
+
+def table_for(year: int) -> list[dict]:
+    return _CURRENT.table_for(year)
+
+
+def param_years(key: str) -> list[int]:
+    return _CURRENT.param_years(key)
+
+
+def parameters_for(year: int) -> list[dict]:
+    return _CURRENT.parameters_for(year)
+
+
+def coef_years(status: str) -> list[int]:
+    return _CURRENT.coef_years(status)
+
+
 def coefficients_for(year: int) -> list[dict]:
-    out = []
-    for status, name in STATUS_NAMES.items():
-        m = multiplier(year, status)
-        user = _latest(USER_MULTIPLIERS, year, lambda r: r.status, status)
-        out.append({"status": status, "name": name,
-                    "effective_year": m.effective_year,
-                    "changes": len(coef_years(status)),
-                    "law_ref": coef_law_ref(year, status),
-                    "coefficient": str(m.coefficient),
-                    "note": (user.note if user is not None else m.note) or "",
-                    "source": "user" if user is not None else "engine"})
-    return out
+    return _CURRENT.coefficients_for(year)
+
+
+def __getattr__(name: str):
+    """`rates.CATEGORIES` and friends read the CURRENT snapshot.
+
+    Attribute access only. `from .rates import CATEGORY_BY_CODE` would bind
+    one snapshot's dict at import time and never see a refresh, which is why
+    no module imports these by name any more.
+    """
+    if name == "CATEGORIES":
+        return list(_CURRENT.categories)
+    if name == "CATEGORY_BY_CODE":
+        return _CURRENT.by_code
+    if name == "EV_CODES":
+        return list(_CURRENT.ev_codes)
+    if name == "QMA_CODES":
+        return list(_CURRENT.qma_codes)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -12,7 +12,7 @@ from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
-from ..rates import CATEGORY_BY_CODE
+from .. import rates
 from ..storage import DataError, check_qma, entry_id_of
 
 from .core import Tx, guard_open_year, rows_of, save_rows, transaction
@@ -65,7 +65,7 @@ def create_asset(root: Path, slug: str, p: dict) -> str:
     if mode not in MODES:
         raise DataError(f"naməlum rejim: {mode!r}")
     category = category_of(p.get("category"))
-    is_qma = CATEGORY_BY_CODE[category].kind == "qma"
+    is_qma = rates.current().by_code[category].kind == "qma"
     life = life_of(p.get("useful_life"))
     residual = str(p.get("opening_residual", "")).strip()
     count = batch_count(p.get("say"))
@@ -83,7 +83,7 @@ def create_asset(root: Path, slug: str, p: dict) -> str:
 
         if mode == "pool":
             name = str(p.get("name", "")).strip() or \
-                f"{CATEGORY_BY_CODE[category].name_az} — qrup qalığı"
+                f"{rates.current().by_code[category].name_az} — qrup qalığı"
             inv, in_date, cost = "", "", "0.00"
             if not residual:
                 raise DataError("Qrup qalığı üçün qalıq dəyər tələb olunur")
@@ -205,7 +205,7 @@ def update_asset(root: Path, slug: str, p: dict) -> str:
         # could never be edited again -- not even to fix its name -- because
         # the very form that was supposed to let you fill the date in later
         # also refused to save without one.
-        is_qma = CATEGORY_BY_CODE[category].kind == "qma"
+        is_qma = rates.current().by_code[category].kind == "qma"
         new = {
             "inv_no": str(p.get("inv_no", "")).strip(),
             "name": str(p.get("name", "")).strip(),

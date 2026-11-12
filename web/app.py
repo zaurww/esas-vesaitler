@@ -31,7 +31,7 @@ from engine.mutate import (  # noqa: E402
     suggest_inv_no, verify_all,
 )
 from engine import rates  # noqa: E402
-from engine.rates import CATEGORIES, CATEGORY_BY_CODE, ENGINE_VERSION  # noqa: E402
+from engine.rates import ENGINE_VERSION  # noqa: E402
 from engine.storage import DataError, list_clients, load_client  # noqa: E402
 from web.update import (  # noqa: E402
     apply_update, check_latest, clear_pending_verify, download,
@@ -105,8 +105,6 @@ def _same_installation(info: dict | None) -> bool:
 
 
 _STATE_LOCK = threading.RLock()
-_closed_cache: set = set()
-_has_opening = False
 
 # Result of the post-update check (see _run_startup_verify below), set once
 # when this process starts serving and read by /api/update-status. None
@@ -147,11 +145,6 @@ def _run_startup_verify(root: Path) -> dict | None:
     return {"ok": False, "mismatches": bad,
             "from_version": pending["from_version"],
             "to_version": pending["to_version"]}
-# Card fields the calculation never reads -- counterparty, e-invoice, serial,
-# the client's own group.
-# One dict rather than one global per field: they are all "what the card says
-# about itself", and three parallel lookups was two too many.
-_card_meta: dict = {}
 
 
 def m(x: Decimal) -> str:
@@ -212,7 +205,14 @@ def default_year(data, years: list[int]) -> int:
     return max(ready) if ready else (years[-1] if years else data.start_year)
 
 
-def serialize(r) -> dict:
+def serialize(r, data) -> dict:
+    # What the card says about itself (counterparty, e-invoice, serial, the
+    # client's own group) and the client's closed years come from `data`,
+    # passed in -- they used to be module globals set by the request handler
+    # just before this call, i.e. state shared between requests (§8.0).
+    _card_meta = data.card_meta()
+    _closed_cache = data.closed_years()
+    _has_opening = any(ob.year == r.year for ob in data.opening_balances)
     return {
         "client_name": r.client_name,
         "voen": r.voen,
@@ -522,7 +522,7 @@ def asset_history(root: Path, slug: str, asset_id: str) -> dict:
         "asset": {
             "asset_id": asset.asset_id, "inv_no": asset.inv_no, "name": asset.name,
             "category": asset.category,
-            "category_name": CATEGORY_BY_CODE[asset.category].name_az,
+            "category_name": rates.current().by_code[asset.category].name_az,
             "in_date": asset.in_date.isoformat() if asset.in_date else "",
             "cost": m(asset.cost), "counterparty": asset.counterparty,
             "e_qaime": asset.e_qaime, "serial_no": asset.serial_no,
@@ -607,17 +607,6 @@ class Handler(BaseHTTPRequestHandler):
         self._send(code, json.dumps(obj, ensure_ascii=False).encode("utf-8"),
                    "application/json; charset=utf-8")
 
-    # One request at a time. The server is threaded, and two things it touches
-    # are process-wide: the rate tables re-read by rates.refresh(), and the
-    # per-request globals above that serialize() reads. Interleave two
-    # requests and a report can be built from another request's client, or
-    # computed while the rate table is being replaced.
-    #
-    # A lock rather than a redesign because the redesign is real work (pass
-    # the rate table into the calculation instead of parking it in a module)
-    # and this is a local single-user program: serialising requests costs
-    # nothing here. A `compute_year` on a 5 000-card client takes under a
-    # second, and nobody else is waiting.
     def _foreign(self, write: bool) -> str:
         """Why this request did not come from our own page, or "" if it did.
 
@@ -668,6 +657,13 @@ class Handler(BaseHTTPRequestHandler):
             pass
         self._json({"error": f"sorğu rədd edildi: {why}"}, 403)
 
+    # One request at a time -- for a different reason than before. The rate
+    # tables are now an immutable snapshot each calculation takes once
+    # (rates.Norms), and serialize() takes its card data as an argument, so
+    # no request can see another's state any more. What remains is the
+    # folder: a transaction writes several files in turn, and a report read
+    # between two of them would mix the old and the new (§8.1). Serialising
+    # costs nothing in a local single-user program.
     def do_GET(self):
         if (why := self._foreign(write=False)):
             return self._refuse(why)
@@ -749,7 +745,7 @@ class Handler(BaseHTTPRequestHandler):
                     "categories": [
                         {"code": c.code, "name_az": c.name_az,
                          "name_ru": c.name_ru, "kind": c.kind}
-                        for c in CATEGORIES
+                        for c in rates.current().categories
                     ],
                 })
                 return
@@ -759,11 +755,6 @@ class Handler(BaseHTTPRequestHandler):
                 year = int(q.get("year", ["0"])[0])
                 rates.refresh(ROOT)      # pick up edits without a restart
                 data = load_client(ROOT, slug)
-                global _closed_cache, _has_opening
-                global _card_meta
-                _card_meta = data.card_meta()
-                _closed_cache = data.closed_years()
-                _has_opening = any(ob.year == year for ob in data.opening_balances)
                 if data.status_for(year) is None:
                     # Not a failure of the data -- a year nobody has set up
                     # yet. Say what is missing and let the UI offer the form.
@@ -773,7 +764,7 @@ class Handler(BaseHTTPRequestHandler):
                         "need": "status", "year": year, "kind": "setup",
                     }, 400)
                     return
-                payload = serialize(compute_year(data, year))
+                payload = serialize(compute_year(data, year), data)
                 # The dictionary itself, not just the name on each card: the
                 # filter and the card form need the whole list, including
                 # groups nothing points at yet.
