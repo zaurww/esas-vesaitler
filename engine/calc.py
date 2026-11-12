@@ -382,7 +382,7 @@ def threshold_label(year: int) -> str:
 
 
 def compute_year(data: ClientData, year: int,
-                 _cache: dict | None = None, _depth: int = 0) -> YearResult:
+                 _cache: dict | None = None) -> YearResult:
     """Compute one year.
 
     Opening balances resolve PER ASSET, most specific first:
@@ -402,6 +402,34 @@ def compute_year(data: ClientData, year: int,
         _cache = {}
     if year in _cache:
         return _cache[year]
+    # The years this one carries from, oldest first, computed bottom-up so
+    # each finds its predecessor in the cache. This used to recurse with a
+    # depth guard of 40 that, once reached, quietly stopped carrying -- every
+    # balance older than that became zero without a word (§2.1). Iteration
+    # needs no guard: the chain ends at start_year or at the first year with
+    # no status, exactly where the carry below stops.
+    chain: list[int] = []
+    y = year - 1
+    while (y >= data.start_year and y not in _cache
+           and data.status_for(y) is not None):
+        chain.append(y)
+        y -= 1
+    for y in reversed(chain):
+        compute_year(data, y, _cache)
+    try:
+        return _compute_one(data, year, _cache)
+    except LookupError as e:
+        # A year the rate tables do not reach (before 2001 for the norms,
+        # before 2019 for the coefficients). It used to surface as a bare
+        # traceback; it is a gap in the law table, and says so (§2.1).
+        raise CalcError(
+            f"{year} ili üçün normativ cədvəldə məlumat yoxdur — "
+            f"Normalar səhifəsində əlavə edin. ({e})"
+        ) from None
+
+
+def _compute_one(data: ClientData, year: int, _cache: dict) -> YearResult:
+    """One year, with every earlier year it carries from already in _cache."""
     status_row = data.status_for(year)
     if status_row is None:
         raise CalcError(
@@ -433,14 +461,11 @@ def compute_year(data: ClientData, year: int,
     explicit = {ob.asset_id: ob.residual
                 for ob in data.opening_balances if ob.year == year}
 
-    # Chain back to the previous year for anything not stated explicitly.
-    # _depth guards against a corrupt start_year sending this into a loop.
+    # Carry from the previous year for anything not stated explicitly.
     carried: dict[str, Decimal] = {}
-    prev_ok = False
-    if (year > data.start_year and _depth < 40
+    if (year > data.start_year
             and data.status_for(year - 1) is not None):
-        prev = compute_year(data, year - 1, _cache, _depth + 1)
-        prev_ok = True
+        prev = _cache[year - 1]
         for c in prev.cards:
             if c.closing > ZERO:
                 carried[c.asset_id] = c.closing

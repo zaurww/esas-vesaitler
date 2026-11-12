@@ -91,6 +91,7 @@ class Addition:
     date: Optional[date]
     amount: Decimal
     note: str = ""
+    entry_id: str = ""                      # row identity (storage.entry_id_of)
 
 
 @dataclass(frozen=True)
@@ -100,6 +101,7 @@ class Repair:
     date: Optional[date]
     amount: Decimal
     note: str = ""
+    entry_id: str = ""                      # row identity (storage.entry_id_of)
 
 
 @dataclass(frozen=True)

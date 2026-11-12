@@ -501,11 +501,12 @@ def asset_history(root: Path, slug: str, asset_id: str) -> dict:
         if a.asset_id == asset_id:
             events.append({"date": a.date.isoformat() if a.date else str(a.year),
                            "kind": "Dəyər artımı", "amount": m(a.amount),
-                           "note": a.note})
+                           "note": a.note, "entry_id": a.entry_id})
     for rp in data.repairs:
         if rp.asset_id == asset_id:
             events.append({"date": rp.date.isoformat() if rp.date else str(rp.year),
-                           "kind": "Təmir", "amount": m(rp.amount), "note": rp.note})
+                           "kind": "Təmir", "amount": m(rp.amount), "note": rp.note,
+                           "entry_id": rp.entry_id})
     for d in data.disposals:
         if d.asset_id == asset_id:
             events.append({"date": d.date.isoformat() if d.date else "",

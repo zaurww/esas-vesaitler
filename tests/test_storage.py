@@ -1030,3 +1030,73 @@ class InterruptedWrites(TempRoot):
         (self.folder() / mutate.TX_MARKER).write_text("clients", encoding="utf-8")
         with self.assertRaises(DataError):
             mutate.recover_interrupted(self.root)
+
+
+class EntryIdentity(TempRoot):
+    """Repairs/additions are addressed by their own entry_id, not by
+    (asset_id, date): two entries on one day used to be deleted together."""
+
+    def setUp(self):
+        super().setUp()
+        mutate.create_asset(self.root, self.slug, {
+            "mode": "new", "category": "ma", "name": "Dəzgah",
+            "cost": "10000", "in_date": "2024-03-01"})
+        self.aid = self.client().assets[0].asset_id
+
+    def add(self, amount, file="repair"):
+        fn = mutate.set_repair if file == "repair" else mutate.set_addition
+        fn(self.root, self.slug, {"asset_id": self.aid, "date": "2024-06-01",
+                                  "amount": amount})
+
+    def test_correcting_one_of_two_same_day_repairs_keeps_the_other(self):
+        self.add("100")
+        self.add("200")
+        reps = self.client().repairs
+        self.assertEqual(len({r.entry_id for r in reps}), 2)
+        first = next(r for r in reps if r.amount == Decimal("100"))
+        mutate.set_repair(self.root, self.slug, {
+            "asset_id": self.aid, "orig_id": first.entry_id,
+            "date": "2024-06-01", "amount": "150"})
+        amounts = sorted(r.amount for r in self.client().repairs)
+        self.assertEqual(amounts, [Decimal("150"), Decimal("200")])
+
+    def test_removing_one_of_two_same_day_additions_keeps_the_other(self):
+        self.add("100", "addition")
+        self.add("200", "addition")
+        first = next(a for a in self.client().additions
+                     if a.amount == Decimal("100"))
+        mutate.set_addition(self.root, self.slug, {
+            "asset_id": self.aid, "orig_id": first.entry_id, "remove": "on",
+            "date": "2024-06-01", "amount": "100"})
+        self.assertEqual([a.amount for a in self.client().additions],
+                         [Decimal("200")])
+
+    def test_a_correction_keeps_its_id(self):
+        self.add("100")
+        rid = self.client().repairs[0].entry_id
+        mutate.set_repair(self.root, self.slug, {
+            "asset_id": self.aid, "orig_id": rid,
+            "date": "2024-07-01", "amount": "120"})
+        self.assertEqual([r.entry_id for r in self.client().repairs], [rid])
+
+    def test_rows_written_before_the_column_are_addressable_and_stamped(self):
+        path = self.root / "clients" / self.slug / "repairs.tsv"
+        write_tsv(path, ["year", "asset_id", "date", "amount", "note"], [
+            [2024, self.aid, "2024-06-01", "100", ""],
+            [2024, self.aid, "2024-06-01", "200", ""]])
+        reps = self.client().repairs
+        self.assertEqual([r.entry_id for r in reps], ["legacy-0", "legacy-1"])
+        mutate.set_repair(self.root, self.slug, {
+            "asset_id": self.aid, "orig_id": "legacy-1",
+            "date": "2024-06-01", "amount": "250"})
+        reps = self.client().repairs
+        self.assertEqual(sorted(r.amount for r in reps),
+                         [Decimal("100"), Decimal("250")])
+        self.assertFalse(any(r.entry_id.startswith("legacy-") for r in reps))
+
+    def test_an_unknown_id_is_refused(self):
+        self.add("100")
+        with self.assertRaises(DataError):
+            mutate.set_repair(self.root, self.slug, {
+                "asset_id": self.aid, "orig_id": "nope",
+                "date": "2024-06-01", "amount": "1"})

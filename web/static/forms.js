@@ -365,7 +365,7 @@ async function formRepair(card, existing){
   openModal(`Təmir xərci${has ? ' — düzəliş' : ''} — ${card.inv_no || card.name}`,
     listing +
     `<input type="hidden" name="asset_id" value="${card.asset_id}">` +
-    (has ? `<input type="hidden" name="orig_date" value="${existing.date}">` : '') +
+    (has ? `<input type="hidden" name="orig_id" value="${esc(existing.entry_id)}">` : '') +
     `<div class="row2">
       ${fld('date','Tarix',{type:'date',req:true,
         value: has ? existing.date : REPORT.year+'-01-01'})}
@@ -424,7 +424,7 @@ async function formAddition(card, existing){
   openModal(`Dəyər artımı${has ? ' — düzəliş' : ''} — ${card.inv_no || card.name}`,
     listing +
     `<input type="hidden" name="asset_id" value="${card.asset_id}">` +
-    (has ? `<input type="hidden" name="orig_date" value="${existing.date}">` : '') +
+    (has ? `<input type="hidden" name="orig_id" value="${esc(existing.entry_id)}">` : '') +
     `<div class="row2">
       ${fld('date','Tarix',{type:'date',req:true,
         value: has ? existing.date : REPORT.year+'-01-01'})}

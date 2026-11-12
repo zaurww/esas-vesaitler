@@ -204,3 +204,39 @@ class GroupsChangeNothing(EngineTest):
 if __name__ == "__main__":
     import unittest
     unittest.main()
+
+
+class LongHistory(EngineTest):
+    """The carry used to recurse with a depth guard of 40 and quietly stop
+    there -- every balance older than that became zero (§2.1)."""
+
+    def test_a_balance_carries_across_more_than_forty_years(self):
+        import tempfile
+        from pathlib import Path
+        from tests.support import asset as mk, rates
+        tmp = Path(tempfile.mkdtemp())
+        (tmp / "coefficients.tsv").write_text(
+            "effective_year\tstatus\tcoefficient\tnote\n1970\torta\t1\t\n",
+            encoding="utf-8-sig")
+        (tmp / "rates.tsv").write_text(
+            "effective_year\tcategory\tmax_rate\trepair_limit\tnote\n"
+            "1970\tbt\t0.07\t0.02\t\n", encoding="utf-8-sig")
+        (tmp / "parameters.tsv").write_text(
+            "effective_year\tkey\tvalue\tnote\n"
+            "1970\tthreshold_abs\t500\t\n"
+            "1970\tthreshold_pct\t0.05\t\n", encoding="utf-8-sig")
+        rates.refresh(tmp)
+        data = client(start_year=1970, years=tuple(range(1970, 2027)),
+                      assets=[mk("A", "bt", "1000", in_year=1970)])
+        r = compute_year(data, 2026)
+        expected = D("1000")
+        for _ in range(1970, 2027):
+            expected = (expected - (expected * D("0.07")).quantize(D("0.01"),
+                        rounding="ROUND_HALF_UP"))
+        self.assertGreater(card_of(r, "A").closing, D("0"))
+        self.assertMoney(card_of(r, "A").closing, str(expected))
+
+    def test_a_year_before_the_coefficient_table_is_a_calc_error(self):
+        data = client(start_year=2010, years=(2010,))
+        with self.assertRaises(CalcError):
+            compute_year(data, 2010)

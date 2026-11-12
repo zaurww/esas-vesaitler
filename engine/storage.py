@@ -185,6 +185,19 @@ def append_tsv(path: Path, header: list[str], rows: Iterable[list[Any]]) -> None
 
 # ------------------------------------------------------------------ client ---
 
+def entry_id_of(row: dict[str, str], index: int) -> str:
+    """The identity of one repair/addition row.
+
+    Rows used to be addressed by (asset_id, date), and an edit removed EVERY
+    row matching that pair -- two repairs of one asset on one day, and
+    correcting one deleted both. A row now carries its own `entry_id`. A row
+    written before that column existed gets a positional stand-in; the next
+    write to the file stamps real ids on every row (mutate.assets), so the
+    stand-in only ever has to survive one read-then-edit.
+    """
+    return (row.get("entry_id") or "").strip() or f"legacy-{index}"
+
+
 def _where(r: dict[str, str]) -> str:
     return f"{r.get('__file__', '?')}:{r.get('__line__', '?')}"
 
@@ -314,9 +327,10 @@ def load_client(root: Path, slug: str) -> ClientData:
             proceeds=_dec(r.get("proceeds", ""), w),
         ))
 
-    for r in read_tsv(folder / "repairs.tsv"):
+    for i, r in enumerate(read_tsv(folder / "repairs.tsv")):
         w = _where(r)
         data.repairs.append(Repair(
+            entry_id=entry_id_of(r, i),
             year=_int(r.get("year", ""), w),
             asset_id=r["asset_id"].strip(),
             date=_date(r.get("date", ""), w),
@@ -324,9 +338,10 @@ def load_client(root: Path, slug: str) -> ClientData:
             note=r.get("note", "").strip(),
         ))
 
-    for r in read_tsv(folder / "additions.tsv"):
+    for i, r in enumerate(read_tsv(folder / "additions.tsv")):
         w = _where(r)
         data.additions.append(Addition(
+            entry_id=entry_id_of(r, i),
             year=_int(r.get("year", ""), w),
             asset_id=r["asset_id"].strip(),
             date=_date(r.get("date", ""), w),

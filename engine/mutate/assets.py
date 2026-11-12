@@ -6,12 +6,14 @@ stores a result."""
 
 from __future__ import annotations
 
+import uuid
+
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
 from ..rates import CATEGORY_BY_CODE
-from ..storage import DataError, check_qma
+from ..storage import DataError, check_qma, entry_id_of
 
 from .core import Tx, guard_open_year, rows_of, save_rows, transaction
 from .groups import group_ref
@@ -455,67 +457,71 @@ def set_disposal(root: Path, slug: str, p: dict) -> str:
     return aid
 
 
-def set_repair(root: Path, slug: str, p: dict) -> str:
-    """Add, correct or remove one repair-cost entry.
+def _set_entry(root: Path, slug: str, p: dict, *, file: str, action: str,
+               kind: str, date_label: str) -> str:
+    """Add, correct or remove one row of repairs.tsv / additions.tsv.
 
-    Keyed by (asset_id, date), not asset_id alone -- unlike a disposal, an
-    asset can legally carry several repairs in a year (or across years, see
-    the `it` category, §5.1). `orig_date` names the row being replaced; a
-    fresh entry has none. Correcting an amount is therefore remove-the-old
-    plus add-the-new in the SAME transaction, mirroring `set_disposal` --
-    not two separate actions, which would mean two backups and two
-    recomputes (§8.1) for what the accountant experiences as one edit.
+    An asset can legally carry several entries in a year (or across years,
+    see `it`, §5.1), so the row being replaced is named by its own `orig_id`
+    (storage.entry_id_of). It used to be named by (asset_id, date), and the
+    filter dropped every row matching that pair: correcting one of two
+    repairs filed on the same day deleted both, silently.
+
+    Correcting is remove-the-old plus add-the-new in the SAME transaction,
+    mirroring `set_disposal` -- not two actions, which would mean two backups
+    and two recomputes (§8.1) for what the accountant experiences as one edit.
+    The closed-year guard reads the old row's date from the FILE, not from the
+    request.
     """
     aid = str(p["asset_id"])
-    orig = str(p.get("orig_date", "")).strip()
-    with transaction(root, slug, "repair.set") as tx:
-        if orig:
-            guard_open_year(root, slug, int(orig[:4]))
-        rows = rows_of(root, slug, "repairs.tsv")
-        if orig:
-            rows = [r for r in rows
-                    if not (r["asset_id"] == aid and r["date"] == orig)]
+    orig_id = str(p.get("orig_id", "")).strip()
+    with transaction(root, slug, action) as tx:
+        rows = rows_of(root, slug, file)
+        # Stamp real ids on rows written before the column existed: the
+        # positional stand-in only has to survive this one read-then-edit.
+        for i, r in enumerate(rows):
+            r["entry_id"] = entry_id_of(r, i)
+        for r in rows:
+            if r["entry_id"].startswith("legacy-"):
+                r["entry_id"] = uuid.uuid4().hex[:12]
+                r["_legacy"] = "1"
+        old = None
+        if orig_id:
+            legacy = orig_id.startswith("legacy-")
+            idx = int(orig_id[7:]) if legacy and orig_id[7:].isdigit() else -1
+            for i, r in enumerate(rows):
+                if (legacy and i == idx and r.get("_legacy")
+                        or not legacy and r["entry_id"] == orig_id):
+                    old = r
+                    break
+            if old is None or old["asset_id"] != aid:
+                raise DataError(f"qeyd tapılmadı: {orig_id}")
+            guard_open_year(root, slug, int(old["year"]))
+            rows.remove(old)
         if not p.get("remove"):
-            when = iso_date(p.get("date"), "Təmir tarixi")
+            when = iso_date(p.get("date"), date_label)
             year = int(when[:4])
             guard_open_year(root, slug, year)
             amount = dec(p.get("amount"), "Məbləğ", allow_zero=False)
             rows.append({"year": str(year), "asset_id": aid, "date": when,
-                         "amount": amount, "note": str(p.get("note", "")).strip()})
-            tx.log(aid, f"repair {when}", "" if not orig else "düzəliş edildi",
-                   amount)
+                         "amount": amount, "note": str(p.get("note", "")).strip(),
+                         "entry_id": old["entry_id"] if old else uuid.uuid4().hex[:12]})
+            tx.log(aid, f"{kind} {when}", "" if old is None
+                   else f"{old['date']} {old['amount']}", amount)
+        elif old is None:
+            raise DataError("silinəcək qeyd göstərilməyib")
         else:
-            tx.log(aid, f"repair {orig}", "var", "silindi")
-        save_rows(root, slug, "repairs.tsv", rows)
+            tx.log(aid, f"{kind} {old['date']}", old["amount"], "silindi")
+        save_rows(root, slug, file, rows)
     return aid
+
+
+def set_repair(root: Path, slug: str, p: dict) -> str:
+    return _set_entry(root, slug, p, file="repairs.tsv", action="repair.set",
+                      kind="repair", date_label="Təmir tarixi")
+
 
 def set_addition(root: Path, slug: str, p: dict) -> str:
-    """Add, correct or remove one capital-addition entry.
-
-    Keyed by (asset_id, date), not asset_id alone -- same reasoning as
-    `set_repair`: an asset can carry several additions in a year. Correcting
-    an amount is remove-the-old plus add-the-new in the SAME transaction.
-    """
-    aid = str(p["asset_id"])
-    orig = str(p.get("orig_date", "")).strip()
-    with transaction(root, slug, "addition.set") as tx:
-        if orig:
-            guard_open_year(root, slug, int(orig[:4]))
-        rows = rows_of(root, slug, "additions.tsv")
-        if orig:
-            rows = [r for r in rows
-                    if not (r["asset_id"] == aid and r["date"] == orig)]
-        if not p.get("remove"):
-            when = iso_date(p.get("date"), "Tarix")
-            year = int(when[:4])
-            guard_open_year(root, slug, year)
-            amount = dec(p.get("amount"), "Məbləğ", allow_zero=False)
-            rows.append({"year": str(year), "asset_id": aid, "date": when,
-                         "amount": amount, "note": str(p.get("note", "")).strip()})
-            tx.log(aid, f"addition {when}", "" if not orig else "düzəliş edildi",
-                   amount)
-        else:
-            tx.log(aid, f"addition {orig}", "var", "silindi")
-        save_rows(root, slug, "additions.tsv", rows)
-    return aid
+    return _set_entry(root, slug, p, file="additions.tsv", action="addition.set",
+                      kind="addition", date_label="Tarix")
 

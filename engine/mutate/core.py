@@ -16,6 +16,7 @@ import uuid
 
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -42,8 +43,11 @@ HEADERS: dict[str, list[str]] = {
     "opening_balances.tsv": ["year", "asset_id", "category", "residual", "source",
                              "engine_version", "closed_at"],
     "disposals.tsv": ["asset_id", "date", "type", "proceeds"],
-    "repairs.tsv": ["year", "asset_id", "date", "amount", "note"],
-    "additions.tsv": ["year", "asset_id", "date", "amount", "note"],
+    # entry_id appended (§7): rows used to be addressed by (asset_id, date),
+    # and two entries on one date were indistinguishable -- see
+    # storage.entry_id_of. Ignoring it changes no figure.
+    "repairs.tsv": ["year", "asset_id", "date", "amount", "note", "entry_id"],
+    "additions.tsv": ["year", "asset_id", "date", "amount", "note", "entry_id"],
     "taxpayer_status.tsv": ["year", "status", "basis", "use_coefficient"],
     "rate_elections.tsv": ["year", "category", "applied_rate", "asset_id"],
     "writeoffs.tsv": ["year", "asset_id", "reason"],
@@ -387,7 +391,13 @@ def verify_client(root: Path, slug: str) -> list[dict]:
             if key not in stored:
                 continue
             recomputed = f"{money(c.closing):.2f}"
-            if recomputed != f"{float(stored[key]):.2f}":
+            # Decimal, never float (§11) -- the seal is a money figure.
+            try:
+                sealed = money(Decimal(stored[key]))
+            except InvalidOperation:
+                raise DataError(f"opening_balances.tsv: {year + 1} "
+                                f"{c.asset_id}: qalıq oxunmur: {stored[key]!r}")
+            if money(c.closing) != sealed:
                 mismatches.append({
                     "client": slug, "year": year, "asset_id": c.asset_id,
                     "stored": stored[key], "recomputed": recomputed,
@@ -421,7 +431,8 @@ def _recompute_everything(root: Path) -> None:
     for s in list_clients(root):
         data = load_client(root, s)
         closed = data.closed_years()
-        for st in data.statuses:
+        cache: dict = {}
+        for st in sorted(data.statuses, key=lambda x: x.year):
             if st.year not in closed:
-                compute_year(data, st.year)
+                compute_year(data, st.year, cache)
 
