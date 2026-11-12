@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ..rates import FORMAT_VERSION
-from ..storage import DataError, load_client, write_tsv
+from ..storage import DataError, client_folder, load_client, write_tsv
 
 from .core import HEADERS, mutate_folder, save_rows, transaction
 from .numbering import slugify
@@ -111,7 +111,7 @@ def create_client(root: Path, _slug: str, p: dict) -> str:
         raise DataError("Status: mikro | kicik | orta | iri")
 
     slug = slugify(p.get("slug") or name)
-    folder = root / "clients" / slug
+    folder = client_folder(root, slug)
     if folder.exists():
         raise DataError(f"«{slug}» qovluğu artıq mövcuddur")
     folder.mkdir(parents=True)

@@ -37,7 +37,8 @@ except ModuleNotFoundError as e:
 from engine import rates  # noqa: E402
 from engine.rates import ENGINE_VERSION  # noqa: E402
 from engine.storage import (  # noqa: E402
-    OPENING_HEADER, DataError, append_tsv, list_clients, load_client,
+    OPENING_HEADER, DataError, append_tsv, client_folder, list_clients,
+    load_client,
 )
 
 
@@ -116,7 +117,7 @@ def cmd_calc(slug: str, year: int) -> None:
 def cmd_export(slug: str, year: int) -> None:
     data = load_client(ROOT, slug)
     r = compute_year(data, year)
-    out = ROOT / "clients" / slug / f"{slug}-{year}-amortizasiya.xlsx"
+    out = client_folder(ROOT, slug) / f"{slug}-{year}-amortizasiya.xlsx"
     out.write_bytes(build_workbook(r, data.card_meta()))
     print(f"yazıldı: {out}")
 
@@ -167,7 +168,7 @@ def cmd_golden(update: bool) -> int:
     hand is the diff `git diff` shows after this runs.
     """
     from tests.golden import DEMO_SLUG, client_snapshot, golden_path, write_golden
-    if not (ROOT / "clients" / DEMO_SLUG).is_dir():
+    if not client_folder(ROOT, DEMO_SLUG).is_dir():
         print(f"  {DEMO_SLUG} yoxdur -- yoxlanacaq heç nə yoxdur")
         return 0
     if update:

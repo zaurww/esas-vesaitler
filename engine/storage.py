@@ -203,6 +203,42 @@ def _where(r: dict[str, str]) -> str:
     return f"{r.get('__file__', '?')}:{r.get('__line__', '?')}"
 
 
+# ------------------------------------------------------------ where clients live
+
+CLIENTS_DIR = "clients"
+
+
+def one_segment(slug: str) -> str:
+    """A client slug names ONE folder under clients/ and nothing else.
+
+    Every request carries the slug in from outside, so without this a
+    crafted value ("../..") would address a path outside the store. Only
+    traversal is refused here, not slug shape: folders created before
+    slugify was applied on import are odd-looking but harmless, and
+    breaking access to an existing client is worse than an ugly name.
+    """
+    s = str(slug or "").strip()
+    if not s or s in (".", "..") or "/" in s or "\\" in s or Path(s).is_absolute():
+        raise DataError(f"müştəri adı yolverilməzdir: {slug!r}")
+    return s
+
+
+def clients_root(root: Path) -> Path:
+    return Path(root) / CLIENTS_DIR
+
+
+def client_folder(root: Path, slug: str) -> Path:
+    """THE one place a client's folder is resolved from its name.
+
+    It used to be spelled `root / "clients" / slug` in some dozen places, and
+    only the write path checked the name: `load_client` -- which every report
+    request goes through -- took `?client=../..` as given. One resolver closes
+    that everywhere at once, and is the seam where a client living in an
+    arbitrary folder on disk (§13.6) will plug in.
+    """
+    return clients_root(root) / one_segment(slug)
+
+
 def load_client(root: Path, slug: str) -> ClientData:
     # The owner's norms live next to the engine, not in the client folder
     # (§5.1), so they have to be re-read somewhere. This is the one place both
@@ -215,9 +251,9 @@ def load_client(root: Path, slug: str) -> ClientData:
     except (ValueError, KeyError, InvalidOperation) as e:
         raise DataError(f"normalar faylı oxunmadı: {e}") from None
 
-    folder = root / "clients" / slug
+    folder = client_folder(root, slug)
     if not folder.is_dir():
-        raise DataError(f"müştəri tapılmadı: {folder}")
+        raise DataError(f"müştəri tapılmadı: {slug}")
 
     cfg_path = folder / "config.toml"
     if not cfg_path.exists():
@@ -405,7 +441,7 @@ def load_client(root: Path, slug: str) -> ClientData:
 
 
 def list_clients(root: Path) -> list[str]:
-    base = root / "clients"
+    base = clients_root(root)
     if not base.is_dir():
         return []
     return sorted(p.name for p in base.iterdir() if (p / "config.toml").exists())

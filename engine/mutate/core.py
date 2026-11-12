@@ -23,7 +23,8 @@ from typing import Any, Iterator
 from .. import rates
 from ..calc import compute_year, money
 from ..storage import (
-    DataError, append_tsv, list_clients, load_client, read_tsv, write_tsv,
+    DataError, append_tsv, client_folder, clients_root, list_clients,
+    load_client, one_segment, read_tsv, write_tsv,
 )
 from .parse import _toml_str
 
@@ -56,23 +57,8 @@ HEADERS: dict[str, list[str]] = {
 }
 
 
-def one_segment(slug: str) -> str:
-    """A client slug names ONE folder under clients/ and nothing else.
-
-    Every action carries the slug in from the request, so without this a
-    crafted value ("../..") would address a path outside the store. Only
-    traversal is refused here, not slug shape: folders created before
-    slugify was applied on import are odd-looking but harmless, and
-    breaking access to an existing client is worse than an ugly name.
-    """
-    s = str(slug or "").strip()
-    if not s or s in (".", "..") or "/" in s or "\\" in s or Path(s).is_absolute():
-        raise DataError(f"müştəri adı yolverilməzdir: {slug!r}")
-    return s
-
-
 def mutate_folder(root: Path, slug: str) -> Path:
-    f = root / "clients" / one_segment(slug)
+    f = client_folder(root, slug)
     if not f.is_dir():
         raise DataError(f"müştəri tapılmadı: {slug}")
     return f
@@ -135,7 +121,7 @@ def _backup_key(root: Path, slug: str) -> str:
     never touched again -- so it runs ahead of the transaction's own
     backup-and-rollback machinery rather than inside it.
     """
-    folder = root / "clients" / one_segment(slug)
+    folder = client_folder(root, slug)
     cfg_path = folder / "config.toml"
     text = cfg_path.read_text(encoding="utf-8-sig")
     cfg = tomllib.loads(text)
@@ -281,7 +267,7 @@ def recover_interrupted(root: Path) -> list[str]:
     around -- it raises, because the folder may be half-written (§2.1).
     """
     recovered: list[str] = []
-    base = root / "clients"
+    base = clients_root(root)
     if not base.is_dir():
         return recovered
     for folder in sorted(p for p in base.iterdir() if p.is_dir()):
@@ -380,7 +366,7 @@ def verify_client(root: Path, slug: str) -> list[dict]:
     """
     data = load_client(root, slug)
     stored: dict[tuple[int, str], str] = {}
-    for row in read_tsv(root / "clients" / slug / "opening_balances.tsv"):
+    for row in read_tsv(client_folder(root, slug) / "opening_balances.tsv"):
         if row.get("source") == "year_close":
             stored[(int(row["year"]), row["asset_id"])] = row["residual"].strip()
     mismatches: list[dict] = []

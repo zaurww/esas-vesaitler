@@ -22,7 +22,7 @@ from typing import Any
 from .. import rates
 from ..calc import compute_year
 from ..rates import ENGINE_VERSION, FORMAT_VERSION, version_tuple
-from ..storage import DataError, load_client
+from ..storage import DataError, client_folder, load_client
 
 from .core import mutate_folder, one_segment
 from .numbering import slugify
@@ -114,7 +114,7 @@ def inspect_archive(root: Path, blob: bytes) -> dict:
 
     # Not blocking: importing under a different name is a normal thing to do,
     # so the collision is reported and the caller picks a target.
-    exists = (root / "clients" / man["slug"]).exists()
+    exists = client_folder(root, man["slug"]).exists()
     if exists:
         notes.append(f"«{man['slug']}» qovluğu artıq mövcuddur — "
                      f"başqa ad seçin.")
@@ -143,7 +143,7 @@ def import_client(root: Path, _slug: str, p: dict) -> Any:
     slug = slugify(p.get("slug") or man["slug"])
     if not slug:
         raise DataError("Qovluq adı boşdur")
-    folder = root / "clients" / one_segment(slug)
+    folder = client_folder(root, slug)
     if folder.exists():
         raise DataError(f"«{slug}» qovluğu artıq mövcuddur")
     folder.mkdir(parents=True)

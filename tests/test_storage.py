@@ -741,6 +741,15 @@ class PathSafety(EngineTest):
             with self.assertRaises(DataError, msg=bad):
                 mutate.one_segment(bad)
 
+    def test_reading_refuses_traversal_too(self):
+        """load_client took `?client=../..` as given -- only the write path
+        checked the name. Every path now comes from storage.client_folder."""
+        for bad in ("..", "../clients", "a/b", "a\\b"):
+            with self.assertRaises(DataError, msg=bad):
+                load_client(Path(tempfile.gettempdir()), bad)
+            with self.assertRaises(DataError, msg=bad):
+                mutate.verify_client(Path(tempfile.gettempdir()), bad)
+
     def test_slugify_transliterates_to_ascii(self):
         self.assertEqual(mutate.slugify('«Şəfa Tibb» MMC'), "sefa-tibb-mmc")
 
