@@ -16,6 +16,7 @@ The second group is the one worth having tests for: each of those would
 otherwise fail by producing a plausible number rather than an error.
 """
 
+import dataclasses
 from datetime import date
 
 from tests.support import (
@@ -27,38 +28,71 @@ from engine.calc import CalcError, compute_year
 
 
 def qma(aid="Q1", kind="qma-m", cost="1000", in_year=2024, life=5):
-    return asset(aid, kind, cost, in_year=in_year,
-                 useful_life=life if kind == "qma-m" else None)
+    """Bought on 1 January unless a test says otherwise: a known term runs in
+    months from the month of purchase, and the tests that are about something
+    else (coefficient, disposal, the 114 line) should see whole years."""
+    a = asset(aid, kind, cost, in_year=in_year,
+              useful_life=life if kind == "qma-m" else None)
+    return dataclasses.replace(a, in_date=date(in_year, 1, 1))
 
 
 class KnownTerm(EngineTest):
     """114.3.6, first half: "istifadə müddəti məlum olanlar üçün isə illər
     üzrə istifadə müddətinə mütənasib məbləğlərlə" -- the cost spread over the
-    years of the term. Straight line, and it has been that in both редакции."""
+    term in proportion to the use that falls in each year. Counted in MONTHS
+    from the month of purchase (Category.monthly_schedule, §5.3): a one-year
+    licence bought in July is used half in each of two tax years."""
 
-    def build(self, life=5, cost="1000"):
+    def build(self, life=5, cost="1000", month=1, day=1):
         data = client(years=tuple(range(2024, 2033)), start_year=2024)
-        data.assets = [qma(cost=cost, life=life)]
+        a = qma(cost=cost, life=life)
+        data.assets = [dataclasses.replace(a, in_date=date(2024, month, day))]
         return data
 
-    def test_the_charge_is_the_same_every_year(self):
+    def test_bought_in_january_the_charge_is_the_same_every_year(self):
         data = self.build()
         for y in range(2024, 2029):
             self.assertMoney(card_of(compute_year(data, y), "Q1").depreciation,
                              "200.00", f"{y}")
 
-    def test_the_year_of_acquisition_carries_a_full_year(self):
-        """§5.3 step 2. Neither 114.3.6 nor 114.6 knows about months, so a
-        purchase in December is a full annual amount, exactly as for a fixed
-        asset."""
-        r = compute_year(self.build(), 2024)
-        self.assertMoney(card_of(r, "Q1").depreciation, "200.00")
+    def test_the_year_of_acquisition_carries_only_its_months(self):
+        """Bought in December: one month of sixty is used in 2024. This is
+        where 114.3.6 parts from 114.4 -- a fixed asset takes the full annual
+        norm whatever the month; a known-term QMA is proportional to use."""
+        r = compute_year(self.build(month=12, day=20), 2024)
+        self.assertMoney(card_of(r, "Q1").depreciation, "16.67")
 
-    def test_it_lands_on_zero_at_the_end_of_the_term(self):
-        r = compute_year(self.build(), 2028)
-        c = card_of(r, "Q1")
-        self.assertMoney(c.depreciation, "200.00")
-        self.assertMoney(c.closing, "0.00")
+    def test_a_one_year_licence_bought_in_july_splits_in_half(self):
+        """The case that brought this in: Fortigate, 1 995 AZN, one year from
+        July 2025 -- six months in each tax year."""
+        data = self.build(life=1, cost="1995", month=7, day=12)
+        c24 = card_of(compute_year(data, 2024), "Q1")
+        c25 = card_of(compute_year(data, 2025), "Q1")
+        self.assertMoney(c24.depreciation, "997.50")
+        self.assertMoney(c25.depreciation, "997.50")
+        self.assertMoney(c25.closing, "0.00")
+
+    def test_the_monthly_view_covers_only_the_months_of_use(self):
+        """The months are the calculation here, not just a view: the second
+        half of the July licence lies in January-June, and nothing after."""
+        data = self.build(life=1, cost="1995", month=7, day=12)
+        m24 = card_of(compute_year(data, 2024), "Q1").monthly
+        m25 = card_of(compute_year(data, 2025), "Q1").monthly
+        self.assertTrue(all(v == 0 for v in m24[:6]))
+        self.assertTrue(all(v > 0 for v in m24[6:]))
+        self.assertTrue(all(v > 0 for v in m25[:6]))
+        self.assertTrue(all(v == 0 for v in m25[6:]))
+        self.assertMoney(sum(m25, D("0")), "997.50")
+
+    def test_a_mid_year_start_runs_into_a_sixth_year_and_ends_at_zero(self):
+        data = self.build(month=6, day=15)
+        total = D("0")
+        for y in range(2024, 2030):
+            total += card_of(compute_year(data, y), "Q1").depreciation
+        self.assertMoney(card_of(compute_year(data, 2024), "Q1").depreciation,
+                         "116.67")                     # 7 of 60 months
+        self.assertMoney(total, "1000.00")
+        self.assertMoney(card_of(compute_year(data, 2029), "Q1").closing, "0.00")
 
     def test_and_then_the_card_stays_as_a_zero_row(self):
         c = card_of(compute_year(self.build(), 2029), "Q1")
@@ -67,30 +101,33 @@ class KnownTerm(EngineTest):
         self.assertMoney(c.depreciation, "0.00")
 
     def test_a_term_that_does_not_divide_evenly_still_ends_at_zero(self):
-        """1000 over 3 years is 333.33, 333.34, 333.33 -- what matters is that
-        nothing is left behind, because base / years-left takes the remainder
-        with it in the final year."""
-        data = self.build(life=3)
+        """Whatever the rounding, base x used / left takes the remainder with
+        it in the final share, n/n."""
+        data = self.build(life=3, month=5)
         total = D("0")
-        for y in (2024, 2025, 2026):
+        for y in range(2024, 2028):
             total += card_of(compute_year(data, y), "Q1").depreciation
         self.assertMoney(total, "1000.00")
-        self.assertMoney(card_of(compute_year(data, 2026), "Q1").closing, "0.00")
+        self.assertMoney(card_of(compute_year(data, 2027), "Q1").closing, "0.00")
 
     def test_a_residual_carried_in_is_spread_over_what_is_left(self):
         """Onboarding: the client's last return says 700 for a five-year asset
-        bought in 2024. Two years are gone, so three are left -- not five, and
-        not a fixed 1/5 of a cost the residual no longer matches."""
+        bought in January 2024. 24 months are gone, 36 left, 12 of them this
+        year -- not a fixed 1/5 of a cost the residual no longer matches."""
         data = self.build()
         data.opening_balances = [opening(2026, "Q1", "700", "qma-m")]
         self.assertMoney(card_of(compute_year(data, 2026), "Q1").depreciation,
                          "233.33")
 
-    def test_the_rate_reported_is_the_norm_and_the_years_left(self):
+    def test_the_rate_reported_is_the_norm_and_the_months_left(self):
         info = card_of(compute_year(self.build(), 2026), "Q1").rate_info
         self.assertEqual(info.method, "duz")
         self.assertEqual(info.term_years, 5)
-        self.assertEqual(info.remaining_years, 3)
+        self.assertEqual(info.remaining_months, 36)
+        self.assertEqual(info.months_this_year, 12)
+        self.assertIsNone(info.remaining_years)
+        self.assertEqual(info.remaining_label, "3 il")
+        self.assertEqual(info.share_label, "× 12/36")
         self.assertEqual(info.applied, D(1) / D(5))
 
     def test_without_a_term_it_refuses_to_guess(self):

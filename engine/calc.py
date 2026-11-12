@@ -173,6 +173,31 @@ class RateInfo:
     term_years: Optional[int] = None
     remaining_years: Optional[int] = None
     per_card: bool = False            # the term lives on the card, not here
+    # Monthly schedule (Category.monthly_schedule): the term left at the start
+    # of the year, and how much of it falls inside this year, both in months.
+    # Set instead of remaining_years, never alongside it.
+    remaining_months: Optional[int] = None
+    months_this_year: Optional[int] = None
+
+    @property
+    def remaining_label(self) -> str:
+        """What is left of the term at the start of the year, as printed."""
+        if self.remaining_months is not None:
+            return months_text(self.remaining_months)
+        return f"{self.remaining_years} il" if self.remaining_years else ""
+
+    @property
+    def share_label(self) -> str:
+        """The operation on the base that gives this year's charge."""
+        if self.remaining_months is not None:
+            return f"× {self.months_this_year}/{self.remaining_months}"
+        return f"÷ {self.remaining_years}" if self.remaining_years else ""
+
+
+def months_text(m: int) -> str:
+    years, months = divmod(m, 12)
+    parts = ([f"{years} il"] if years else []) + ([f"{months} ay"] if months else [])
+    return " ".join(parts) or "0 ay"
 
 
 @dataclass
@@ -320,7 +345,8 @@ MONTHS_AZ = ["Yanvar", "Fevral", "Mart", "Aprel", "May", "İyun",
              "İyul", "Avqust", "Sentyabr", "Oktyabr", "Noyabr", "Dekabr"]
 
 
-def split_monthly(annual: Decimal, start_month: int = 1) -> list[Decimal]:
+def split_monthly(annual: Decimal, start_month: int = 1,
+                  end_month: int = 12) -> list[Decimal]:
     """Annual amount / months held this year, rounding remainder pushed into
     the last month so the twelve parts add back up to the annual figure
     exactly.
@@ -334,14 +360,19 @@ def split_monthly(annual: Decimal, start_month: int = 1) -> list[Decimal]:
     January is misleading even though the annual total is correct either
     way. `start_month` is 1 for an asset carried from an earlier year --
     it was on the books for all twelve months.
+
+    `end_month` is earlier than December only for a monthly schedule whose
+    term runs out inside the year: there the months are the calculation, not
+    just the view, and painting July for a licence that ended in June would
+    contradict the very figure it splits.
     """
     if annual == ZERO:
         return [ZERO] * 12
-    months = 13 - start_month
+    months = end_month - start_month + 1
     per = money(annual / D(months))
     out = [ZERO] * (start_month - 1) + [per] * (months - 1)
     out.append(money(annual - per * (months - 1)))
-    return out
+    return out + [ZERO] * (12 - end_month)
 
 
 def threshold_test(card: "CardResult", residual: Decimal, year: int,
@@ -553,7 +584,7 @@ class _RateResolver:
                     method="duz", per_card=True,
                 )
             norm = D(1) / D(term)
-            remaining = None
+            remaining = rem_m = used = None
             if asset is not None:
                 if asset.in_date is None:
                     raise CalcError(
@@ -561,17 +592,28 @@ class _RateResolver:
                         f"— düz xətt metodu üçün cədvəlin başlanğıcı məlum "
                         f"olmalıdır."
                     )
-                # Years already behind it. The year of acquisition is year
-                # zero: a full annual amount is charged in it, exactly as for
-                # a fixed asset (§5.3 step 2) -- neither 114.3.6 nor 114.6
-                # knows anything about months.
-                remaining = max(1, term - (year - asset.in_date.year))
+                if norms.by_code[code].monthly_schedule:
+                    # Months, counted from the month of purchase (§5.3). Use
+                    # starts in the purchase month and runs term x 12 months;
+                    # this year gets its share of what is left of them.
+                    start = asset.in_date.year * 12 + asset.in_date.month - 1
+                    y0 = year * 12
+                    # A residual still standing after the term ran out (a
+                    # carried-in balance) goes out whole: 1 of 1.
+                    rem_m = max(1, term * 12 - max(0, y0 - start))
+                    used = min(12 - max(0, start - y0), rem_m)
+                else:
+                    # Years already behind it. The year of acquisition is
+                    # year zero: a full annual amount is charged in it,
+                    # exactly as for a fixed asset (§5.3 step 2).
+                    remaining = max(1, term - (year - asset.in_date.year))
             return RateInfo(
                 category=code, statutory_max=norm,
                 statutory_year=st.effective_year, status=status_row.status,
                 coefficient=coefficient, ceiling=norm, applied=norm,
                 elected=False, below_ceiling=False,
                 method="duz", term_years=term, remaining_years=remaining,
+                remaining_months=rem_m, months_this_year=used,
             )
 
         if st.max_rate is None:
@@ -636,7 +678,13 @@ def _straight(base: Decimal, info: "RateInfo") -> Decimal:
     overshoots. Dividing what is on the books by the years it has left
     arrives at zero at the end of the term either way -- the rule 114.11.2
     states for a change of method, applied to the same situation.
+
+    In months (Category.monthly_schedule) it is the same rule at a finer
+    grain: base x months used this year / months left. The last share is
+    n/n, so the schedule still ends at zero.
     """
+    if info.remaining_months is not None:
+        return money(base * D(info.months_this_year) / D(info.remaining_months))
     return money(base / D(info.remaining_years))
 
 
@@ -1080,7 +1128,9 @@ def _compute_one(data: ClientData, year: int, _cache: dict,
         start_month = (asset.in_date.month
                        if asset.in_date is not None and asset.in_date.year == year
                        else 1)
-        c.monthly = split_monthly(c.depreciation, start_month)
+        used = c.rate_info.months_this_year if c.rate_info else None
+        end_month = min(12, start_month + used - 1) if used else 12
+        c.monthly = split_monthly(c.depreciation, start_month, end_month)
 
         # Same test against the closing residual. That residual becomes next
         # year's opening balance, so this is a reliable forecast of which

@@ -240,21 +240,29 @@ const GRID_COLS = [
   {f:'group',            t:'Növ',               w:130},
   {f:'note',             t:'Qeyd',              w:130},
 ];
-const GRID_DEL = 36;                     // the row-delete column, no field
+/* The row-selection column, no field. It stands FIRST, not last: the grid is
+   ~1 500px wide, and a delete control at the far right meant scrolling across
+   the sheet for every row -- then back again, because the rebuild reset the
+   horizontal scroll. Rows are cleared by ticking them and deleting at once. */
+const GRID_SEL = 58;
 const gcol = f => GRID_COLS.findIndex(c => c.f === f);
 const gridRow = () => GRID_COLS.map(() => '');
-const GRID_WIDTH = GRID_COLS.reduce((w, c) => w + c.w, GRID_DEL);
+const GRID_WIDTH = GRID_COLS.reduce((w, c) => w + c.w, GRID_SEL);
 
 function impGrid(rows){
   IMP.step = 2; IMP.back = impGrid;
   const data = rows || IMP.grid || [];
-  while (data.length < 15) data.push(gridRow());
+  // Padded only when there is nothing at all: padding after every rebuild
+  // would put back the very blank rows "Boş sətirləri sil" just took out.
+  if (!data.length) for (let i = 0; i < 15; i++) data.push(gridRow());
   IMP.grid = data;
-  // Every edit rebuilds the grid, and deleting a row is now an ordinary edit.
-  // Without keeping the scroll, clearing four bad rows would send the sheet
-  // back to line one four times.
+  if (!IMP.gridSel) IMP.gridSel = new Set();
+  const sel = IMP.gridSel;
+  // Every edit rebuilds the grid. Without keeping the scroll -- both ways --
+  // clearing rows would send the sheet back to its top-left corner each time.
   const open = document.getElementById('gridwrap');
   const scroll = open ? open.scrollTop : 0;
+  const scrollX = open ? open.scrollLeft : 0;
 
   // The category <select> used to have no blank option, so an untouched cell
   // silently held whatever category impCats() lists first -- a paste that
@@ -276,8 +284,10 @@ function impGrid(rows){
     <div class="note">Excel-də <strong>bir sütunu</strong> seçin →
       <kbd>Ctrl+C</kbd> → burada həmin sütunun birinci xanasına
       <kbd>Ctrl+V</kbd>. Bir neçə sütunu birdən də yapışdıra bilərsiniz.
-      Boş sətirlər nəzərə alınmır; artıq düşən sətri sağdakı
-      <strong>×</strong> ilə silin.</div>
+      Boş sətirlər nəzərə alınmır. Artıq sətirləri soldakı qutucuqlarla
+      seçib birdən silin (<kbd>Shift</kbd>+klik — aralığı seçir).
+      Səhv yerə yapışdırdınızsa — <strong>↶ Geri al</strong> və ya
+      <kbd>Ctrl+Z</kbd>.</div>
     <div style="display:flex;gap:10px;align-items:flex-end;margin-bottom:10px">
       <div class="fld" style="margin:0">
         <label>Bütün sətirlərin kateqoriyası</label>
@@ -291,17 +301,32 @@ function impGrid(rows){
           onchange="IMP.year = parseInt(this.value,10) || IMP.year"></div>
       <button type="button" class="ghost" style="padding:9px 14px"
         onclick="impGridAdd(20)">+ 20 sətir</button>
+      <button type="button" class="ghost" style="padding:9px 14px" id="griddelsel"
+        onclick="impGridDelSel()" ${sel.size ? '' : 'disabled'}
+        >Seçilənləri sil${sel.size ? ` (${sel.size})` : ''}</button>
+      <button type="button" class="ghost" style="padding:9px 14px"
+        onclick="impGridDelEmpty()">Boş sətirləri sil</button>
+      <button type="button" class="ghost" style="padding:9px 14px" id="gridundo"
+        onclick="impGridUndo()" title="Son yapışdırmanı / silməni geri qaytarır (Ctrl+Z)"
+        ${(IMP.gridUndo || []).length ? '' : 'disabled'}>↶ Geri al</button>
     </div>
     <div class="scroll imp grid" style="max-height:40vh" id="gridwrap"
-      onpaste="return impGridPaste(event)" oninput="impGridTotals()">
-      <table style="min-width:${GRID_WIDTH}px"><thead><tr>${
+      onpaste="return impGridPaste(event)" onkeydown="return impGridKey(event)"
+      oninput="IMP.gridTyped = true; impGridTotals()">
+      <table style="min-width:${GRID_WIDTH}px"><thead><tr><th class="del"
+        style="width:${GRID_SEL}px"><input type="checkbox" title="Hamısını seç"
+          ${data.length && sel.size === data.length ? 'checked' : ''}
+          onclick="impGridSelAll(this.checked)"></th>${
         GRID_COLS.map(c => `<th style="width:${c.w}px"${c.num ? ' class="num"' : ''}
           >${typeof c.t === 'function' ? c.t() : c.t}</th>`).join('')
-      }<th style="width:${GRID_DEL}px"></th></tr></thead>
-      <tbody id="gridbody">${data.map((row, r) => `<tr>${
+      }</tr></thead>
+      <tbody id="gridbody">${data.map((row, r) => `<tr${sel.has(r) ? ' class="sel"' : ''}>
+        <td class="del"><input type="checkbox" class="rowsel" title="Seç"
+          ${sel.has(r) ? 'checked' : ''} onclick="impGridSel(${r}, this.checked, event)"
+          ><button type="button" class="rowdel" title="Sətri sil"
+          onclick="impGridDel(${r})">×</button></td>${
         GRID_COLS.map((_, c) => `<td>${cell(r, c)}</td>`).join('')
-      }<td class="del"><button type="button" class="rowdel" title="Sətri sil"
-          onclick="impGridDel(${r})">×</button></td></tr>`).join('')}</tbody>
+      }</tr>`).join('')}</tbody>
       ${impGridFoot()}</table></div>
     <div class="h">«Adı» məcburidir. «İlkin dəyər» olmadan 500/5% testinin
       yalnız məbləğ hissəsi işləyəcək — bilirsinizsə, yazın.<br>
@@ -309,7 +334,7 @@ function impGrid(rows){
       rəqəmlər üst-üstə düşməlidir.</div>`,
     'Baxış', () => impRender(), true);
   const wrap = document.getElementById('gridwrap');
-  if (wrap) wrap.scrollTop = scroll;
+  if (wrap){ wrap.scrollTop = scroll; wrap.scrollLeft = scrollX; }
   impGridTotals();
 
   MSUBMIT = async () => {
@@ -337,9 +362,101 @@ function impGrid(rows){
    has been written yet, so the row goes out at once: no confirmation, no
    undo, and no need for either. */
 function impGridDel(r){
-  impGridRead();
-  IMP.grid.splice(r, 1);
+  impGridDrop(new Set([r]));
+}
+
+/* Deleting shifts every index below it, so a selection kept across a delete
+   would point at other rows. Every delete therefore clears it. */
+function impGridDrop(rows){
+  impGridSnap();
+  IMP.grid = IMP.grid.filter((_, i) => !rows.has(i));
+  IMP.gridSel = new Set();
   impGrid(IMP.grid);
+}
+
+/* Undo for the grid's own bulk actions. A paste of a hundred values into the
+   wrong column was otherwise a hundred cells to clear by hand -- the browser's
+   own undo cannot help, because the paste is applied by rebuilding the grid,
+   not by typing into it. A snapshot is taken before every paste, delete and
+   "category for all rows"; typing is left to the browser. */
+const GRID_UNDO_MAX = 30;
+
+function impGridSnap(){
+  impGridRead();
+  IMP.gridUndo = IMP.gridUndo || [];
+  IMP.gridUndo.push(IMP.grid.map(r => r.slice()));
+  if (IMP.gridUndo.length > GRID_UNDO_MAX) IMP.gridUndo.shift();
+  IMP.gridTyped = false;
+}
+
+function impGridUndo(){
+  const prev = (IMP.gridUndo || []).pop();
+  if (!prev) return;
+  IMP.grid = prev;
+  IMP.gridSel = new Set();
+  IMP.gridTyped = false;
+  impGrid(IMP.grid);
+}
+
+/* Ctrl+Z belongs to our undo only while the last change was ours. Once the
+   user has typed into a cell, it is the browser's -- otherwise undoing a typo
+   would silently take back the paste before it. */
+function impGridKey(e){
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'z' || e.key === 'Z'
+      || e.code === 'KeyZ') && !IMP.gridTyped && (IMP.gridUndo || []).length){
+    e.preventDefault();
+    impGridUndo();
+    return false;
+  }
+  return true;
+}
+
+function impGridDelSel(){
+  if (IMP.gridSel && IMP.gridSel.size) impGridDrop(IMP.gridSel);
+}
+
+/* A blank row is already ignored on import, but a sheet with forty of them
+   under three real rows does not read as "ready". Category alone does not make
+   a row filled -- "apply to all rows" puts it on every blank line. */
+function impGridDelEmpty(){
+  impGridRead();
+  impGridDrop(new Set(IMP.grid.map((row, i) => impGridFilled(row) ? -1 : i)
+                               .filter(i => i >= 0)));
+}
+
+/* Shift+click ticks the whole range from the last row clicked, as in a file
+   list: clearing thirty stray rows is two clicks, not thirty. Selection does
+   not touch the data, so it is applied in place rather than by a rebuild --
+   a rebuild would also eat whatever is being typed in a cell. */
+function impGridSel(r, on, ev){
+  const sel = IMP.gridSel;
+  const from = ev && ev.shiftKey && IMP.gridLast != null ? IMP.gridLast : r;
+  for (let i = Math.min(from, r); i <= Math.max(from, r); i++)
+    on ? sel.add(i) : sel.delete(i);
+  IMP.gridLast = r;
+  impGridSelShow();
+}
+
+function impGridSelAll(on){
+  IMP.gridSel = new Set(on ? IMP.grid.map((_, i) => i) : []);
+  IMP.gridLast = null;
+  impGridSelShow();
+}
+
+function impGridSelShow(){
+  const sel = IMP.gridSel;
+  document.querySelectorAll('#gridbody tr').forEach((tr, i) => {
+    tr.classList.toggle('sel', sel.has(i));
+    const box = tr.querySelector('input.rowsel');
+    if (box) box.checked = sel.has(i);
+  });
+  const all = document.querySelector('#gridwrap thead input[type=checkbox]');
+  if (all) all.checked = IMP.grid.length > 0 && sel.size === IMP.grid.length;
+  const btn = document.getElementById('griddelsel');
+  if (btn){
+    btn.disabled = !sel.size;
+    btn.textContent = 'Seçilənləri sil' + (sel.size ? ` (${sel.size})` : '');
+  }
 }
 
 /* The totals row follows the same column list as the header: a total under
@@ -347,7 +464,7 @@ function impGridDel(r){
    is how the headings went out of step with the data in the first place. */
 function impGridFoot(){
   const parts = [];
-  for (const c of GRID_COLS.concat([{f:'del'}])){
+  for (const c of [{f:'sel'}].concat(GRID_COLS)){
     if (c.num) parts.push({f: c.f});
     else if (parts.length && parts[parts.length - 1].span) parts[parts.length - 1].span++;
     else parts.push({span: 1});
@@ -465,7 +582,7 @@ function impGridAdd(n){
 
 function impGridAllCats(code){
   if (!code) return;
-  impGridRead();
+  impGridSnap();
   const c = gcol('category');
   IMP.grid.forEach(r => { r[c] = code; });
   impGrid(IMP.grid);
@@ -476,13 +593,15 @@ function impGridPaste(e){
   if (!el.dataset || el.dataset.r == null) return true;
   const text = (e.clipboardData || window.clipboardData).getData('text');
   if (!text) return true;
-  const block = text.replace(/\r\n?/g, '\n').replace(/\n+$/, '')
-                    .split('\n').map(l => l.split('\t'));
-  // A single value is an ordinary paste -- let the browser do it.
-  if (block.length === 1 && block[0].length === 1) return true;
+  const block = impGridParse(text);
+  // A single plain value is an ordinary paste -- let the browser do it. Not
+  // one that came quoted (a cell with a line break): the browser would paste
+  // the quotes and glue the two lines together.
+  if (block.length === 1 && block[0].length === 1
+      && block[0][0] === text.replace(/\r?\n$/, '')) return true;
   e.preventDefault();
 
-  impGridRead();
+  impGridSnap();
   const r0 = +el.dataset.r, c0 = +el.dataset.c;
   while (IMP.grid.length < r0 + block.length)
     IMP.grid.push(gridRow());
@@ -494,6 +613,50 @@ function impGridPaste(e){
   }));
   impGrid(IMP.grid);
   return false;
+}
+
+/* Excel's clipboard TSV, read the way Excel writes it. A cell holding a line
+   break (Alt+Enter -- two invoice numbers in one cell) goes out in double
+   quotes, with any quote inside doubled. Splitting on every line break cut
+   such a cell into two rows and shifted everything under it by one -- the
+   name of one asset lined up against the invoice of the next.
+
+   Inside a cell the break becomes "; ", the same as the engine stores it
+   (storage.tsv_cell). A quote that does not open a properly closed field is
+   taken literally: text from elsewhere may start with one. */
+function impGridParse(text){
+  const s = text.replace(/\r\n?/g, '\n');
+  const rows = [];
+  let row = [], i = 0;
+  const flat = v => v.replace(/\s*\n+\s*/g, '; ').trim();
+  while (i <= s.length){
+    let val = null;
+    if (s[i] === '"'){
+      let j = i + 1, out = '';
+      for (;;){
+        const q = s.indexOf('"', j);
+        if (q < 0) break;
+        if (s[q + 1] === '"'){ out += s.slice(j, q) + '"'; j = q + 2; continue; }
+        const next = s[q + 1];
+        if (next === undefined || next === '\t' || next === '\n'){
+          val = flat(out + s.slice(j, q)); i = q + 1;
+        }
+        break;
+      }
+    }
+    if (val === null){
+      let j = i;
+      while (j < s.length && s[j] !== '\t' && s[j] !== '\n') j++;
+      val = s.slice(i, j); i = j;
+    }
+    row.push(val);
+    if (i >= s.length){ rows.push(row); break; }
+    if (s[i] === '\n'){ rows.push(row); row = []; }
+    i++;
+  }
+  // Excel ends the block with a line break: drop the empty row it leaves.
+  while (rows.length && rows[rows.length - 1].every(v => v === '')) rows.pop();
+  return rows;
 }
 
 /* A pasted category may be our code, or the Azerbaijani name from their

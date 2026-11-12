@@ -91,10 +91,13 @@ function openCard(id){
           : isIt ? ' — kartda göstərilib, 5 ildən az deyil'
                                     : ' — FİM, kartda göstərilib'}</span>
           <span class="num">${r6.term_years} il</span></div>
-        <div class="step"><span class="l">Bu ilin əvvəlinə qalan müddət</span>
-          <span class="num">${r6.remaining_years} il</span></div>
-        <div class="step"><span class="l">Baza ÷ qalan müddət</span>
-          <span class="num">${money(card.base)} ÷ ${r6.remaining_years}</span></div>
+        <div class="step"><span class="l">Bu ilin əvvəlinə qalan müddət${
+          r6.remaining_months != null ? ' — alış ayından sayılır' : ''}</span>
+          <span class="num">${esc(r6.remaining_label)}</span></div>
+        <div class="step"><span class="l">${r6.remaining_months != null
+          ? 'Baza × bu ildəki istifadə ayları ÷ qalan aylar'
+          : 'Baza ÷ qalan müddət'}</span>
+          <span class="num">${money(card.base)} ${esc(r6.share_label)}</span></div>
         <div class="step"><span class="l">Sahibkar əmsalı — ${esc(REPORT.status_name)}</span>
           <span>tətbiq olunmur</span></div>
       </div>

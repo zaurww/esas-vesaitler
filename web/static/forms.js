@@ -522,7 +522,7 @@ async function showHistory(id){
         : ['<span class="zero">—</span>', '<span class="zero">—</span>'])
       .map(v => `<td class="num">${v}</td>`).join('')}
     <td class="num">${y.method === 'duz'
-      ? `${y.term_years} il <span class="tag">qalan ${y.remaining_years}</span>`
+      ? `${y.term_years} il <span class="tag">qalan ${esc(y.remaining_label)}</span>`
       : parseFloat(y.rate) ? pct(y.rate) : '<span class="zero">—</span>'}</td>
     <td class="num"><strong>${money(y.depreciation)}</strong></td>
     <td class="num">${money(y.writeoff)}</td>

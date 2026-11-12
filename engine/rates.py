@@ -74,6 +74,14 @@ class Category(NamedTuple):
     term_floor: int = 1              # shortest term the law allows
     term_label: str = "istifadə müddəti (FİM)"
     schedule_law: str = ""           # article that sets the schedule
+    # The straight line runs in MONTHS from the month of purchase, not in
+    # whole years from the year of it. 114.3.6 for a known term says
+    # "istifadə müddətinə mütənasib məbləğlərlə": proportional to the period
+    # of use. A one-year licence bought in July is used six months in each of
+    # two tax years; whole years put all of it into the first. Only `qma-m`:
+    # `qma-n` has a length the law states in years (114.3-1.10, "10 il"),
+    # and `it` is a separate article not yet read this way.
+    monthly_schedule: bool = False
     # m.115.6: the deduction exists only if the cost was neither reimbursed
     # nor offset against rent -- asked once, at creation.
     needs_confirmation: bool = False
@@ -106,7 +114,7 @@ _BUILTIN_CATEGORIES: List[Category] = [
              bulk_import=False),
     Category("qma-m", "QMA — FİM məlum", "НМА — срок известен", "qma", "VM m.114.3.6",
              **_NOT_EV, exclusion="qma", term_source="card",
-             schedule_law="m.114.3.6"),
+             schedule_law="m.114.3.6", monthly_schedule=True),
     Category("qma-n", "QMA — FİM nəməlum", "НМА — срок неизвестен", "qma", "VM m.114.3.6",
              **_NOT_EV, exclusion="qma", term_source="param:qma_term_unknown",
              schedule_law="m.114.3.6"),

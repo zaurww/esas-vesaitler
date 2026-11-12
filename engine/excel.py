@@ -281,8 +281,8 @@ def _sheet_cards(wb: Workbook, r: YearResult,
                 method = "düz xətt"
                 if ri.term_years:
                     method += f" · {ri.term_years} il"
-                if ri.remaining_years:
-                    method += f" (qalan {ri.remaining_years})"
+                if ri.remaining_label:
+                    method += f" (qalan {ri.remaining_label})"
             else:
                 method = "azalan qalıq"
             if card.retired:

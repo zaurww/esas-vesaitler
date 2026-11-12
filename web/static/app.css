@@ -138,7 +138,12 @@
   }
   /* column widths ride on the <th>, out of GRID_COLS, so they follow the
      column that owns them instead of a position that shifts (§11.3) */
-  .scroll.imp.grid td.del{text-align:center; vertical-align:middle}
+  .scroll.imp.grid td.del,
+  .scroll.imp.grid th.del{text-align:center; vertical-align:middle; white-space:nowrap}
+  .scroll.imp.grid td input.rowsel{
+    width:auto; padding:0; margin:0 2px 0 4px; vertical-align:middle; cursor:pointer;
+  }
+  .scroll.imp.grid tr.sel td{background:#eef4ff}
   .scroll.imp.grid button.rowdel{
     border:0; background:none; color:var(--muted); cursor:pointer;
     font-size:16px; line-height:1; padding:4px 6px; border-radius:5px;

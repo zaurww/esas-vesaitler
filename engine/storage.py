@@ -7,6 +7,7 @@ text and users will edit them by hand sooner or later (§3, layer 1).
 from __future__ import annotations
 
 import os
+import re
 import tempfile
 import tomllib
 from datetime import date, datetime
@@ -154,6 +155,23 @@ def read_tsv(path: Path) -> list[dict[str, str]]:
     return rows
 
 
+_LINEBREAK = re.compile(r"\s*[\r\n]+\s*")
+
+
+def tsv_cell(value: Any) -> str:
+    """One cell as TSV can hold it: no tab, no line break.
+
+    A cell in the client's workbook may hold two invoice numbers on two lines
+    (Alt+Enter). Written as is, the break would split the record in two, and
+    the second half would be read back as a row of its own. The line break is
+    kept as "; " -- the value still reads as a list -- and a tab as a space.
+    """
+    s = "" if value is None else str(value)
+    if "\n" in s or "\r" in s:
+        s = _LINEBREAK.sub("; ", s.strip())
+    return s.replace("\t", " ")
+
+
 def write_tsv(path: Path, header: list[str], rows: Iterable[list[Any]]) -> None:
     """Atomic write: either the whole file lands or it is left untouched (§8).
 
@@ -164,7 +182,7 @@ def write_tsv(path: Path, header: list[str], rows: Iterable[list[Any]]) -> None:
     """
     body = ["\t".join(header)]
     for r in rows:
-        body.append("\t".join("" if c is None else str(c) for c in r))
+        body.append("\t".join(tsv_cell(c) for c in r))
     tmp = tempfile.NamedTemporaryFile(
         "w", encoding="utf-8-sig", newline="\n", delete=False, dir=str(path.parent)
     )

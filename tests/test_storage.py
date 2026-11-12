@@ -81,6 +81,23 @@ class Roundtrip(TempRoot):
         self.assertEqual(a.e_qaime, "EQ-2026-77421")
         self.assertEqual(a.serial_no, "SRV-99881")
 
+    def test_a_line_break_inside_a_value_does_not_split_the_record(self):
+        """Two invoice numbers in one Excel cell (Alt+Enter). Written as is,
+        the break cut assets.tsv's line in two and the tail was read back as a
+        row of its own (§11.2)."""
+        mutate.create_asset(self.root, self.slug, {
+            "mode": "new", "category": "ma", "name": "Kondisioner\tGREE",
+            "cost": "974.58", "in_date": "2024-03-01",
+            "e_qaime": "MT250611210731\r\nMT250611211515\n",
+            "note": "birinci\n\n  ikinci"})
+        d = self.client()
+        self.assertEqual(len(d.assets), 1)
+        a = d.assets[0]
+        self.assertEqual(a.e_qaime, "MT250611210731; MT250611211515")
+        self.assertEqual(a.name, "Kondisioner GREE")
+        self.assertEqual(a.note, "birinci; ikinci")
+        self.assertEqual(a.cost, Decimal("974.58"))
+
 
 class Batches(TempRoot):
     """§4: quantity is a form field, never stored -- it becomes N cards."""
@@ -792,7 +809,8 @@ class QmaCards(TempRoot):
     def test_and_computes_on_the_straight_line(self):
         self.make()
         r = compute_year(self.client(), 2024)
-        self.assertEqual(str(r.totals["depreciation"]), "1200.00")
+        # Bought 1 March: ten months of the sixty fall in 2024 (§5.3, months).
+        self.assertEqual(str(r.totals["depreciation"]), "1000.00")
 
     def test_a_known_term_card_without_a_term_is_refused(self):
         with self.assertRaises(DataError) as e:
@@ -833,7 +851,7 @@ class QmaCards(TempRoot):
             "useful_life": "3"})
         self.assertEqual(self.client().assets[0].useful_life, 3)
         r = compute_year(self.client(), 2024)
-        self.assertEqual(str(r.totals["depreciation"]), "2000.00")
+        self.assertEqual(str(r.totals["depreciation"]), "1666.67")   # 6000 x 10/36
 
     def test_a_hand_edited_file_is_caught_on_read(self):
         """§3: the files are plain text and people edit them, so the same rule

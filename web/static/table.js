@@ -109,9 +109,9 @@ function bulkDeleteAssets(){
    showing a rate at all (§5.2). */
 function rateCell(c){
   const ri = c.rate_info;
-  if (ri && ri.method === 'duz' && ri.remaining_years)
-    return `<span title="düz xətt: baza ÷ qalan il">${ri.term_years} il
-      <span class="tag">qalan ${ri.remaining_years}</span></span>`;
+  if (ri && ri.method === 'duz' && ri.remaining_label)
+    return `<span title="düz xətt: baza ${esc(ri.share_label)}">${ri.term_years} il
+      <span class="tag">qalan ${esc(ri.remaining_label)}</span></span>`;
   return parseFloat(c.rate) ? pct(c.rate) : '<span class="zero">—</span>';
 }
 

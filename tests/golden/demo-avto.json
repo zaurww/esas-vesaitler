@@ -60,7 +60,9 @@
           "method": "azalan",
           "term_years": null,
           "remaining_years": null,
-          "per_card": false
+          "per_card": false,
+          "remaining_months": null,
+          "months_this_year": null
         },
         "cards": [
           {
@@ -113,7 +115,9 @@
               "method": "azalan",
               "term_years": null,
               "remaining_years": null,
-              "per_card": false
+              "per_card": false,
+              "remaining_months": null,
+              "months_this_year": null
             },
             "monthly": [
               "56.67",
@@ -186,7 +190,9 @@
           "method": "azalan",
           "term_years": null,
           "remaining_years": null,
-          "per_card": false
+          "per_card": false,
+          "remaining_months": null,
+          "months_this_year": null
         },
         "cards": [
           {
@@ -239,7 +245,9 @@
               "method": "azalan",
               "term_years": null,
               "remaining_years": null,
-              "per_card": false
+              "per_card": false,
+              "remaining_months": null,
+              "months_this_year": null
             },
             "monthly": [
               "0",
@@ -313,7 +321,9 @@
               "method": "azalan",
               "term_years": null,
               "remaining_years": null,
-              "per_card": false
+              "per_card": false,
+              "remaining_months": null,
+              "months_this_year": null
             },
             "monthly": [
               "19.73",
@@ -387,7 +397,9 @@
               "method": "azalan",
               "term_years": null,
               "remaining_years": null,
-              "per_card": false
+              "per_card": false,
+              "remaining_months": null,
+              "months_this_year": null
             },
             "monthly": [
               "268.29",
@@ -461,7 +473,9 @@
               "method": "azalan",
               "term_years": null,
               "remaining_years": null,
-              "per_card": false
+              "per_card": false,
+              "remaining_months": null,
+              "months_this_year": null
             },
             "monthly": [
               "0",
@@ -535,7 +549,9 @@
               "method": "azalan",
               "term_years": null,
               "remaining_years": null,
-              "per_card": false
+              "per_card": false,
+              "remaining_months": null,
+              "months_this_year": null
             },
             "monthly": [
               "0",
@@ -609,7 +625,9 @@
               "method": "azalan",
               "term_years": null,
               "remaining_years": null,
-              "per_card": false
+              "per_card": false,
+              "remaining_months": null,
+              "months_this_year": null
             },
             "monthly": [
               "10.00",
@@ -682,7 +700,9 @@
           "method": "azalan",
           "term_years": null,
           "remaining_years": null,
-          "per_card": false
+          "per_card": false,
+          "remaining_months": null,
+          "months_this_year": null
         },
         "cards": [
           {
@@ -735,7 +755,9 @@
               "method": "azalan",
               "term_years": null,
               "remaining_years": null,
-              "per_card": false
+              "per_card": false,
+              "remaining_months": null,
+              "months_this_year": null
             },
             "monthly": [
               "0",
@@ -808,7 +830,9 @@
           "method": "azalan",
           "term_years": null,
           "remaining_years": null,
-          "per_card": false
+          "per_card": false,
+          "remaining_months": null,
+          "months_this_year": null
         },
         "cards": [
           {
@@ -861,7 +885,9 @@
               "method": "azalan",
               "term_years": null,
               "remaining_years": null,
-              "per_card": false
+              "per_card": false,
+              "remaining_months": null,
+              "months_this_year": null
             },
             "monthly": [
               "50.00",
@@ -934,7 +960,9 @@
           "method": "azalan",
           "term_years": null,
           "remaining_years": null,
-          "per_card": false
+          "per_card": false,
+          "remaining_months": null,
+          "months_this_year": null
         },
         "cards": [
           {
@@ -987,7 +1015,9 @@
               "method": "azalan",
               "term_years": null,
               "remaining_years": null,
-              "per_card": false
+              "per_card": false,
+              "remaining_months": null,
+              "months_this_year": null
             },
             "monthly": [
               "154.17",
@@ -1136,7 +1166,9 @@
           "method": "azalan",
           "term_years": null,
           "remaining_years": null,
-          "per_card": false
+          "per_card": false,
+          "remaining_months": null,
+          "months_this_year": null
         },
         "cards": [
           {
@@ -1189,7 +1221,9 @@
               "method": "azalan",
               "term_years": null,
               "remaining_years": null,
-              "per_card": false
+              "per_card": false,
+              "remaining_months": null,
+              "months_this_year": null
             },
             "monthly": [
               "53.07",
@@ -1262,7 +1296,9 @@
           "method": "azalan",
           "term_years": null,
           "remaining_years": null,
-          "per_card": false
+          "per_card": false,
+          "remaining_months": null,
+          "months_this_year": null
         },
         "cards": [
           {
@@ -1315,7 +1351,9 @@
               "method": "azalan",
               "term_years": null,
               "remaining_years": null,
-              "per_card": false
+              "per_card": false,
+              "remaining_months": null,
+              "months_this_year": null
             },
             "monthly": [
               "0",
@@ -1389,7 +1427,9 @@
               "method": "azalan",
               "term_years": null,
               "remaining_years": null,
-              "per_card": false
+              "per_card": false,
+              "remaining_months": null,
+              "months_this_year": null
             },
             "monthly": [
               "116.67",
@@ -1463,7 +1503,9 @@
               "method": "azalan",
               "term_years": null,
               "remaining_years": null,
-              "per_card": false
+              "per_card": false,
+              "remaining_months": null,
+              "months_this_year": null
             },
             "monthly": [
               "241.65",
@@ -1537,7 +1579,9 @@
               "method": "azalan",
               "term_years": null,
               "remaining_years": null,
-              "per_card": false
+              "per_card": false,
+              "remaining_months": null,
+              "months_this_year": null
             },
             "monthly": [
               "268.29",
@@ -1611,7 +1655,9 @@
               "method": "azalan",
               "term_years": null,
               "remaining_years": null,
-              "per_card": false
+              "per_card": false,
+              "remaining_months": null,
+              "months_this_year": null
             },
             "monthly": [
               "633.33",
@@ -1685,7 +1731,9 @@
               "method": "azalan",
               "term_years": null,
               "remaining_years": null,
-              "per_card": false
+              "per_card": false,
+              "remaining_months": null,
+              "months_this_year": null
             },
             "monthly": [
               "10.00",
@@ -1759,7 +1807,9 @@
               "method": "azalan",
               "term_years": null,
               "remaining_years": null,
-              "per_card": false
+              "per_card": false,
+              "remaining_months": null,
+              "months_this_year": null
             },
             "monthly": [
               "0",
@@ -1832,7 +1882,9 @@
           "method": "azalan",
           "term_years": null,
           "remaining_years": null,
-          "per_card": false
+          "per_card": false,
+          "remaining_months": null,
+          "months_this_year": null
         },
         "cards": [
           {
@@ -1885,7 +1937,9 @@
               "method": "azalan",
               "term_years": null,
               "remaining_years": null,
-              "per_card": false
+              "per_card": false,
+              "remaining_months": null,
+              "months_this_year": null
             },
             "monthly": [
               "0",
@@ -1958,7 +2012,9 @@
           "method": "azalan",
           "term_years": null,
           "remaining_years": null,
-          "per_card": false
+          "per_card": false,
+          "remaining_months": null,
+          "months_this_year": null
         },
         "cards": [
           {
@@ -2011,7 +2067,9 @@
               "method": "azalan",
               "term_years": null,
               "remaining_years": null,
-              "per_card": false
+              "per_card": false,
+              "remaining_months": null,
+              "months_this_year": null
             },
             "monthly": [
               "37.50",
@@ -2084,7 +2142,9 @@
           "method": "azalan",
           "term_years": null,
           "remaining_years": null,
-          "per_card": false
+          "per_card": false,
+          "remaining_months": null,
+          "months_this_year": null
         },
         "cards": [
           {
@@ -2137,7 +2197,9 @@
               "method": "azalan",
               "term_years": null,
               "remaining_years": null,
-              "per_card": false
+              "per_card": false,
+              "remaining_months": null,
+              "months_this_year": null
             },
             "monthly": [
               "123.33",
