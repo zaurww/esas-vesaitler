@@ -29,12 +29,14 @@ function qmaToggle(){
   const box = document.getElementById('fimbox');
   if (!f || !box || !f.category) return;
   const cat = f.category.value;
-  const isIt = cat === 'it';
-  box.hidden = cat !== 'qma-m' && !isIt;
+  const info = catOf(cat);
+  const isIt = isLease(cat);
+  const onCard = info.term_source === 'card';
+  box.hidden = !onCard;
   const inp = box.querySelector('input');
   if (inp){
-    inp.required = (cat === 'qma-m' || isIt);
-    inp.min = isIt ? '5' : '1';
+    inp.required = onCard;
+    inp.min = String(info.term_floor || 1);
   }
   const lbl = box.querySelector('label');
   const hint = box.querySelector('.h');
@@ -50,16 +52,16 @@ function qmaToggle(){
       + 'hissələrlə gəlirdən çıxılır. Sahibkarlıq əmsalı (×2 / ×1,5) QMA-ya '
       + 'tətbiq olunmur — m.114.3-2 yalnız əsas vəsaitlərə aiddir.';
   const note = document.getElementById('qmanote');
-  if (note) note.hidden = cat !== 'qma-n';
+  if (note) note.hidden = !(info.term_source || '').startsWith('param:');
   // The m.115.6-1 confirmation is asked once, at creation -- editing a card
   // later (name, note, counterparty) does not reopen a fact about how the
   // repair itself was paid for.
   const editing = !!f.elements['asset_id'];
   const confirm = document.getElementById('itconfirm');
   if (confirm){
-    confirm.hidden = !isIt || editing;
+    confirm.hidden = !info.needs_confirmation || editing;
     const cb = confirm.querySelector('input');
-    if (cb) cb.required = isIt && !editing;
+    if (cb) cb.required = !!info.needs_confirmation && !editing;
   }
   // A QMA/`it` schedule needs a year zero no matter how the card entered the
   // books (§4), so its date stays required through edits too. Everything

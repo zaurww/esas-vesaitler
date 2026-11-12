@@ -17,7 +17,8 @@ function openCard(id){
   // residual and may still be accrued below it.
   const rinf = card.rate_info || cat.rate;
   const qma = isQma(card.category);
-  const isIt = card.category === 'it';
+  const isIt = isLease(card.category);
+  const cinfo = catOf(card.category);
   const straight = rinf.method === 'duz';
   document.getElementById('dtitle').textContent = (card.inv_no ? card.inv_no + ' · ' : '') + card.name;
   const step = (l, v, extra='') =>
@@ -82,11 +83,11 @@ function openCard(id){
   // entrepreneur coefficient is not among the factors.
   if (straight){
     h += `<div class="step"><span class="l"><strong>6 · Amortizasiya cədvəli</strong>
-        — düz xətt (${isIt ? 'm.115.6-1' : 'm.114.3.6'})</span>
+        — düz xətt (${cinfo.schedule_law})</span>
         <span><strong>${money(card.depreciation)}</strong></span></div>
       <div class="sub">
         <div class="step"><span class="l">${isIt ? 'Müqavilə müddəti' : 'İstifadə müddəti'}${
-          card.category === 'qma-n' ? ' — qanunla (m.114.3-1.10)'
+          (cinfo.term_source || '').startsWith('param:') ? ' — qanunla (m.114.3-1.10)'
           : isIt ? ' — kartda göstərilib, 5 ildən az deyil'
                                     : ' — FİM, kartda göstərilib'}</span>
           <span class="num">${r6.term_years} il</span></div>

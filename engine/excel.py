@@ -574,7 +574,7 @@ def build_import_template(fields: list[str]) -> bytes:
     # requires per repair (not reimbursed, not offset against rent, m.115.6).
     # One card per capitalised repair-year is also a low-volume fact, entered
     # through "+ Yeni ƏV" where that confirmation lives.
-    cats = [c for c in rates.current().categories if c.code != "it"]
+    cats = [c for c in rates.current().categories if c.bulk_import]
 
     ref = wb.create_sheet("Kateqoriyalar")
     _header(ref, 1, ["Kod", "Kateqoriya", "Amortizasiya norması (maks)"])

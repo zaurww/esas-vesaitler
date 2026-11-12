@@ -500,8 +500,8 @@ def _compute_one(data: ClientData, year: int, _cache: dict,
     # would be a top-up the statute does not describe.
     for aid in repairs:
         a = assets.get(aid)
-        if a is not None and norms.by_code[a.category].kind == "qma":
-            if a.category == "it":
+        if a is not None and not norms.by_code[a.category].repair_limit_115:
+            if norms.by_code[a.category].exclusion == "lease":
                 raise CalcError(
                     f"{a.inv_no or aid}: icarə təmiri kartına əlavə təmir "
                     f"xərci yazılıb ({year}). Bu kateqoriyada kartın özü "
@@ -542,22 +542,21 @@ def _compute_one(data: ClientData, year: int, _cache: dict,
         None means the category has no single term to state -- the term is per
         card, so the category header cannot print one.
         """
-        if code in ("qma-m", "it"):
+        cat = norms.by_code[code]
+        if cat.term_source == "card":
             if asset is None:
                 return None
             life = asset.useful_life
-            floor = 1 if code == "qma-m" else 5
-            if not life or life < floor:
-                what = "istifadə müddəti (FİM)" if code == "qma-m" else "müqavilə müddəti"
-                law = "m.114.3.6" if code == "qma-m" else "m.115.6-1"
+            if not life or life < cat.term_floor:
+                what, law = cat.term_label, cat.schedule_law
                 raise CalcError(
                     f"{asset.inv_no or asset.asset_id}: {what} göstərilməyib "
                     f"— {law} üzrə düz xətt metodu müddət olmadan hesablana "
                     f"bilmir. Kartı redaktə edib {what} yazın."
                 )
             return int(life)
-        if code == "qma-n":
-            return int(norms.parameter(year, "qma_term_unknown"))
+        if cat.term_source.startswith("param:"):
+            return int(norms.parameter(year, cat.term_source[len("param:"):]))
         raise CalcError(
             f"{code}: düz xətt metodu üçün müddət mənbəyi müəyyən edilməyib"
         )
@@ -571,8 +570,8 @@ def _compute_one(data: ClientData, year: int, _cache: dict,
         # reason: m.115.6-1 is a self-contained deduction outside art. 114
         # altogether, with no coefficient article of its own to reach it --
         # not because the leased asset itself is not an əsas vəsait.
-        is_qma = norms.by_code[code].kind == "qma"
-        coefficient = D("1") if is_qma else mult.coefficient
+        coefficient = (mult.coefficient if norms.by_code[code].coefficient
+                       else D("1"))
         election = data.election_for(year, code, asset_id)
 
         if st.method == "duz":
@@ -743,7 +742,12 @@ def _compute_one(data: ClientData, year: int, _cache: dict,
             continue
         st = norms.statutory(year, code)
         if st.repair_limit is None:
-            continue
+            raise CalcError(
+                f"{norms.by_code[code].name_az}: {year} ili üçün təmir xərci "
+                f"yazılıb, lakin bu kateqoriya üçün m.115 təmir həddi təyin "
+                f"edilməyib — Normalar səhifəsində həddi əlavə edin. Əks halda "
+                f"xərc heç yerə düşməzdi."
+            )
         opening_total = sum((c.opening for c in group), ZERO)
         limit = money(opening_total * st.repair_limit)
         # The deductible total is fixed by law: MIN(limit, actual). Split it
@@ -820,15 +824,15 @@ def _compute_one(data: ClientData, year: int, _cache: dict,
         # art. 114/114.8 altogether, and a straight line needs no cut-off
         # anyway -- it ends by arriving at zero, which the declining balance
         # never does on its own.
-        if norms.by_code[c.category].kind == "ev":
+        if norms.by_code[c.category].threshold:
             c.threshold_hit, c.threshold_reason = threshold_test(
                 c, c.opening, year,
                 c.cost_prior, norms)               # start of year: before this year's
                                             # additions existed
 
         if (c.asset_id in writeoffs
-                and norms.by_code[c.category].kind == "qma"):
-            if c.category == "it":
+                and not norms.by_code[c.category].threshold):
+            if norms.by_code[c.category].exclusion == "lease":
                 raise CalcError(
                     f"{c.inv_no or c.asset_id}: icarə təmiri kartı üçün "
                     f"m.114.8 silinmə qərarı yazılıb ({year}), lakin bu hədd "
@@ -882,7 +886,7 @@ def _compute_one(data: ClientData, year: int, _cache: dict,
         # write-off would happen. With the threshold hardcoded this could not
         # go wrong; now that an amendment can move it, forecasting a 2027
         # write-off against the 2026 threshold would be simply wrong.
-        if not c.written_off and norms.by_code[c.category].kind == "ev":
+        if not c.written_off and norms.by_code[c.category].threshold:
             c.threshold_next, c.threshold_next_reason = threshold_test(
                 c, c.closing, year + 1, norms=norms)
 
@@ -977,7 +981,7 @@ def _compute_one(data: ClientData, year: int, _cache: dict,
     if mult.coefficient > D("1"):
         unused = [cat for cat in result.categories
                   if not cat.mixed_rates and not cat.rate.coefficient_used
-                  and norms.by_code[cat.code].kind == "ev"]
+                  and norms.by_code[cat.code].coefficient]
         if unused:
             result.warnings.append(
                 f"{STATUS_NAMES[status_row.status]} əmsalı (×{mult.coefficient}) "

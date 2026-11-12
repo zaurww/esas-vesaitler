@@ -34,6 +34,7 @@ except ModuleNotFoundError as e:
     sys.exit("\n  XETA: 'openpyxl' kitabxanasi qurulmayib.\n"
              "  Install.bat faylini ishe salin, ve ya:\n"
              "      python -m pip install -r requirements.txt\n")
+from engine import rates  # noqa: E402
 from engine.rates import ENGINE_VERSION  # noqa: E402
 from engine.storage import (  # noqa: E402
     OPENING_HEADER, DataError, append_tsv, list_clients, load_client,
@@ -55,7 +56,7 @@ def cmd_calc(slug: str, year: int) -> None:
             # "0% x 1 = 0% hədd" (nothing has a category-wide rate) and flag
             # every card as "fərdi dərəcə", same bug the web table already
             # avoids (table.js, §5.2) by asking the method first.
-            law = "m.115.6-1" if cat.code == "it" else "m.114.3.6"
+            law = rates.current().by_code[cat.code].schedule_law
             print(f"  {cat.name_az}  —  düz xətt ({law}) · "
                   f"müddət hər kartda · sahibkar əmsalı tətbiq olunmur")
         else:

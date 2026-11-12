@@ -742,11 +742,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({
                     "clients": out,
                     "engine_version": ENGINE_VERSION,
-                    "categories": [
-                        {"code": c.code, "name_az": c.name_az,
-                         "name_ru": c.name_ru, "kind": c.kind}
-                        for c in rates.current().categories
-                    ],
+                    # The traits travel with the category so the page asks
+                    # "does 114.8 apply?" instead of comparing codes.
+                    "categories": [c._asdict()
+                                   for c in rates.current().categories],
                 })
                 return
 

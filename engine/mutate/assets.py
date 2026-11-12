@@ -117,7 +117,8 @@ def create_asset(root: Path, slug: str, p: dict) -> str:
         # default, because a wrongly-claimed deduction is exactly the failure
         # §2.1 rules out -- and unlike most facts here, this one the engine
         # cannot check against anything else in the books.
-        if category == "it" and not p.get("it_confirmed"):
+        if (rates.current().by_code[category].needs_confirmation
+                and not p.get("it_confirmed")):
             raise DataError(
                 "İcarə təmiri: təsdiq tələb olunur — xərc icarədar tərəfindən "
                 "ödənilməyib və icarə haqqı ilə əvəzləşdirilməyib (m.115.6, "

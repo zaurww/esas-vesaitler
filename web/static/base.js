@@ -348,7 +348,7 @@ const fld = (name, label, o = {}) => `<div class="fld">
      reimbursed, not offset against rent) that a single card asks for at
      creation -- see mutate.assets.create_asset and mutate.imports, which
      refuses the category outright rather than silently dropping the check. */
-const cardCats = () => CTX.categories.filter(c => c.code !== 'it');
+const cardCats = () => CTX.categories.filter(c => c.bulk_import);
 
 const catOptions = sel => cardCats()
   .map(c => `<option value="${c.code}" ${c.code === sel ? 'selected' : ''}>
@@ -368,7 +368,18 @@ const assetCatOptions = sel => assetCats()
 /* Is this code a qeyri-maddi aktiv? Asked in several places, so the answer
    comes from the engine's own classification rather than from the shape of
    the code string. */
-const isQma = code => (CTX.categories.find(c => c.code === code) || {}).kind === 'qma';
+const isQma = code => catOf(code).kind === 'qma';
+
+/* A category with its traits (engine/rates.py Category): what applies to it,
+   where its straight-line term comes from, which article sets it. Code asks
+   these questions instead of comparing category codes -- comparing codes is
+   how adding `it` leaked QMA wording into three screens (§10). */
+const catOf = code => CTX.categories.find(c => c.code === code) || {};
+
+/* "Why the coefficient, 114.8 and art. 115 do not apply" differs by reason,
+   not by category: an intangible is not an əsas vəsait at all (art. 118); a
+   leased-asset repair is a self-contained deduction (m.115.6-1). */
+const isLease = code => catOf(code).exclusion === 'lease';
 
 /* The tab strip follows TAB rather than the other way round, so a jump made
    from inside a view (a declaration line to the table behind it) does not

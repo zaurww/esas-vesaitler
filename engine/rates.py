@@ -52,6 +52,38 @@ class Category(NamedTuple):
     # instead of a year nobody typed.
     law_ref: str = ""
 
+    # -- traits: WHAT applies to the category, so code asks the question it
+    # means ("does 114.8 reach this?") instead of "is this `it`?". Before
+    # these, the codes `it`, `qma-m` and `qma-n` were spelled out in some
+    # twenty places across calc, storage, mutate, excel, the CLI and four
+    # JS files, and adding `it` leaked QMA wording into three of them
+    # (§10). A new category with a known shape is now a row, not a hunt.
+    #
+    # Mechanisms of art. 114/115 for fixed assets. Defaults are a fixed asset.
+    coefficient: bool = True         # 114.3-2 / 114.3-3 entrepreneur coefficient
+    threshold: bool = True           # 114.8 one-off write-off
+    repair_limit_115: bool = True    # ordinary art. 115 repair limit
+    # Why the three above are off, which picks the wording of every refusal:
+    #   "qma"   -- not an əsas vəsait at all (art. 118)
+    #   "lease" -- m.115.6-1 is a self-contained deduction outside art. 114
+    exclusion: str = ""
+    # Straight-line schedule (§5.3, `duz`): where its length comes from.
+    #   "card"            -- the card's useful_life (FİM / lease term)
+    #   "param:<key>"     -- a parameter of the law (qma_term_unknown)
+    term_source: str = ""
+    term_floor: int = 1              # shortest term the law allows
+    term_label: str = "istifadə müddəti (FİM)"
+    schedule_law: str = ""           # article that sets the schedule
+    # m.115.6: the deduction exists only if the cost was neither reimbursed
+    # nor offset against rent -- asked once, at creation.
+    needs_confirmation: bool = False
+    # Offered in bulk import, the paste grid and the Excel template. Off where
+    # a row of somebody's spreadsheet has nowhere to carry a confirmation.
+    bulk_import: bool = True
+
+
+# Shorthand for the categories outside the fixed-asset mechanics.
+_NOT_EV = dict(coefficient=False, threshold=False, repair_limit_115=False)
 
 # The nine categories the engine ships with. Frozen: nothing here is ever
 # renamed or removed at runtime, only added to (below).
@@ -64,15 +96,20 @@ _BUILTIN_CATEGORIES: List[Category] = [
     Category("dg", "Digər əsas vəsaitlər", "Прочие основные средства", "ev", "VM m.114.3.7"),
     # kind="qma", not "ev": the object is a leased FIXED asset, but the
     # DEDUCTION runs through the same exclusions as an intangible -- no
-    # coefficient, no 114.8, no ordinary art. 115 limit (§5.1-bis: kind drives
-    # those gates, not the label). The reason differs from a real QMA's
-    # (art. 118 vs. m.115.6-1 being a self-contained mechanism outside art.
-    # 114), so every message a user can see is worded per category, not per
-    # kind -- see calc.py, storage.py check_qma, card.js.
+    # coefficient, no 114.8, no ordinary art. 115 limit. The reason differs
+    # from a real QMA's (art. 118 vs. m.115.6-1 being a self-contained
+    # mechanism outside art. 114), which is what `exclusion` carries.
     Category("it", "İcarəyə götürülmüş ƏV-in təmiri", "Ремонт арендованных ОС", "qma",
-              "VM m.115.3-115.6-1"),
-    Category("qma-m", "QMA — FİM məlum", "НМА — срок известен", "qma", "VM m.114.3.6"),
-    Category("qma-n", "QMA — FİM nəməlum", "НМА — срок неизвестен", "qma", "VM m.114.3.6"),
+             "VM m.115.3-115.6-1", **_NOT_EV, exclusion="lease",
+             term_source="card", term_floor=5, term_label="müqavilə müddəti",
+             schedule_law="m.115.6-1", needs_confirmation=True,
+             bulk_import=False),
+    Category("qma-m", "QMA — FİM məlum", "НМА — срок известен", "qma", "VM m.114.3.6",
+             **_NOT_EV, exclusion="qma", term_source="card",
+             schedule_law="m.114.3.6"),
+    Category("qma-n", "QMA — FİM nəməlum", "НМА — срок неизвестен", "qma", "VM m.114.3.6",
+             **_NOT_EV, exclusion="qma", term_source="param:qma_term_unknown",
+             schedule_law="m.114.3.6"),
 ]
 
 # A code an owner may append. Lower-case ASCII only: it is a TSV field, an

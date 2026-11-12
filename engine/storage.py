@@ -89,12 +89,13 @@ def check_qma(category: str, *, in_date, useful_life, is_legacy_pool,
     Raising from both sides is deliberate (§8): the files are plain text and
     people edit them.
     """
-    if rates.current().by_code[category].kind != "qma":
+    cat = rates.current().by_code[category]
+    if cat.kind != "qma":
         return
     w = f"{where}: " if where else ""
-    name = rates.current().by_code[category].name_az
+    name = cat.name_az
     if is_legacy_pool:
-        if category == "it":
+        if cat.exclusion == "lease":
             raise DataError(
                 f"{w}{name}: qrup qalığı tətbiq olunmur — hər icarə təmiri "
                 f"ayrıca kart kimi yaradılır, öz müqavilə müddəti ilə "
@@ -106,13 +107,13 @@ def check_qma(category: str, *, in_date, useful_life, is_legacy_pool,
         raise DataError(
             f"{w}{name}: alış tarixi tələb olunur — düz xətt metodu üçün "
             f"amortizasiya cədvəlinin başlanğıcı məlum olmalıdır")
-    if category == "qma-m":
+    if cat.term_source == "card" and cat.term_floor <= 1:
         if useful_life is None or int(useful_life) < 1:
             raise DataError(
                 f"{w}{name}: istifadə müddəti (FİM, il) tələb olunur və 1-dən "
-                f"kiçik ola bilməz (m.114.3.6)")
-    elif category == "it":
-        if useful_life is None or int(useful_life) < 5:
+                f"kiçik ola bilməz ({cat.schedule_law})")
+    elif cat.term_source == "card":
+        if useful_life is None or int(useful_life) < cat.term_floor:
             raise DataError(
                 f"{w}{name}: müqavilə müddəti (il) tələb olunur və 5 ildən "
                 f"kiçik ola bilməz — müqavilə daha qısadırsa, qanunla 5 "

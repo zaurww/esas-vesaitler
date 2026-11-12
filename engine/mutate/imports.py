@@ -166,7 +166,7 @@ def import_assets(root: Path, slug: str, p: dict) -> Any:
                     # that confirmation. One card per repair-year is also a
                     # low-volume fact, entered through "+ Yeni ƏV" where the
                     # confirmation lives (mutate.assets.create_asset).
-                    if category == "it":
+                    if not rates.current().by_code[category].bulk_import:
                         raise DataError(
                             f"{rates.current().by_code[category].name_az}: idxal "
                             f"vasitəsilə əlavə edilmir — «+ Yeni ƏV» "
