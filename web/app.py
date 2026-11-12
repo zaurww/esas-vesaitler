@@ -56,6 +56,10 @@ STATIC = Path(__file__).resolve().parent / "static"
 
 _APP_MARKER = "esas-vesaitler"
 
+# Names our own page can be reached by. Anything else in a Host header is a
+# foreign domain resolved to loopback (DNS rebinding) -- see Handler._foreign.
+_LOOPBACK_NAMES = ("127.0.0.1", "localhost", "[::1]", "::1")
+
 
 def _install_id(root: Path) -> str:
     """Stable short id for one installation folder.
@@ -613,7 +617,59 @@ class Handler(BaseHTTPRequestHandler):
     # and this is a local single-user program: serialising requests costs
     # nothing here. A `compute_year` on a 5 000-card client takes under a
     # second, and nobody else is waiting.
+    def _foreign(self, write: bool) -> str:
+        """Why this request did not come from our own page, or "" if it did.
+
+        Binding to 127.0.0.1 keeps the network out, but not the browser: any
+        site the accountant has open can send a request to 127.0.0.1:8777.
+        Before this check a `fetch(..., {mode: "no-cors"})` from a foreign
+        page reached /api/action and could delete cards or rewrite the norms
+        of every client -- the response was unreadable to it, the write was
+        not. Three gates, each against a different trick:
+
+        * Host must be a loopback name. DNS rebinding points an attacker's
+          own domain at 127.0.0.1; the browser then sends THAT name as Host,
+          and without this gate it could read client data as same-origin.
+        * Origin, when the browser sends one, must be our own page.
+        * A write must be `Content-Type: application/json`. That is not a
+          "simple" content type, so a cross-site browser request is forced
+          through a CORS preflight, which this server never answers -- the
+          write is never sent. json.loads used to accept any body type.
+        """
+        host = (self.headers.get("Host") or "").strip().lower()
+        hostname = host.rsplit(":", 1)[0] if not host.startswith("[") \
+            else host.split("]")[0] + "]"
+        if hostname not in _LOOPBACK_NAMES:
+            return f"host {host!r}"
+        origin = (self.headers.get("Origin") or "").strip().lower()
+        if origin and origin != "null":
+            o = urlparse(origin)
+            if o.scheme != "http" or (o.hostname or "") not in _LOOPBACK_NAMES:
+                return f"origin {origin!r}"
+            if o.port != self.server.server_address[1]:
+                return f"origin {origin!r}"
+        elif origin == "null" and write:
+            return "origin null"
+        if write:
+            ctype = (self.headers.get("Content-Type") or "").split(";")[0]
+            if ctype.strip().lower() != "application/json":
+                return f"content-type {ctype!r}"
+        return ""
+
+    def _refuse(self, why: str) -> None:
+        # Drain the unread body first: closing a socket with bytes still
+        # waiting makes Windows send a reset instead of our 403.
+        try:
+            n = min(int(self.headers.get("Content-Length") or 0), 50_000_000)
+            if n:
+                self.rfile.read(n)
+        except (ValueError, OSError):
+            pass
+        self._json({"error": f"sorğu rədd edildi: {why}"}, 403)
+
     def do_GET(self):
+        if (why := self._foreign(write=False)):
+            return self._refuse(why)
         # The instance probe answers BEFORE the lock, deliberately. It reads
         # nothing mutable -- two constants and a pid -- and a copy that is
         # starting up needs the answer now: if this instance were mid-recompute
@@ -627,6 +683,8 @@ class Handler(BaseHTTPRequestHandler):
             self._get()
 
     def do_POST(self):
+        if (why := self._foreign(write=True)):
+            return self._refuse(why)
         with _STATE_LOCK:
             self._post()
 

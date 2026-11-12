@@ -68,7 +68,7 @@ function openUpdateModal(u){
       (<code>clients/</code>), normalar (<code>rates.tsv</code> və s.) və
       bəkaplar toxunulmaz qalır — yalnız proqramın öz faylları yenilənir.</div>`,
     async () => {
-      const r = await fetch('/api/update-apply', {method: 'POST'});
+      const r = await fetch('/api/update-apply', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'});
       const j = await r.json();
       if (!r.ok || !j.ok) throw new Error(j.error || 'Yeniləmə alınmadı');
       document.getElementById('mtitle').textContent = 'Hazırdır';
@@ -153,7 +153,7 @@ function openVerifyProblemModal(){
       bəkaplayır, ona görə geri qaytarma özü də geri dönən əməliyyatdır.</div>
      <div style="max-height:260px;overflow:auto;margin-top:10px">${table}</div>`,
     async () => {
-      const r = await fetch('/api/update-rollback', {method: 'POST'});
+      const r = await fetch('/api/update-rollback', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'});
       const j = await r.json();
       if (!r.ok || !j.ok) throw new Error(j.error || 'Geri qaytarma alınmadı');
       document.getElementById('updateProblem').style.display = 'none';
