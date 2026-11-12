@@ -233,9 +233,78 @@ class Tx:
         ])
 
 
+# ------------------------------------------------- interrupted transactions ---
+#
+# Each file is written atomically (temp + os.replace), but an action that
+# touches several files is not: a crash or a power cut between assets.tsv and
+# opening_balances.tsv used to leave the folder half-written, and the backup
+# that could repair it just sat there -- nothing restored it unless somebody
+# knew to. So a transaction now leaves a marker in the client folder for as
+# long as it runs, naming its own snapshot. A marker that outlives its process
+# means that process died mid-write, and the next start restores the snapshot.
+
+TX_MARKER = ".tx_pending"
+
+
+def _restore(src: Path, snapshot: Path) -> None:
+    """Put the folder back exactly as the snapshot holds it.
+
+    Idempotent, and the marker is removed LAST: a crash halfway through a
+    restore leaves the marker standing, so the next start simply restores
+    again. Each file lands by temp + os.replace, never "delete, then copy",
+    which was how the old rollback could leave a file missing altogether.
+    """
+    keep = {p.name for p in snapshot.iterdir() if p.is_file()}
+    for item in snapshot.iterdir():
+        if not item.is_file():
+            continue
+        tmp = src / f".{item.name}.restore"
+        shutil.copy2(item, tmp)
+        os.replace(tmp, src / item.name)
+    for item in src.iterdir():
+        if item.is_file() and item.name not in keep and item.name != TX_MARKER:
+            item.unlink()
+    marker = src / TX_MARKER
+    if marker.exists():
+        marker.unlink()
+
+
+def recover_interrupted(root: Path) -> list[str]:
+    """Restore every client whose last write never finished. Returns slugs.
+
+    Called at start-up (web server and CLI), before anything reads a client.
+    A marker naming a snapshot that does not exist is not something to guess
+    around -- it raises, because the folder may be half-written (§2.1).
+    """
+    recovered: list[str] = []
+    base = root / "clients"
+    if not base.is_dir():
+        return recovered
+    for folder in sorted(p for p in base.iterdir() if p.is_dir()):
+        marker = folder / TX_MARKER
+        if not marker.exists():
+            continue
+        rel = marker.read_text(encoding="utf-8").strip()
+        snapshot = (root / rel).resolve()
+        if (not rel or (root / "backups").resolve() not in snapshot.parents
+                or not snapshot.is_dir()):
+            raise DataError(
+                f"{folder.name}: yarımçıq qalmış yazı aşkar edildi, lakin onun "
+                f"ehtiyat nüsxəsi tapılmadı ({rel!r}). Qovluq yarımçıq ola "
+                f"bilər — backups/ qovluğundan son nüsxəni əl ilə bərpa edin."
+            )
+        _restore(folder, snapshot)
+        recovered.append(folder.name)
+    return recovered
+
+
 @contextmanager
 def transaction(root: Path, slug: str, action: str) -> Iterator[Tx]:
     src = mutate_folder(root, slug)
+    if (src / TX_MARKER).exists():
+        # A previous write in some other process died on this client. Writing
+        # on top of a half-written folder would make the damage permanent.
+        recover_interrupted(root)
     # Keyed by client_id, not slug (§3, §8.3) -- generated and persisted here
     # if this client predates it, carrying its backup history to the new key.
     client_id = _backup_key(root, slug)
@@ -251,6 +320,10 @@ def transaction(root: Path, slug: str, action: str) -> Iterator[Tx]:
     # candidate for deletion.
     prune_backups(root, slug)
     shutil.copytree(src, dest)
+    # Written after the copy, so the snapshot never contains it; removed only
+    # once the write -- changelog included -- has fully landed.
+    (src / TX_MARKER).write_text(dest.relative_to(root).as_posix(),
+                                 encoding="utf-8")
 
     tx = Tx(root, slug, action)
     try:
@@ -260,24 +333,23 @@ def transaction(root: Path, slug: str, action: str) -> Iterator[Tx]:
         # every report until someone edits the file by hand.
         data = load_client(root, slug)
         closed = data.closed_years()
-        for st in data.statuses:
+        cache: dict = {}
+        for st in sorted(data.statuses, key=lambda s: s.year):
             if st.year not in closed:
-                compute_year(data, st.year)
+                compute_year(data, st.year, cache)
+        # Inside the try: a write whose changelog line failed to land is a
+        # write nobody can account for, so it rolls back with the rest.
+        if tx.entries:
+            path = src / "changelog.tsv"
+            existing = read_tsv(path)
+            header = HEADERS["changelog.tsv"]
+            out = [[r.get(h, "") for h in header] for r in existing]
+            out.extend(tx.entries)
+            write_tsv(path, header, out)
     except BaseException:
-        for item in src.iterdir():       # roll back to the backup
-            if item.is_file():
-                item.unlink()
-        for item in dest.iterdir():
-            shutil.copy2(item, src / item.name)
+        _restore(src, dest)
         raise
-
-    if tx.entries:
-        path = src / "changelog.tsv"
-        existing = read_tsv(path)
-        header = HEADERS["changelog.tsv"]
-        out = [[r.get(h, "") for h in header] for r in existing]
-        out.extend(tx.entries)
-        write_tsv(path, header, out)
+    (src / TX_MARKER).unlink()
 
 
 # ---------------------------------------------------------------- checking ---

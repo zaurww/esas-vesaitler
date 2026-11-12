@@ -39,6 +39,7 @@ from .core import (
     BACKUP_KEEP_ALWAYS, BACKUP_KEEP_COUNT, BACKUP_KEEP_DAYS, HEADERS, Tx,
     guard_open_year, mutate_folder, one_segment, prune_backups, rows_of,
     save_rows, transaction, verify_all, verify_client,
+    TX_MARKER, recover_interrupted,
 )
 from .parse import category_of, dec, iso_date
 from .numbering import (

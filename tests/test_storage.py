@@ -958,3 +958,75 @@ class Verify(TempRoot):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class InterruptedWrites(TempRoot):
+    """A process that dies mid-transaction leaves a marker; the next start
+    restores the snapshot it names (§8.1, crash safety)."""
+
+    def folder(self) -> Path:
+        return self.root / "clients" / self.slug
+
+    def add(self, name="Dəzgah"):
+        mutate.create_asset(self.root, self.slug, {
+            "mode": "new", "category": "ma", "name": name,
+            "cost": "1000", "in_date": "2024-03-01"})
+
+    def crash_inside(self):
+        """Run a transaction and kill it the way a power cut would: the body
+        writes, then the process vanishes -- no except, no finally."""
+        cm = mutate.transaction(self.root, self.slug, "test.crash")
+        cm.__enter__()                       # backup + marker, as in real life
+        # Held, never closed: a collected generator would run the ordinary
+        # rollback, which a killed process never gets to do.
+        self._dead = getattr(self, "_dead", []) + [cm]
+        assets = self.folder() / "assets.tsv"
+        assets.write_text("garbage\n", encoding="utf-8")   # half-written
+        (self.folder() / "stray.tsv").write_text("x", encoding="utf-8")
+        # never __exit__: the process is gone
+
+    def test_a_finished_write_leaves_no_marker(self):
+        self.add()
+        self.assertFalse((self.folder() / mutate.TX_MARKER).exists())
+
+    def test_a_failed_write_leaves_no_marker(self):
+        with self.assertRaises(DataError):
+            mutate.create_asset(self.root, self.slug, {
+                "mode": "new", "category": "nope", "name": "x",
+                "cost": "1", "in_date": "2024-03-01"})
+        self.assertFalse((self.folder() / mutate.TX_MARKER).exists())
+
+    def test_the_next_start_restores_the_snapshot(self):
+        self.add()
+        before = (self.folder() / "assets.tsv").read_bytes()
+        self.crash_inside()
+        self.assertTrue((self.folder() / mutate.TX_MARKER).exists())
+
+        self.assertEqual(mutate.recover_interrupted(self.root), [self.slug])
+        self.assertEqual((self.folder() / "assets.tsv").read_bytes(), before)
+        self.assertFalse((self.folder() / "stray.tsv").exists())
+        self.assertFalse((self.folder() / mutate.TX_MARKER).exists())
+        self.assertEqual(len(self.client().assets), 1)
+
+    def test_the_next_write_recovers_first(self):
+        """The CLI in another process may write before any start-up ran."""
+        self.add()
+        self.crash_inside()
+        self.add("İkinci")
+        self.assertEqual([a.name for a in self.client().assets],
+                         ["Dəzgah", "İkinci"])
+
+    def test_a_clean_store_recovers_nothing(self):
+        self.add()
+        self.assertEqual(mutate.recover_interrupted(self.root), [])
+
+    def test_a_marker_without_its_snapshot_is_loud(self):
+        (self.folder() / mutate.TX_MARKER).write_text(
+            "backups/none/missing", encoding="utf-8")
+        with self.assertRaises(DataError):
+            mutate.recover_interrupted(self.root)
+
+    def test_a_marker_pointing_outside_backups_is_refused(self):
+        (self.folder() / mutate.TX_MARKER).write_text("clients", encoding="utf-8")
+        with self.assertRaises(DataError):
+            mutate.recover_interrupted(self.root)

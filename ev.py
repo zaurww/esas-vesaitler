@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """Əsas Vəsaitlər — CLI entry point.
 
     python ev.py                          start the local UI (default)
@@ -263,6 +263,12 @@ def main(argv: list[str]) -> int:
         return 0
     cmd = argv[0]
     try:
+        if cmd not in ("test", "golden", "release-promote"):
+            # A write that died with its process left a half-written folder.
+            from engine.mutate import recover_interrupted
+            for slug in recover_interrupted(ROOT):
+                print(f"  {slug}: yarımçıq qalmış yazı ehtiyat nüsxədən "
+                      f"bərpa edildi", file=sys.stderr)
         if cmd == "clients":
             for s in list_clients(ROOT):
                 print(" ", s)

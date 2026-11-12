@@ -988,6 +988,11 @@ def serve(port: int = 8777, open_browser: bool = True,
         return
 
     global _startup_verify
+    # First of all: a write that died with its process left a half-written
+    # client folder behind, and everything below reads clients.
+    from engine.mutate import recover_interrupted
+    for slug in recover_interrupted(ROOT):
+        print(f"  {slug}: yarımçıq qalmış yazı ehtiyat nüsxədən bərpa edildi")
     # Before the verify: that one clears the pending-update marker, and
     # remove_obsolete wants it to file the old launchers under that update's
     # backup, so a rollback brings them back.
