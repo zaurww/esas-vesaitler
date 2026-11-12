@@ -48,9 +48,14 @@ function qmaToggle(){
       + 'bərabər hissələrlə gəlirdən çıxılır. Müqavilə daha qısadırsa, 5 '
       + 'yazın — qanun elə tələb edir. Sahibkarlıq əmsalı bura tətbiq '
       + 'olunmur: bu, m.114 üzrə deyil, ayrıca mexanizmdir.'
-    : 'm.114.3.6: müddəti məlum olan QMA ilkin dəyəri bu illər üzrə bərabər '
-      + 'hissələrlə gəlirdən çıxılır. Sahibkarlıq əmsalı (×2 / ×1,5) QMA-ya '
-      + 'tətbiq olunmur — m.114.3-2 yalnız əsas vəsaitlərə aiddir.';
+    : (info.monthly_schedule
+        ? 'm.114.3.6: müddəti məlum olan QMA ilkin dəyəri istifadə müddətinə '
+          + 'mütənasib, alış ayından başlayaraq aylar üzrə gəlirdən çıxılır — '
+          + 'məs. 1 illik, iyulda alınıb: yarısı bu il, yarısı növbəti il. '
+        : 'm.114.3.6: müddəti məlum olan QMA ilkin dəyəri bu illər üzrə '
+          + 'bərabər hissələrlə gəlirdən çıxılır. ')
+      + 'Sahibkarlıq əmsalı (×2 / ×1,5) QMA-ya tətbiq olunmur — m.114.3-2 '
+      + 'yalnız əsas vəsaitlərə aiddir.';
   const note = document.getElementById('qmanote');
   if (note) note.hidden = !(info.term_source || '').startsWith('param:');
   // The m.115.6-1 confirmation is asked once, at creation -- editing a card
@@ -170,8 +175,10 @@ function formAsset(card){
       h += `<div id="fimbox" hidden>` + fld('useful_life','İstifadə müddəti — FİM (il)',
               {type:'number',min:'1',step:'1',
                value:card&&card.rate_info&&card.rate_info.term_years,
-               hint:'m.114.3.6: müddəti məlum olan QMA ilkin dəyəri bu illər '
-                  + 'üzrə bərabər hissələrlə gəlirdən çıxılır. Sahibkarlıq '
+               hint:'m.114.3.6: müddəti məlum olan QMA ilkin dəyəri istifadə '
+                  + 'müddətinə mütənasib, <strong>alış ayından başlayaraq '
+                  + 'aylar üzrə</strong> gəlirdən çıxılır — məs. 1 illik, iyulda '
+                  + 'alınıb: yarısı bu il, yarısı növbəti il. Sahibkarlıq '
                   + 'əmsalı (×2 / ×1,5) QMA-ya tətbiq olunmur — m.114.3-2 '
                   + 'yalnız əsas vəsaitlərə aiddir.'}) + `</div>
         <div id="qmanote" class="fld" hidden><div class="h">Müddəti məlum
@@ -240,7 +247,19 @@ function formAsset(card){
     // form used to answer that with nothing at all: no field, no hint, no
     // mention of «Açılış qalığı» next door. The figure is wrong, it is on
     // screen, and the form for fixing it stayed silent about it (§6.1).
-    if (edit && card.opening_source !== 'carried'){
+    // Bought in the year on screen: it enters as this year's acquisition, so
+    // there is no opening balance to have -- and telling the user it "reads as
+    // fully depreciated" was simply false. A stored residual is still shown:
+    // that is a written fact, and the form must let it be corrected.
+    const boughtThisYear = edit && card.in_date
+      && parseInt(String(card.in_date).slice(0, 4), 10) === Number(year);
+    if (edit && card.opening_source === 'none' && boughtThisYear){
+      h += `<div class="fld"><div class="h">${year}-ci ildə alınıb — bu il
+        üçün açılış qalığı tələb olunmur, ilkin dəyər ilin daxilolması kimi
+        hesablanır.</div></div>`;
+    }
+    if (edit && card.opening_source !== 'carried'
+        && !(card.opening_source === 'none' && boughtThisYear)){
       const stored = card.opening_source === 'explicit';
       h += `<input type="hidden" name="opening_edit" value="1">
             <input type="hidden" name="opening_year" value="${year}">` +
@@ -249,7 +268,7 @@ function formAsset(card){
              hint: stored
                ? 'Əl ilə daxil edilmiş açılış qalığı (idxal da bura yazır). '
                + 'Boş buraxsanız sətir silinir və qalıq əvvəlki ildən hesablanır.'
-               : `Bu ƏV üçün ${year} ilin əvvəlinə qalıq yazılmayıb və əvvəlki `
+               : `Bu kart üçün ${year} ilin əvvəlinə qalıq yazılmayıb və əvvəlki `
                + 'ildən də köçürülməyib — ona görə kart «tam amortizasiya '
                + 'olunub» kimi görünür. Son bəyannamədəki qalıq dəyəri '
                + 'buraya yazın.'});
