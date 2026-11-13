@@ -10,7 +10,14 @@ function batchTotal(){
   const cost = parseFloat(f.cost && f.cost.value);
   box.innerHTML = (say > 1 && cost > 0)
     ? `<strong>${say} × ${fmt.format(cost)} = ${fmt.format(say * cost)}</strong> AZN`
-    : '—';
+    : say > 1 ? 'Bir ədədin qiymətini «İlkin dəyər»ə yazın' : '—';
+  // The label says what the number is: with a count above one it is the
+  // price of ONE unit, and "İlkin dəyər" alone read like the invoice total.
+  const lab = f.cost && f.cost.closest('.fld').querySelector('label');
+  if (lab) lab.textContent = say > 1 ? 'Bir ədədin ilkin dəyəri (AZN)' : 'İlkin dəyər (AZN)';
+  const res = f.opening_residual && f.opening_residual.closest('.fld').querySelector('label');
+  if (res && !res.dataset.base) res.dataset.base = res.textContent;
+  if (res) res.textContent = say > 1 ? res.dataset.base.replace('Qalıq dəyər', 'Bir ədədin qalıq dəyəri') : res.dataset.base;
 }
 
 /* The term of a QMA or an `it` card, shown only where it means something.
@@ -169,6 +176,25 @@ function formAsset(card){
               hint: mode==='carried'
                 ? 'Məlum deyilsə boş buraxın — onda 500/5% testinin yalnız 500 AZN hissəsi işləyəcək.'
                 : ''});
+      // Right under the cost, because the count changes what the cost
+      // MEANS (one unit, not the invoice total) -- asked by the owner, who
+      // could not tell where the unit price goes.
+      // Buying the same thing many times over. One card per object is not
+      // tidiness: m.114.8 tests each object separately, so 240 refrigerators
+      // at 400 AZN fall under the threshold one by one, while a single
+      // 96 000 AZN line never would.
+      if (!edit){
+        h += `<div class="row2">
+          <div class="fld"><label>Say</label>
+            <input name="say" type="number" min="1" step="1" value="1">
+            <div class="h">Eyni əşyadan neçə ədəd alınıb. Hər ədəd üçün
+              <strong>ayrıca kart</strong> yaradılır — m.114.8 həddi hər obyekt
+              üzrə ayrıca yoxlanılır.</div></div>
+          <div class="fld"><label>Cəmi</label>
+            <div id="batchsum" class="h" style="font-size:14px;padding-top:9px">—</div>
+            <div class="h">«İlkin dəyər» və «Qalıq dəyər» — <strong>bir ədəd</strong>
+              üçündür. İnventar nömrələri ardıcıl verilir.</div></div></div>`;
+      }
       // The term sits with the cost, because together they ARE the schedule:
       // m.114.3.6 spreads the one over the other. Hidden until the category
       // asks for it -- see qmaToggle().
@@ -208,22 +234,6 @@ function formAsset(card){
             placeholder:'ixtiyari',
             hint: edit ? '' : 'Say 1-dən çoxdursa boş qalır — seriya nömrəsi '
                + 'hər ədəd üçün fərqlidir, sonra kartlarda ayrıca yazılır.'});
-      // Buying the same thing many times over. One card per object is not
-      // tidiness: m.114.8 tests each object separately, so 240 refrigerators
-      // at 400 AZN fall under the threshold one by one, while a single
-      // 96 000 AZN line never would.
-      if (!edit){
-        h += `<div class="row2">
-          <div class="fld"><label>Say</label>
-            <input name="say" type="number" min="1" step="1" value="1">
-            <div class="h">Eyni əşyadan neçə ədəd alınıb. Hər ədəd üçün
-              <strong>ayrıca kart</strong> yaradılır — m.114.8 həddi hər obyekt
-              üzrə ayrıca yoxlanılır.</div></div>
-          <div class="fld"><label>Cəmi</label>
-            <div id="batchsum" class="h" style="font-size:14px;padding-top:9px">—</div>
-            <div class="h">«İlkin dəyər» və «Qalıq dəyər» — bir ədəd üçündür.
-              İnventar nömrələri ardıcıl verilir.</div></div></div>`;
-      }
     } else {
       h += fld('name','Adı',{placeholder:'avtomatik: «kateqoriya — qrup qalığı»',
               hint:'Kartsız qrup qalığı: inventar nömrəsi, tarix və ilkin dəyər olmur. '
