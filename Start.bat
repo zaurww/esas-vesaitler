@@ -9,7 +9,9 @@ REM after "chcp 65001" below a single multi-byte letter shifted every later
 REM line: "echo" came out as "cho" on a real user's machine.
 cd /d "%~dp0"
 
-where python >nul 2>nul
+REM Run it, do not just look for it: the Microsoft Store stub python.exe
+REM is found by "where" but is not Python (see Install.bat).
+python -c "import sys" >nul 2>nul
 if errorlevel 1 (
   echo.
   echo   Python tapilmadi -- qurashdirma avtomatik bashlayir...

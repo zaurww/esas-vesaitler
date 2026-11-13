@@ -26,7 +26,11 @@ if not exist "ev.py" (
     exit /b 1
 )
 
-where python >nul 2>nul
+REM Not "where python": Windows ships a Microsoft Store stub python.exe
+REM (App execution alias) that "where" finds although no Python is
+REM installed -- setup then went on and pip failed with "Python was not
+REM found". Running it is the only test the stub cannot pass.
+python -c "import sys" >nul 2>nul
 if not errorlevel 1 goto :havepython
 
 echo   Python tapilmadi. Avtomatik qurulur, bir nece deqiqe gozleyin...
@@ -67,9 +71,10 @@ REM Re-read PATH from both hives so "python" is usable without closing
 REM the window.
 for /f "usebackq tokens=2,*" %%A in (`reg query "HKCU\Environment" /v Path 2^>nul`) do set "UPATH=%%B"
 for /f "usebackq tokens=2,*" %%A in (`reg query "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment" /v Path 2^>nul`) do set "MPATH=%%B"
-set "PATH=%MPATH%;%UPATH%"
+REM "call set" expands %USERPROFILE% and the like: Path is REG_EXPAND_SZ.
+call set "PATH=%MPATH%;%UPATH%"
 
-where python >nul 2>nul
+python -c "import sys" >nul 2>nul
 if not errorlevel 1 goto :havepython
 
 echo.
