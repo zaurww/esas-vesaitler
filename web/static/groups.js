@@ -109,7 +109,7 @@ function formAssign(gid){
   openModal(target ? `«${groupName(target)}» növünə keçir` : 'Növsüz et', `
     <input type="hidden" name="group_id" value="${target}">
     <div class="fld"><label>Süzgəc</label>
-      <input id="assignq" placeholder="ad, inv.№, kateqoriya, indiki növ…"
+      <input id="assignq" placeholder="ad, inventar №, kateqoriya, indiki növ…"
         oninput="assignFilter(this.value)"></div>
     <div class="acts" style="margin:0 0 8px">
       <button type="button" class="tagbtn" onclick="assignAll(true)"
@@ -118,7 +118,7 @@ function formAssign(gid){
         >seçimi ləğv et</button>
       <span class="h" id="assigncount"></span></div>
     <div class="scroll" style="max-height:38vh" id="assignbox"><table>
-      <thead><tr><th></th><th>İnv.№</th><th>Adı</th><th>Kat.</th>
+      <thead><tr><th></th><th>İnventar №</th><th>Adı</th><th>Kat.</th>
         <th>İndiki növ</th></tr></thead><tbody>${rows}</tbody></table></div>`,
     d => {
       const ids = assignPicked();

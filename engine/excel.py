@@ -95,7 +95,7 @@ def _sheet_declaration(wb: Workbook, r: YearResult) -> None:
         ws.cell(row, 1, "Təqdim edilmə — m.114.7 / m.114.9 üzrə fərq") \
           .font = Font(bold=True, size=11)
         row += 1
-        _header(ws, row, ["İnv.№", "Adı", "Tarix", "Növ", "Satış məbləği",
+        _header(ws, row, ["İnventar №", "Adı", "Tarix", "Növ", "Satış məbləği",
                           "Qalıq dəyər", "Fərq"])
         row += 1
         for c in r.disposed_cards:
@@ -232,7 +232,7 @@ def _sheet_cards(wb: Workbook, r: YearResult,
     # together and confusing them is the one real risk of having both. The
     # sheet is flat with an autofilter, so "all the servers" is a filter here
     # rather than a report someone has to build (§13.1).
-    head = ["⚠", "Kod", "Kateqoriya", "Növ", "İnv.№", "Adı", "Kontragent",
+    head = ["⚠", "Kod", "Kateqoriya", "Növ", "İnventar №", "Adı", "Kontragent",
             "E-qaimə", "Seriya №",
             "Alış tarixi", "İlkin dəyər", "Qalıq (il əvvəli)",
             "Daxilolma", "Dəyər artımı", "Kapital. təmir", "Xaricetmə",
@@ -415,7 +415,7 @@ def _sheet_monthly(wb: Workbook, r: YearResult) -> None:
     ws.cell(row, 1, "ƏV üzrə").font = Font(bold=True, size=11)
     row += 1
     head_row = row
-    _header(ws, row, ["Kateqoriya", "İnv.№", "Adı"] + MONTHS_AZ + ["C Ə M İ"])
+    _header(ws, row, ["Kateqoriya", "İnventar №", "Adı"] + MONTHS_AZ + ["C Ə M İ"])
     row += 1
     for cat in r.categories:
         for card in cat.cards:
@@ -441,7 +441,7 @@ def _sheet_repair(wb: Workbook, r: YearResult) -> None:
     ws = wb.create_sheet("Təmir m.115")
     ws["A1"] = f"Təmir xərclərinin vergi fondu — {r.year}"
     ws["A1"].font = Font(bold=True, size=12)
-    _header(ws, 3, ["İnv.№", "Adı", "Faktiki təmir", "Gəlirdən çıxılan",
+    _header(ws, 3, ["İnventar №", "Adı", "Faktiki təmir", "Gəlirdən çıxılan",
                     "Kapitallaşan", "Amortizasiya bazası"])
     row = 4
     for cat in cats:
@@ -517,7 +517,7 @@ def build_workbook(r: YearResult, meta: dict | None = None) -> bytes:
 # own sheet, so nothing sample-shaped can be imported by accident.
 
 TEMPLATE_LABELS = {
-    "inv_no": ("İnv.№", "Boş buraxsanız avtomatik verilir"),
+    "inv_no": ("İnventar №", "Boş buraxsanız avtomatik verilir"),
     "name": ("Adı", "MƏCBURİ"),
     "category": ("Kateqoriya", "MƏCBURİ — siyahıdan seçin"),
     "in_date": ("Alış tarixi", "YYYY-MM-DD. Bu il alınıbsa məcburi"),
@@ -549,7 +549,7 @@ TEMPLATE_EXAMPLES = [
      "note": "əvvəlki illərdən — qalıq dəyər son bəyannamədən"},
     {"name": "Ofis mebeli", "category": "dg", "in_date": "2024-11-02",
      "cost": "3200", "opening_residual": "1900", "counterparty": "Embawood",
-     "note": "inv.№ boşdur — proqram özü verəcək"},
+     "note": "inventar № boşdur — proqram özü verəcək"},
     # A QMA, because the template is also where someone finds out the program
     # keeps them at all -- and that a known term is a column, not a category
     # note (m.114.3.6).

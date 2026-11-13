@@ -61,6 +61,11 @@ function selRefreshBar(){
   if (!btn) return;
   btn.textContent = SELECTED.size ? `Seçilmişləri sil (${SELECTED.size})` : 'Seçilmişləri sil';
   btn.disabled = !SELECTED.size;
+  const cat = document.getElementById('selcatbtn');
+  if (cat){
+    cat.textContent = SELECTED.size ? `Kateqoriyanı dəyiş (${SELECTED.size})` : 'Kateqoriyanı dəyiş';
+    cat.disabled = !SELECTED.size;
+  }
 }
 function selToggle(id, on){
   if (on) SELECTED.add(id); else SELECTED.delete(id);
@@ -98,6 +103,63 @@ function bulkDeleteAssets(){
       SELECTED.clear();
       return r;
     }, 'Sil');
+}
+
+/* Many cards to another category at once (asset.recategorize). Two steps,
+   like the archive import: "Baxış" asks the server for the plan -- which
+   cards move and what number each gets -- and only then "Köçür" writes it,
+   in one transaction. Ordinary fixed-asset categories only: a QMA or `it`
+   card needs a date, a term or a confirmation a bulk act cannot ask for. */
+function bulkRecategorize(){
+  const ids = [...SELECTED];
+  if (!ids.length) return fail('Heç bir ƏV seçilməyib.');
+  const targets = CTX.categories.filter(c => c.kind === 'ev');
+  const preview = async d => {
+    const plan = (await post('asset.recategorize',
+      {asset_ids: ids, category: d.category, renumber: !!d.renumber,
+       dry_run: true})).result;
+    const moves = plan.moves;
+    const box = document.getElementById('recatplan');
+    if (!moves.length){
+      box.innerHTML = '<div class="note">Seçilmiş ƏV-lər artıq bu kateqoriyadadır.</div>';
+      throw new Error('__stay__');
+    }
+    box.innerHTML = `<div class="h" style="margin:10px 0 4px">${moves.length} ƏV köçürüləcək:</div>
+      <div style="max-height:220px;overflow:auto;font-size:12.5px"><table>${
+        moves.map(m => `<tr><td>${esc(m.name)}</td>
+          <td>${esc(m.inv_no || '—')}</td><td>→</td>
+          <td><strong>${esc(m.new_inv_no || '—')}</strong></td></tr>`).join('')
+      }</table></div>`;
+    // Changing the choice after the preview sends the user back to it, so
+    // what is written is always what was last shown.
+    document.querySelectorAll('#mbody select[name=category], #mbody input[name=renumber]')
+      .forEach(el => el.onchange = () => {
+        MSUBMIT = preview; box.innerHTML = '';
+        document.getElementById('msubmit').textContent = 'Baxış';
+      });
+    MSUBMIT = async d2 => {
+      const r = await post('asset.recategorize',
+        {asset_ids: ids, category: d2.category, renumber: !!d2.renumber});
+      SELECTED.clear();
+      return r;
+    };
+    document.getElementById('msubmit').textContent = `Köçür (${moves.length})`;
+    throw new Error('__stay__');
+  };
+  openModal(`${ids.length} ƏV — kateqoriyanı dəyiş`,
+    fld('category','Yeni kateqoriya',{type:'select',req:true,options:
+      // no preselected category: a move nobody chose must not be one click away
+      '<option value="">— seçin —</option>' +
+      targets.map(c => `<option value="${c.code}">${esc(c.name_az)}</option>`).join('')}) +
+    `<label style="font-size:12.5px;display:flex;gap:8px;align-items:flex-start">
+      <input type="checkbox" name="renumber" checked style="width:auto;margin-top:3px">
+      <span>İnventar nömrələrini yeni kateqoriyaya uyğun ver — yalnız köhnə
+        kateqoriyanın kodu ilə başlayan nömrələr (NV-0011 → YM-…) dəyişir;
+        öz nömrələməniz (məs. 1C-dən) toxunulmur.</span></label>
+     <div class="h" style="margin-top:8px">Bağlı ildə alınmış ƏV köçürülmür —
+       əvvəlcə ili açın. QMA və icarəyə götürülmüş ƏV-in təmiri kart-kart dəyişdirilir.</div>
+     <div id="recatplan"></div>`,
+    preview, 'Baxış');
 }
 
 /* A straight-line card states a TERM, never a bare percentage.
@@ -192,7 +254,7 @@ function viewAnnual(d){
   const head = [
     ...(SELMODE ? [`<input type="checkbox" style="width:auto"
         onclick="selAllVisible(this.checked)" title="hamısını seç">`] : []),
-    '', 'İnv.№', 'Adı', 'Alış tarixi', ...cols.map(c => c.h)];
+    '', 'İnventar №', 'Adı', 'Alış tarixi', ...cols.map(c => c.h)];
   const span = lead + cols.length;
   let rows = '';
   for (const cat of cats(d)){
@@ -291,7 +353,10 @@ function viewAnnual(d){
     ? `<button class="tagbtn" onclick="toggleSelMode()">Seçimi bağla</button>
        <button id="seldelbtn" class="tagbtn" style="color:var(--neg)"
          ${SELECTED.size ? '' : 'disabled'} onclick="bulkDeleteAssets()">${
-         SELECTED.size ? `Seçilmişləri sil (${SELECTED.size})` : 'Seçilmişləri sil'}</button>`
+         SELECTED.size ? `Seçilmişləri sil (${SELECTED.size})` : 'Seçilmişləri sil'}</button>
+       <button id="selcatbtn" class="tagbtn"
+         ${SELECTED.size ? '' : 'disabled'} onclick="bulkRecategorize()">${
+         SELECTED.size ? `Kateqoriyanı dəyiş (${SELECTED.size})` : 'Kateqoriyanı dəyiş'}</button>`
     : `<button class="tagbtn" onclick="toggleSelMode()">Bir neçəsini seç…</button>`);
   const bar = `<div class="tbar">${toggle}${groupSwitch}${selBar}
     <button class="tagbtn" onclick="colPicker()">Sütunlar${
@@ -331,7 +396,7 @@ function viewMonthly(d){
     d.monthly.map(v => `<td class="num">${money(v)}</td>`).join('') +
     `<td class="num">${money(d.totals.depreciation)}</td></tr>`;
   return `<div class="card"><div class="scroll"><table><thead><tr>
-    <th>İnv.№</th><th>Adı</th>${d.months.map(m => `<th class="num">${m}</th>`).join('')}
+    <th>İnventar №</th><th>Adı</th>${d.months.map(m => `<th class="num">${m}</th>`).join('')}
     <th class="num">C Ə M İ</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
 }
 
@@ -376,7 +441,7 @@ function viewDeclaration(d){
   if (d.disposals.length){
     h += `<h3>Təqdim edilmə — m.114.7 / m.114.9 üzrə fərq</h3>
       <div class="card"><div class="scroll"><table><thead><tr>
-        <th>İnv.№</th><th>Adı</th><th>Tarix</th><th>Növ</th>
+        <th>İnventar №</th><th>Adı</th><th>Tarix</th><th>Növ</th>
         <th class="num">Satış məbləği</th><th class="num">Qalıq dəyər</th>
         <th class="num">Fərq</th></tr></thead><tbody>${
         d.disposals.map(c => {

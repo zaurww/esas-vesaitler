@@ -151,7 +151,7 @@ function formAsset(card){
     h += groupField(card);
     if (!pool){
       h += `<div class="row2">
-        <div class="fld"><label>İnv.№</label>
+        <div class="fld"><label>İnventar №</label>
           <div style="display:flex;gap:6px">
             <input name="inv_no" value="${val(card && card.inv_no)}"
               placeholder="məs. NV-0006">
@@ -222,7 +222,7 @@ function formAsset(card){
           <div class="fld"><label>Cəmi</label>
             <div id="batchsum" class="h" style="font-size:14px;padding-top:9px">—</div>
             <div class="h">«İlkin dəyər» və «Qalıq dəyər» — bir ədəd üçündür.
-              İnv.№-lər ardıcıl verilir.</div></div></div>`;
+              İnventar nömrələri ardıcıl verilir.</div></div></div>`;
       }
     } else {
       h += fld('name','Adı',{placeholder:'avtomatik: «kateqoriya — qrup qalığı»',

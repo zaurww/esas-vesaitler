@@ -69,18 +69,18 @@ def cmd_calc(slug: str, year: int) -> None:
                     "  (həddən aşağı)" if ri.below_ceiling else "")
             print(f"  {cat.name_az}  —  {ri.statutory_max:.0%} × {ri.coefficient} "
                   f"= {ri.ceiling:.0%} hədd, tətbiq {ri.applied:.0%}{note}")
-        print(f"    {'İnv.№':<10}{'Adı':<26}{'Qalıq(əvv)':>{w}}{'Daxil':>{w}}"
+        print(f"    {'İnventar №':<12}{'Adı':<26}{'Qalıq(əvv)':>{w}}{'Daxil':>{w}}"
               f"{'Xaric':>{w}}{'Amort.':>{w}}{'Silinmə':>{w}}{'Qalıq(son)':>{w}}")
         for c in cat.cards:
             flag = "⚠" if c.threshold_hit else (" →" if c.disposal_type else "  ")
-            print(f"  {flag}{c.inv_no:<10}{c.name[:25]:<26}"
+            print(f"  {flag}{c.inv_no:<12}{c.name[:25]:<26}"
                   f"{c.opening:>{w},.2f}{c.acquisition:>{w},.2f}{c.disposed:>{w},.2f}"
                   f"{c.depreciation:>{w},.2f}{c.writeoff:>{w},.2f}{c.closing:>{w},.2f}")
-        print(f"    {'':<36}{cat.opening:>{w},.2f}{cat.acquisition:>{w},.2f}"
+        print(f"    {'':<38}{cat.opening:>{w},.2f}{cat.acquisition:>{w},.2f}"
               f"{cat.disposed:>{w},.2f}{cat.depreciation:>{w},.2f}"
               f"{cat.writeoff:>{w},.2f}{cat.closing:>{w},.2f}\n")
     t = r.totals
-    print(f"    {'C Ə M İ':<36}{t['opening']:>{w},.2f}{t['acquisition']:>{w},.2f}"
+    print(f"    {'C Ə M İ':<38}{t['opening']:>{w},.2f}{t['acquisition']:>{w},.2f}"
           f"{t['disposed']:>{w},.2f}{t['depreciation']:>{w},.2f}"
           f"{t['writeoff']:>{w},.2f}{t['closing']:>{w},.2f}")
     # The point of the whole run. Everything above is how these were arrived

@@ -1196,3 +1196,74 @@ class DisposalCorrection(TempRoot):
             mutate.set_disposal(self.root, self.slug, {
                 "asset_id": self.aid, "remove": "1"})
         self.assertEqual(self.client().disposals[0].proceeds, Decimal("5000"))
+
+
+class Recategorize(TempRoot):
+    """asset.recategorize: many cards to another category in one write,
+    renumbering only numbers that carry the old category's code."""
+
+    def make(self, inv, category, **kw):
+        p = {"mode": "new", "category": category, "name": inv or "ƏV",
+             "inv_no": inv, "in_date": "2024-03-01", "cost": "1000"}
+        p.update(kw)
+        return mutate.create_asset(self.root, self.slug, p)
+
+    def setUp(self):
+        super().setUp()
+        for n in ("YM-0001", "YM-0002", "YM-0003"):
+            self.make(n, "ym")
+        self.a = self.make("NV-0011", "nv")
+        self.b = self.make("NV-0016", "nv")
+        self.own = self.make("1C-0042", "nv")   # the client's own scheme
+
+    def move(self, ids, renumber=True, **kw):
+        return mutate.recategorize_assets(self.root, self.slug, {
+            "asset_ids": ids, "category": "ym", "renumber": renumber, **kw})
+
+    def card(self, aid):
+        return next(a for a in self.client().assets if a.asset_id == aid)
+
+    def test_moves_and_renumbers_as_one_series(self):
+        self.move([self.a, self.b, self.own])
+        self.assertEqual([self.card(x).category for x in (self.a, self.b, self.own)],
+                         ["ym"] * 3)
+        self.assertEqual(self.card(self.a).inv_no, "YM-0004")
+        self.assertEqual(self.card(self.b).inv_no, "YM-0005")
+        self.assertEqual(self.card(self.own).inv_no, "1C-0042")
+
+    def test_without_renumbering_numbers_stay(self):
+        self.move([self.a], renumber=False)
+        self.assertEqual(self.card(self.a).inv_no, "NV-0011")
+        self.assertEqual(self.card(self.a).category, "ym")
+
+    def test_dry_run_writes_nothing(self):
+        plan = self.move([self.a, self.b], dry_run=True)
+        self.assertEqual([m["new_inv_no"] for m in plan["moves"]],
+                         ["YM-0004", "YM-0005"])
+        self.assertEqual(self.card(self.a).category, "nv")
+
+    def test_qma_target_is_refused(self):
+        with self.assertRaises(DataError):
+            mutate.recategorize_assets(self.root, self.slug, {
+                "asset_ids": [self.a], "category": "qma-n"})
+
+    def test_card_in_a_closed_year_refuses_the_whole_batch(self):
+        mutate.close_year(self.root, self.slug, {"year": 2024})
+        with self.assertRaises(DataError) as e:
+            self.move([self.a, self.b])
+        self.assertIn("NV-0011", str(e.exception))
+        self.assertEqual(self.card(self.a).category, "nv")
+
+    def test_carried_card_without_date_is_guarded_by_its_opening_year(self):
+        """The single-card edit checked only the purchase year, so a card
+        carried in without a date could change category under a closed year."""
+        aid = mutate.create_asset(self.root, self.slug, {
+            "mode": "carried", "category": "nv", "name": "Köhnə",
+            "in_date": "", "cost": "", "opening_residual": "3000",
+            "opening_year": "2024"})
+        mutate.close_year(self.root, self.slug, {"year": 2024})
+        row = self.card(aid)
+        with self.assertRaises(DataError):
+            mutate.update_asset(self.root, self.slug, {
+                "asset_id": aid, "inv_no": row.inv_no, "name": row.name,
+                "category": "ym", "in_date": "", "cost": ""})

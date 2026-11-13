@@ -11,7 +11,7 @@
 let IMP = null;
 
 const IMP_LABELS = {
-  inv_no:'İnv.№', name:'Adı', category:'Kateqoriya', in_date:'Alış tarixi',
+  inv_no:'İnventar №', name:'Adı', category:'Kateqoriya', in_date:'Alış tarixi',
   cost:'İlkin dəyər', opening_residual:'Qalıq dəyər',
   counterparty:'Kontragent', e_qaime:'E-qaimə №', serial_no:'Seriya №',
   group:'Növ', note:'Qeyd'};
@@ -212,7 +212,7 @@ const impPayload = () => IMP.rows.map(r => {
    card. A test compares the two and fails when they drift (§11.2). */
 const GRID_COLS = [
   {f:'category',         t:'Kat.',              w: 84},
-  {f:'inv_no',           t:'İnv.№',             w:100},
+  {f:'inv_no',           t:'İnventar №',             w:100},
   {f:'name',             t:'Adı *',             w:180},
   {f:'in_date',          t:'Alış tarixi',       w:100, ph:'GG.AA.YYYY'},
   // The two money columns sit TOGETHER, and that adjacency is load-bearing.
@@ -718,7 +718,7 @@ async function impPreview(){
 
   impBox(3, already + summary + spentNote + `
     <div class="scroll imp" style="max-height:42vh"><table><thead><tr>
-      <th>#</th><th>İnv.№</th><th>Adı</th><th>Kateqoriya</th>
+      <th>#</th><th>İnventar №</th><th>Adı</th><th>Kateqoriya</th>
       <th class="num">İlkin dəyər</th><th class="num">Qalıq dəyər</th>
       <th>Nəticə</th></tr></thead><tbody>${
       rep.rows.map(r => `<tr class="${r.ok?'good':'bad'}">

@@ -124,7 +124,7 @@ function viewRepair(d){
   }
   const t = d.totals;
   return `<div class="card"><div class="scroll"><table><thead><tr>
-      <th>İnv.№</th><th>Adı</th><th class="num">Faktiki təmir</th>
+      <th>İnventar №</th><th>Adı</th><th class="num">Faktiki təmir</th>
       <th class="num">Gəlirdən çıxılan</th><th class="num">Kapitallaşan</th>
       <th class="num">Amortizasiya bazası</th></tr></thead>
     <tbody>${rows}<tr class="total"><td colspan="2">C Ə M İ</td>

@@ -10,10 +10,11 @@ import uuid
 
 from datetime import date
 from decimal import Decimal
+from typing import Any
 from pathlib import Path
 
 from .. import rates
-from ..storage import DataError, check_qma, entry_id_of
+from ..storage import DataError, check_qma, entry_id_of, load_client
 
 from .core import Tx, guard_open_year, rows_of, save_rows, transaction
 from .groups import group_ref
@@ -246,6 +247,9 @@ def update_asset(root: Path, slug: str, p: dict) -> str:
             for value in (row["in_date"], new["in_date"]):
                 if value:
                     guard_open_year(root, slug, int(value[:4]))
+            year = _sealed_year_touched(root, slug, row)
+            if year is not None:
+                guard_open_year(root, slug, year)
 
         for field, value in new.items():
             if row[field] != value:
@@ -279,6 +283,124 @@ def update_asset(root: Path, slug: str, p: dict) -> str:
                            str(p.get("opening_residual", "")).strip(), tx)
         save_rows(root, slug, "opening_balances.tsv", ob)
     return aid
+
+
+def _sealed_year_touched(root: Path, slug: str, row: dict[str, str],
+                         ob: list[dict[str, str]] | None = None,
+                         closed: set[int] | None = None) -> int | None:
+    """A closed year that changing this card's cost, date, category or FİM
+    would rewrite, or None.
+
+    Checking only the purchase year was too narrow: those fields reach every
+    year the card lives in, not just the first. An asset bought in 2023 with
+    2025 closed changes 2025's charge when its category changes, and the
+    sealed balance (§6.2) silently stops matching. The card's first year is
+    its purchase year, or, for one carried in without a date, the earliest
+    year it has an opening balance in.
+    """
+    if closed is None:
+        closed = load_client(root, slug).closed_years()
+    if not closed:
+        return None
+    years = [int(row["in_date"][:4])] if row.get("in_date") else []
+    if ob is None:
+        ob = rows_of(root, slug, "opening_balances.tsv")
+    years += [int(r["year"]) for r in ob if r["asset_id"] == row["asset_id"]]
+    if not years:
+        return None
+    first = min(years)
+    later = [y for y in closed if y >= first]
+    return min(later) if later else None
+
+
+def recategorize_assets(root: Path, slug: str, p: dict) -> Any:
+    """Move a batch of cards to another category, optionally renumbering them.
+
+    One transaction for the same reason as group.assign and set_writeoff
+    (§5.3-bis): every write backs the folder up and recomputes every open
+    year (§8.1). One changelog line per card and field, as always.
+
+    Renumbering touches only numbers that carry the OLD category's own code
+    (NV-0011 -> YM-0007); a client's own scheme, typically from 1C, is left
+    alone. The new numbers are one series continuing the target category
+    (inv_series), not N calls to suggest_inv_no, which would drift.
+
+    Limited to ordinary fixed-asset categories on both sides: a QMA or `it`
+    card needs a purchase date, a term and (for `it`) a confirmation that a
+    bulk act has nowhere to ask for. With `dry_run` nothing is written and
+    the plan comes back for the preview.
+    """
+    ids = [str(a) for a in (p.get("asset_ids") or [])]
+    if not ids:
+        raise DataError("ƏV seçilməyib")
+    target = category_of(p.get("category"))
+    norms = rates.current()
+    if norms.by_code[target].kind != "ev":
+        raise DataError("Kütləvi köçürmə yalnız adi ƏV kateqoriyalarına mümkündür "
+                        "(QMA və icarəyə götürülmüş ƏV-in təmiri — kart-kart)")
+    renumber = bool(p.get("renumber"))
+
+    def plan_for(assets, ob, closed):
+        by_id = {r["asset_id"]: r for r in assets}
+        moves, problems = [], []
+        for aid in ids:
+            row = by_id.get(aid)
+            if row is None:
+                raise DataError(f"ƏV tapılmadı: {aid}")
+            label = row["inv_no"] or row["name"]
+            if row["category"] == target:
+                continue
+            if norms.by_code[row["category"]].kind != "ev":
+                problems.append(f"{label}: QMA / icarə kateqoriyasıdır — kart-kart dəyişin")
+                continue
+            year = _sealed_year_touched(root, slug, row, ob, closed)
+            if year is not None:
+                problems.append(f"{label}: {year} ili bağlıdır")
+                continue
+            moves.append(row)
+        if problems:
+            raise DataError("Köçürmək olmur: " + "; ".join(problems)
+                            + ". Bağlı ili əvvəlcə açın və ya bu ƏV-ləri "
+                            "seçimdən çıxarın.")
+        # Numbers to change, in the order the cards stand in assets.tsv.
+        renum = [r for r in moves if renumber and r["inv_no"].upper().startswith(
+            r["category"].upper() + "-")]
+        new_numbers = {}
+        if renum:
+            first = suggest_inv_no(assets, target)
+            for r, n in zip(renum, inv_series(assets, first, len(renum))):
+                new_numbers[r["asset_id"]] = n
+        return [{"asset_id": r["asset_id"], "name": r["name"],
+                 "category": r["category"], "inv_no": r["inv_no"],
+                 "new_inv_no": new_numbers.get(r["asset_id"], r["inv_no"])}
+                for r in sorted(moves, key=lambda r: assets.index(r))]
+
+    if p.get("dry_run"):
+        return {"moves": plan_for(rows_of(root, slug, "assets.tsv"),
+                                  rows_of(root, slug, "opening_balances.tsv"),
+                                  load_client(root, slug).closed_years()),
+                "target": target}
+
+    with transaction(root, slug, "asset.recategorize") as tx:
+        assets = rows_of(root, slug, "assets.tsv")
+        ob = rows_of(root, slug, "opening_balances.tsv")
+        plan = plan_for(assets, ob, load_client(root, slug).closed_years())
+        by_id = {r["asset_id"]: r for r in assets}
+        for m in plan:
+            row = by_id[m["asset_id"]]
+            tx.log(row["asset_id"], "category", row["category"], target)
+            row["category"] = target
+            if m["new_inv_no"] != row["inv_no"]:
+                tx.log(row["asset_id"], "inv_no", row["inv_no"], m["new_inv_no"])
+                row["inv_no"] = m["new_inv_no"]
+        moved = {m["asset_id"] for m in plan}
+        # The category lives on the balance rows too (as in update_asset).
+        for r in ob:
+            if r["asset_id"] in moved:
+                r["category"] = target
+        save_rows(root, slug, "assets.tsv", assets)
+        save_rows(root, slug, "opening_balances.tsv", ob)
+    return f"{len(plan)} ƏV → {norms.by_code[target].name_az}"
 
 
 # Everything that points at a card. The same list delete_asset walks, which

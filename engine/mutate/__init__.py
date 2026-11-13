@@ -49,7 +49,7 @@ from .numbering import (
 from .assets import (
     clear_assets,
     MODES, create_asset, delete_asset,
-    delete_assets_many,
+    delete_assets_many, recategorize_assets,
     set_addition, set_disposal, set_opening, set_repair, update_asset,
 )
 from .clients import create_client, update_client
@@ -82,6 +82,7 @@ ACTIONS = {
     "asset.update": update_asset,
     "asset.delete": delete_asset,
     "asset.delete_many": delete_assets_many,
+    "asset.recategorize": recategorize_assets,
     "asset.clear": clear_assets,
     "opening.set": set_opening,
     "disposal.set": set_disposal,
