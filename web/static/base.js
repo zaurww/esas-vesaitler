@@ -1,3 +1,5 @@
+// stored values stay realizasiya/leqv (disposals.tsv); this is what is shown
+const DISPOSAL_AZ = {realizasiya:'Satış', leqv:'Ləğv'};
 const fmt = new Intl.NumberFormat('az-AZ',{minimumFractionDigits:2,maximumFractionDigits:2});
 const money = s => { const n = parseFloat(s); return n === 0
   ? '<span class="zero">—</span>' : fmt.format(n); };

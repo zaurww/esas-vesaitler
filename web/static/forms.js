@@ -327,18 +327,18 @@ function formOpening(card){
 /* ---- disposal ---- */
 function formDisposal(card){
   const has = !!card.disposal_type;
-  openModal(`Xaricetmə — ${card.inv_no || card.name}`,
+  openModal(`${has ? 'Xaricetməni düzəlt' : 'Xaricetmə'} — ${card.inv_no || card.name}`,
     `<input type="hidden" name="asset_id" value="${card.asset_id}">` +
     `<div class="row2">
       ${fld('date','Tarix',{type:'date',value:card.disposal_date,req:true})}
       ${fld('type','Növ',{type:'select',req:true,options:
-        `<option value="realizasiya" ${card.disposal_type==='realizasiya'?'selected':''}>Realizasiya (satış)</option>
+        `<option value="realizasiya" ${card.disposal_type==='realizasiya'?'selected':''}>Satış</option>
          <option value="leqv" ${card.disposal_type==='leqv'?'selected':''}>Ləğv (silinmə)</option>`})}
      </div>` +
     fld('proceeds','Satış məbləği (AZN)',{type:'number',step:'0.01',
         value:has?card.proceeds:'',
-        hint:'Ləğv halında 0. Satışdan gəlir/zərərin bəyannamədə əks etdirilməsi '
-           + 'hələ həll olunmayıb — CLAUDE.md §12.1.'}) +
+        hint:'Ləğv halında 0. Satış məbləği ilə qalıq dəyər arasındakı fərq '
+           + '«Bəyannamə»yə düşür: gəlir m.114.7, zərər m.114.9.'}) +
     (has ? `<label style="font-size:12.5px"><input type="checkbox" name="remove"
         style="width:auto"> Xaricetməni ləğv et</label>` : ''),
     d => post('disposal.set', d));

@@ -442,6 +442,12 @@ def set_disposal(root: Path, slug: str, p: dict) -> str:
     aid = str(p["asset_id"])
     with transaction(root, slug, "disposal.set") as tx:
         rows = rows_of(root, slug, "disposals.tsv")
+        # Correcting a sale rewrites the old row too: a sale dated inside a
+        # closed year must not be moved or removed from here (§6.2) -- the
+        # year is read from the FILE, as in _set_entry.
+        for r in rows:
+            if r["asset_id"] == aid and r.get("date"):
+                guard_open_year(root, slug, int(r["date"][:4]))
         rows = [r for r in rows if r["asset_id"] != aid]
         if not p.get("remove"):
             when = iso_date(p.get("date"), "Xaricetmə tarixi")

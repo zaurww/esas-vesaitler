@@ -1154,3 +1154,45 @@ class EntryIdentity(TempRoot):
             mutate.set_repair(self.root, self.slug, {
                 "asset_id": self.aid, "orig_id": "nope",
                 "date": "2024-06-01", "amount": "1"})
+
+
+class DisposalCorrection(TempRoot):
+    """A sale is corrected through the same disposal.set that recorded it:
+    one row per asset, replaced, never duplicated (found by the owner, who
+    typed the price wrong and could not see how to fix it)."""
+
+    def setUp(self):
+        super().setUp()
+        mutate.create_asset(self.root, self.slug, {
+            "mode": "new", "category": "nv", "name": "Avtomobil",
+            "cost": "20000", "in_date": "2024-01-10"})
+        self.aid = self.client().assets[0].asset_id
+        # a second asset stays on the books: a year is recorded as closed
+        # through its sealed year-end balances, and with nothing left at year
+        # end there would be nothing to seal (open question, see HISTORY.md)
+        mutate.create_asset(self.root, self.slug, {
+            "mode": "new", "category": "ma", "name": "Dəzgah",
+            "cost": "1000", "in_date": "2024-01-10"})
+        self.sell("5000")
+
+    def sell(self, price, date="2024-06-01"):
+        mutate.set_disposal(self.root, self.slug, {
+            "asset_id": self.aid, "date": date, "type": "realizasiya",
+            "proceeds": price})
+
+    def test_correcting_the_price_replaces_the_row(self):
+        self.sell("6000")
+        ds = self.client().disposals
+        self.assertEqual(len(ds), 1)
+        self.assertEqual(ds[0].proceeds, Decimal("6000"))
+        card = next(c for c in compute_year(self.client(), 2024).disposed_cards)
+        self.assertEqual(card.gain_loss, Decimal("6000") - card.disposed)
+
+    def test_sale_in_a_closed_year_cannot_be_corrected_or_moved(self):
+        mutate.close_year(self.root, self.slug, {"year": 2024})
+        with self.assertRaises(DataError):
+            self.sell("6000")
+        with self.assertRaises(DataError):
+            mutate.set_disposal(self.root, self.slug, {
+                "asset_id": self.aid, "remove": "1"})
+        self.assertEqual(self.client().disposals[0].proceeds, Decimal("5000"))

@@ -249,7 +249,7 @@ function viewAnnual(d){
             ${c.written_off ? '<span class="tag w">silindi</span>' : ''}
             ${c.retired ? `<span class="tag d">${esc(RETIRED_AZ[c.retired_kind]
                 || 'balansdan çıxıb')}${c.retired_year ? ' ' + c.retired_year : ''}</span>` : ''}
-            ${c.disposal_type ? `<span class="tag d">${esc(c.disposal_type)}</span>` : ''}</td>
+            ${c.disposal_type ? `<span class="tag d">${esc(DISPOSAL_AZ[c.disposal_type] || c.disposal_type)}</span>` : ''}</td>
         <td class="d">${esc(c.in_date)}</td>
         ${cols.map(col => `<td class="num">${col.cell(c, cat)}</td>`).join('')}</tr>`;
     }
@@ -382,7 +382,7 @@ function viewDeclaration(d){
         d.disposals.map(c => {
           const g = parseFloat(c.gain_loss);
           return `<tr><td>${esc(c.inv_no)}</td><td>${esc(c.name)}</td>
-            <td class="d">${esc(c.date)}</td><td>${esc(c.type)}</td>
+            <td class="d">${esc(c.date)}</td><td>${esc(DISPOSAL_AZ[c.type] || c.type)}</td>
             <td class="num">${money(c.proceeds)}</td>
             <td class="num">${money(c.residual)}</td>
             <td class="num" style="color:${g>0?'var(--neg)':g<0?'var(--pos)':'inherit'}">

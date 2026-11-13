@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from engine.calc import (  # noqa: E402
-    MONTHS_AZ, CalcError, compute_year, rate_matrix,
+    DISPOSAL_AZ, MONTHS_AZ, CalcError, compute_year, rate_matrix,
 )
 from engine.excel import build_import_template, build_workbook  # noqa: E402
 from engine.mutate import (  # noqa: E402
@@ -515,7 +515,7 @@ def asset_history(root: Path, slug: str, asset_id: str) -> dict:
         if d.asset_id == asset_id:
             events.append({"date": d.date.isoformat() if d.date else "",
                            "kind": "Xaricetmə", "amount": m(d.proceeds),
-                           "note": d.type})
+                           "note": DISPOSAL_AZ.get(d.type, d.type)})
     for w in data.writeoffs:
         if w.asset_id == asset_id:
             events.append({"date": f"{w.year}-12-31", "kind": "Silinmə 500/5%",

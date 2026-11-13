@@ -341,6 +341,10 @@ class YearResult:
         return self.declaration_income - self.declaration_deducted
 
 
+# How a disposal type is shown. The stored values stay `realizasiya` / `leqv`
+# (disposals.tsv, format unchanged); "Satış" is what people say.
+DISPOSAL_AZ = {"realizasiya": "Satış", "leqv": "Ləğv"}
+
 MONTHS_AZ = ["Yanvar", "Fevral", "Mart", "Aprel", "May", "İyun",
              "İyul", "Avqust", "Sentyabr", "Oktyabr", "Noyabr", "Dekabr"]
 

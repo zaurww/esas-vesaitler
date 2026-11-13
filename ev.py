@@ -23,7 +23,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
-from engine.calc import MONTHS_AZ, CalcError, compute_year  # noqa: E402
+from engine.calc import DISPOSAL_AZ, MONTHS_AZ, CalcError, compute_year  # noqa: E402
 try:
     from engine.excel import build_workbook  # noqa: E402
 except ModuleNotFoundError as e:
@@ -100,7 +100,7 @@ def cmd_calc(slug: str, year: int) -> None:
         for c in r.disposed_cards:
             when = c.disposal_date.isoformat() if c.disposal_date else "—"
             print(f"      {c.inv_no or c.name[:10]:<10}{c.name[:22]:<23}"
-                  f"{c.disposal_type:<13}{when:<12}"
+                  f"{DISPOSAL_AZ.get(c.disposal_type, c.disposal_type):<13}{when:<12}"
                   f"satış {c.proceeds:>11,.2f}  qalıq {c.disposed:>11,.2f}"
                   f"  fərq {c.gain_loss:>11,.2f}")
 

@@ -23,14 +23,18 @@ function openCard(id){
   document.getElementById('dtitle').textContent = (card.inv_no ? card.inv_no + ' · ' : '') + card.name;
   const step = (l, v, extra='') =>
     `<div class="step ${extra}"><span class="l">${l}</span><span class="num">${
-      typeof v === 'string' && !isNaN(parseFloat(v)) ? fmt.format(parseFloat(v)) : v}</span></div>`;
+      // only a plain number is money: parseFloat('2025-07-15') is 2025, and
+      // the sale date used to print as "2,025.00"
+      typeof v === 'string' && /^-?\d+(\.\d+)?$/.test(v.trim())
+        ? fmt.format(parseFloat(v)) : v}</span></div>`;
   let h = '';
   if (!REPORT.is_closed){
     h += `<div class="acts">
       <button onclick="showHistory('${card.asset_id}')"><strong>Tam tarixçə</strong></button>
       <button onclick="formAsset(CARD)">Redaktə</button>
       <button onclick="formOpening(CARD)">Açılış qalığı</button>
-      <button onclick="formDisposal(CARD)">Xaricetmə</button>
+      <button onclick="formDisposal(CARD)">${card.disposal_type
+        ? 'Xaricetməni düzəlt' : 'Xaricetmə (satış / ləğv)'}</button>
       ${qma ? '' : `<button onclick="formRepair(CARD)">Təmir xərci</button>`}
       <button onclick="formAddition(CARD)">Dəyər artımı</button>
       ${straight ? '' : `<button onclick="formElection(CAT, CARD)">Fərdi dərəcə</button>`}
@@ -131,8 +135,14 @@ function openCard(id){
   if (parseFloat(card.writeoff)) h += step('Silinmə', card.writeoff);
   h += step('7 · Qalıq (il sonu)', card.closing, 'res');
   if (card.disposal_type){
-    h += `<h3>Xaricetmə</h3>` + step('Tarix', card.disposal_date) +
-         step('Növ', card.disposal_type) + step('Satış', card.proceeds) +
+    // The sale is edited through the same form that recorded it; without a
+    // door right here, a mistyped price looked unfixable (found by the owner).
+    h += `<h3>Xaricetmə${REPORT.is_closed ? '' : ` <button class="ghost"
+            style="font-size:12px;padding:2px 8px;margin-left:6px"
+            onclick="formDisposal(CARD)">düzəlt</button>`}</h3>` +
+         step('Tarix', card.disposal_date) +
+         step('Növ', DISPOSAL_AZ[card.disposal_type] || card.disposal_type) +
+         step('Satış məbləği', card.proceeds) +
          step('Qalıq', card.disposed) + step('Fərq', card.gain_loss) +
          `<div class="note" style="margin-top:8px">Fərq bəyannamədə ayrıca sətirdir:
           gəlir üçün m.114.7, zərər üçün m.114.9 — «Bəyannamə» bölməsinə baxın.</div>`;

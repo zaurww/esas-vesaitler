@@ -15,7 +15,7 @@ from openpyxl.utils import get_column_letter
 
 from datetime import date
 
-from .calc import MONTHS_AZ, YearResult
+from .calc import DISPOSAL_AZ, MONTHS_AZ, YearResult
 from . import rates
 from .rates import statutory
 
@@ -101,7 +101,8 @@ def _sheet_declaration(wb: Workbook, r: YearResult) -> None:
         for c in r.disposed_cards:
             vals = [c.inv_no, c.name,
                     c.disposal_date.isoformat() if c.disposal_date else "",
-                    c.disposal_type, _f(c.proceeds), _f(c.disposed),
+                    DISPOSAL_AZ.get(c.disposal_type, c.disposal_type),
+                    _f(c.proceeds), _f(c.disposed),
                     _f(c.gain_loss)]
             for i, v in enumerate(vals, start=1):
                 cell = ws.cell(row, i, v)
