@@ -14,3 +14,6 @@ __pycache__/
 # Backups
 *.bak
 backups/
+
+# Off-site copy target -- a personal path, never for the public repo (§9.2)
+offsite.json

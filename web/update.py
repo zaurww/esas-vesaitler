@@ -50,7 +50,8 @@ _RELEASES_URL = f"https://github.com/{GITHUB_REPO}/releases"
 # app grows a file and would eventually be forgotten (as NORM_FILES itself
 # once was, CLAUDE.md §5.1). A short "what to keep" list is stable instead.
 PRESERVE = {"clients", "backups", "rates.tsv", "coefficients.tsv",
-            "parameters.tsv", "categories.tsv"}
+            "parameters.tsv", "categories.tsv",
+            "offsite.json"}   # where the off-site copy goes (web/offsite.py)
 
 # Written into each update's own backup_dir, so rollback_update can find it
 # again later without re-deriving what changed from a "before" state that,

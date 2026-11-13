@@ -26,6 +26,28 @@ if not exist "ev.py" (
     exit /b 1
 )
 
+REM The client data AND its backups live inside this folder. On the desktop
+REM or in Downloads it is one stray delete or cleanup away from losing all
+REM of it, so say so -- a warning, not a refusal: the user may know better.
+REM Substring test by substitution: cmd replaces case-insensitively, and
+REM findstr was tried first and mis-parsed the backslashes.
+set "HERE=%~dp0"
+if /i not "%HERE:\Desktop\=%"=="%HERE%" goto :placewarn
+if /i not "%HERE:\Downloads\=%"=="%HERE%" goto :placewarn
+if /i not "%HERE:\OneDrive\=%"=="%HERE%" goto :placewarn
+goto :placeok
+:placewarn
+echo   DIQQET: proqram bu qovluqdadir:
+echo     "%~dp0"
+echo   Butun musteri bazalari ve ehtiyat nusxeler de burada saxlanacaq.
+echo   Is masasi, Yuklemeler ve ya OneDrive qovlugu tehlukelidir: tesadufen
+echo   silinse, her shey iter. Meslehet: bu pencereni baglayin, qovlugu
+echo   C:\EsasVesaitler kimi bir yere kocurun ve Install.bat-i oradan
+echo   yeniden ishe salin. Davam etmek ucun her hansi duymeye basin.
+echo.
+pause
+:placeok
+
 REM Not "where python": Windows ships a Microsoft Store stub python.exe
 REM (App execution alias) that "where" finds although no Python is
 REM installed -- setup then went on and pip failed with "Python was not

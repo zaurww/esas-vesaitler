@@ -43,6 +43,31 @@ async function boot(){
   fillYears(); load();
   checkUpdate();      // fire-and-forget -- must never delay or block boot()
   checkPendingVerify(); // same -- must never delay or block boot()
+  checkOffsite();       // same
+}
+
+/* The off-site copy (web/offsite.py) is the only backup that survives the
+   program's folder being deleted, and the one nobody thinks of until that
+   day. So its absence -- or a copy that stopped working -- is said next to
+   the version, quietly but every time, and leads to where it is set up. */
+async function checkOffsite(){
+  try {
+    const st = await (await fetch('/api/offsite')).json();
+    const w = document.getElementById('offwarn');
+    const msg = st.error ? '⚠ xarici nüsxə işləmir'
+              : !st.folder ? '⚠ xarici nüsxə qurulmayıb' : '';
+    w.textContent = msg;
+    w.title = st.error || 'Proqram qovluğu silinsə, bütün məlumat və ehtiyat nüsxələr itəcək. ⚙ → «Xarici ehtiyat nüsxə»';
+    w.style.display = msg ? '' : 'none';
+  } catch (e) { /* quiet */ }
+}
+
+async function postJSON(url, body){
+  const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'},
+                              body: JSON.stringify(body || {})});
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error || 'xəta');
+  return j;
 }
 
 /* Once per page load, never a repeating timer (§9): a worker who leaves the

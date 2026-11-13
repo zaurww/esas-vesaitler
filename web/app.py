@@ -32,7 +32,8 @@ from engine.mutate import (  # noqa: E402
 )
 from engine import rates  # noqa: E402
 from engine.rates import ENGINE_VERSION  # noqa: E402
-from engine.storage import DataError, list_clients, load_client  # noqa: E402
+from engine.storage import DataError, client_folder, list_clients, load_client  # noqa: E402
+from web import offsite  # noqa: E402
 from web.update import (  # noqa: E402
     apply_update, check_latest, clear_pending_verify, download,
     read_pending_verify, remove_obsolete, rollback_update,
@@ -105,6 +106,56 @@ def _same_installation(info: dict | None) -> bool:
 
 
 _STATE_LOCK = threading.RLock()
+
+# Off-site copy (web/offsite.py): the last failure, shown on the settings
+# screen and next to the version. A copy that silently stopped working is the
+# worst kind -- it is only looked for on the day it is needed.
+_offsite_error: str = ""
+
+
+def _offsite_tick() -> None:
+    """Write today's off-site archives. Under the state lock: an export reads
+    every client file, and reading between two files of a transaction would
+    copy a half-written client (§8.0)."""
+    global _offsite_error
+    with _STATE_LOCK:
+        try:
+            done = offsite.run(ROOT)
+            _offsite_error = ""
+            if done:
+                print(f"  xarici nüsxə: {', '.join(done)}")
+        except DataError as e:
+            _offsite_error = str(e)
+            print(f"  {e}")
+
+
+def _offsite_loop() -> None:
+    """Once at start, then hourly: a program left open for days still makes
+    its daily copy when the date turns."""
+    import time
+    while True:
+        _offsite_tick()
+        time.sleep(3600)
+
+
+# The folder picker is a real Windows dialog in a child process: a browser
+# never hands a page the absolute path of a folder. Run outside the state
+# lock -- the dialog waits for a human, and the server must not wait with it.
+_PICK_SCRIPT = """
+import sys, tkinter
+from tkinter import filedialog
+r = tkinter.Tk(); r.withdraw(); r.attributes('-topmost', True)
+p = filedialog.askdirectory(title='Xarici ehtiyat nüsxə üçün qovluq', initialdir=sys.argv[1])
+sys.stdout.write(p or '')
+"""
+
+
+def _open_in_explorer(path: Path) -> None:
+    if sys.platform == "win32":
+        os.startfile(str(path))  # noqa: S606 -- a folder we resolved, not input
+    else:
+        import subprocess
+        subprocess.Popen(["xdg-open", str(path)])
 
 # Result of the post-update check (see _run_startup_verify below), set once
 # when this process starts serving and read by /api/update-status. None
@@ -686,6 +737,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if (why := self._foreign(write=True)):
             return self._refuse(why)
+        if urlparse(self.path).path == "/api/pick-folder":
+            return self._pick_folder()
         with _STATE_LOCK:
             self._post()
 
@@ -715,6 +768,14 @@ class Handler(BaseHTTPRequestHandler):
 
             if url.path.startswith("/static/"):
                 self._static(url.path[len("/static/"):])
+                return
+
+            if url.path == "/api/offsite":
+                with_paths = self._offsite_status()
+                client = q.get("client", [""])[0]
+                if client:
+                    with_paths["client_folder"] = str(client_folder(ROOT, client))
+                self._json(with_paths)
                 return
 
             if url.path == "/api/context":
@@ -863,6 +924,27 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:  # noqa: BLE001
             self._json({"error": f"{type(e).__name__}: {e}", "kind": "internal"}, 500)
 
+    def _offsite_status(self) -> dict:
+        st = offsite.status(ROOT)
+        st["error"] = st.get("error") or _offsite_error
+        st["root"] = str(ROOT)
+        return st
+
+    def _pick_folder(self) -> None:
+        import subprocess
+        start = (offsite.read_settings(ROOT).get("folder")
+                 or offsite.suggested_folder())
+        start = start if Path(start).is_dir() else str(Path.home())
+        try:
+            r = subprocess.run([sys.executable, "-c", _PICK_SCRIPT, start],
+                               capture_output=True, text=True, encoding="utf-8",
+                               timeout=600)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            return self._json({"error": f"qovluq seçimi açılmadı: {e}"}, 400)
+        if r.returncode != 0:
+            return self._json({"error": "qovluq seçimi açılmadı — yolu əl ilə yazın"}, 400)
+        self._json({"folder": r.stdout.strip().replace("/", os.sep)})
+
     def _post(self):
         """Every write goes through engine.mutate, which backs up, applies,
         re-validates the whole store and rolls back if it no longer parses."""
@@ -901,6 +983,29 @@ class Handler(BaseHTTPRequestHandler):
                 global _startup_verify
                 _startup_verify = None
                 return self._json({"ok": True, "message": message})
+            if url.path == "/api/offsite":
+                length = int(self.headers.get("Content-Length", "0"))
+                body = json.loads(self.rfile.read(length) or b"{}")
+                offsite.set_folder(ROOT, body.get("folder", ""))
+                _offsite_tick()   # copy right away: the user wants to see it work
+                return self._json({"ok": True, **self._offsite_status()})
+            if url.path == "/api/open-folder":
+                # The path is resolved HERE from the client name, never taken
+                # from the request: a page must not make the server open an
+                # arbitrary location.
+                length = int(self.headers.get("Content-Length", "0"))
+                body = json.loads(self.rfile.read(length) or b"{}")
+                what = body.get("what")
+                if what == "client":
+                    path = client_folder(ROOT, body.get("client", ""))
+                elif what == "offsite":
+                    path = Path(offsite.read_settings(ROOT).get("folder", ""))
+                else:
+                    path = ROOT
+                if not str(path) or not path.is_dir():
+                    return self._json({"error": f"qovluq tapılmadı: {path}"}, 400)
+                _open_in_explorer(path)
+                return self._json({"ok": True})
             if url.path != "/api/action":
                 return self._json({"error": "not found"}, 404)
             length = int(self.headers.get("Content-Length", "0"))
@@ -994,6 +1099,7 @@ def serve(port: int = 8777, open_browser: bool = True,
     for name in remove_obsolete(ROOT):
         print(f"  köhnə fayl silindi: {name} (backups/_app-da saxlanılıb)")
     _startup_verify = _run_startup_verify(ROOT)
+    threading.Thread(target=_offsite_loop, daemon=True).start()
 
     print(f"Əsas Vəsaitlər · engine {ENGINE_VERSION}")
     print(f"  {url}")

@@ -179,6 +179,28 @@ function formSettings(){
       onunla ehtiyat nüsxələr və arxivlər bağlıdır. Başqa ad lazımdırsa,
       «⇄ Baza» ilə ixrac edib yeni adla idxal edin.</div>
     <hr style="border:0;border-top:1px solid var(--line);margin:14px 0">
+    <div class="fld"><label>Məlumatlar harada saxlanılır</label>
+      <div class="h" id="pathinfo" style="margin:0 0 8px">…</div>
+      <button type="button" class="btn" style="border:1px solid var(--line)"
+        onclick="openFolder('client')">📂 Bu müştərinin qovluğu</button>
+      <button type="button" class="btn" style="border:1px solid var(--line)"
+        onclick="openFolder('root')">📂 Proqramın qovluğu</button></div>
+    <div class="fld"><label>Xarici ehtiyat nüsxə</label>
+      <div class="h" style="margin:0 0 8px">Proqram hər dəyişiklikdən əvvəl
+        ehtiyat nüsxə götürür, amma onları <strong>proqramın öz qovluğunda</strong>
+        saxlayır: o qovluq silinsə, nüsxələr də gedir. Burada başqa yer seçin
+        (yaxşısı OneDrive / Google Drive) — proqram hər gün bütün müştərilərin
+        «⇄ Baza» arxivini ora yazacaq və son 30 nüsxəni saxlayacaq.</div>
+      <div style="display:flex;gap:6px">
+        <input id="offfolder" style="flex:1" placeholder="C:\Users\...\OneDrive\EsasVesaitler-ehtiyat">
+        <button type="button" class="btn" style="border:1px solid var(--line)"
+          onclick="pickOffsite()">Seç…</button></div>
+      <div id="offstatus" class="h" style="margin:6px 0"></div>
+      <button type="button" class="btn" style="border:1px solid var(--line)"
+        onclick="saveOffsite()">Saxla və indi köçür</button>
+      <button type="button" class="btn" id="offopen" style="border:1px solid var(--line)"
+        onclick="openFolder('offsite')">📂 Nüsxələrin qovluğu</button></div>
+    <hr style="border:0;border-top:1px solid var(--line);margin:14px 0">
     <div class="fld"><label>Sıfırdan başlamaq</label>
       <div class="h" style="margin:0 0 8px">İdxal mövcud kartları
         <strong>silmir, üstünə əlavə edir</strong>. Cədvəli düzəldib yenidən
@@ -187,6 +209,63 @@ function formSettings(){
         color:var(--neg)" onclick="closeModal(); formClearAssets()"
         >Bütün ƏV-ləri sil…</button></div>`,
     d => post('client.update', d));
+  loadOffsite();
+}
+
+/* Where the data is, and the copy that lives somewhere else. New users do
+   not know the database is a folder next to the program -- and that deleting
+   that folder from the desktop takes every backup with it. */
+async function loadOffsite(){
+  const slug = document.getElementById('client').value;
+  const st = await (await fetch(`/api/offsite?client=${encodeURIComponent(slug)}`)).json();
+  const pi = document.getElementById('pathinfo');
+  if (!pi) return;
+  pi.innerHTML = `Proqram: <code>${esc(st.root)}</code><br>
+    Bu müştəri: <code>${esc(st.client_folder || '')}</code><br>
+    Ehtiyat nüsxələr də proqramın qovluğundadır (<code>backups</code>).`;
+  const inp = document.getElementById('offfolder');
+  inp.value = st.folder || '';
+  if (!st.folder) inp.placeholder = st.suggested;
+  showOffsite(st, slug);
+}
+
+function showOffsite(st, slug){
+  const box = document.getElementById('offstatus');
+  document.getElementById('offopen').style.display = st.folder ? '' : 'none';
+  const last = st.clients && st.clients[slug];
+  box.innerHTML = st.error
+    ? `<span style="color:var(--neg)">⚠ ${esc(st.error)}</span>`
+    : !st.folder
+      ? `<span style="color:var(--neg)">Qurulmayıb.</span> Təklif: <code>${esc(st.suggested)}</code>
+         <a href="#" onclick="document.getElementById('offfolder').value=${esc(JSON.stringify(st.suggested))};return false">istifadə et</a>`
+      : `✓ Son nüsxə: <strong>${esc(last || '—')}</strong>`;
+}
+
+async function pickOffsite(){
+  try {
+    const r = await postJSON('/api/pick-folder');
+    if (r.folder) document.getElementById('offfolder').value = r.folder;
+  } catch (e) { fail(e.message); }
+}
+
+async function saveOffsite(){
+  const slug = document.getElementById('client').value;
+  try {
+    const st = await postJSON('/api/offsite',
+      {folder: document.getElementById('offfolder').value});
+    showOffsite(st, slug);
+    checkOffsite();
+  } catch (e) {
+    document.getElementById('offstatus').innerHTML =
+      `<span style="color:var(--neg)">⚠ ${esc(e.message)}</span>`;
+  }
+}
+
+async function openFolder(what){
+  try {
+    await postJSON('/api/open-folder',
+      {what, client: document.getElementById('client').value});
+  } catch (e) { fail(e.message); }
 }
 
 /* The four statuses and what each multiplies the norm by. Comes from the
