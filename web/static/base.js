@@ -54,10 +54,10 @@ async function checkOffsite(){
   try {
     const st = await (await fetch('/api/offsite')).json();
     const w = document.getElementById('offwarn');
-    const msg = st.error ? '⚠ xarici nüsxə işləmir'
-              : !st.folder ? '⚠ xarici nüsxə qurulmayıb' : '';
+    const msg = st.error ? '⚠ Backup işləmir'
+              : !st.folder ? '⚠ Backup üçün qovluq seçilməyib' : '';
     w.textContent = msg;
-    w.title = st.error || 'Proqram qovluğu silinsə, bütün məlumat və ehtiyat nüsxələr itəcək. ⚙ → «Xarici ehtiyat nüsxə»';
+    w.title = st.error || 'Proqram qovluğu silinsə, bütün məlumat və ehtiyat nüsxələr itəcək. ⚙ → «Backup qovluğu»';
     w.style.display = msg ? '' : 'none';
   } catch (e) { /* quiet */ }
 }

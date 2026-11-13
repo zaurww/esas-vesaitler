@@ -185,7 +185,7 @@ function formSettings(){
         onclick="openFolder('client')">📂 Bu müştərinin qovluğu</button>
       <button type="button" class="btn" style="border:1px solid var(--line)"
         onclick="openFolder('root')">📂 Proqramın qovluğu</button></div>
-    <div class="fld"><label>Xarici ehtiyat nüsxə</label>
+    <div class="fld"><label>Backup qovluğu</label>
       <div class="h" style="margin:0 0 8px">Proqram hər dəyişiklikdən əvvəl
         ehtiyat nüsxə götürür, amma onları <strong>proqramın öz qovluğunda</strong>
         saxlayır: o qovluq silinsə, nüsxələr də gedir. Burada başqa yer seçin
