@@ -274,6 +274,8 @@ function openModal(title, body, onSubmit, submitLabel){
   document.getElementById('mtitle').textContent = title;
   document.getElementById('mbody').innerHTML = body;
   document.getElementById('ferr').style.display = 'none';
+  // some windows (⇄ Baza, update) hide it; every new form gets it back
+  document.getElementById('msubmit').style.display = '';
   document.getElementById('msubmit').textContent = submitLabel || 'Yadda saxla';
   MSUBMIT = onSubmit;
   document.getElementById('modal').classList.add('open');

@@ -43,50 +43,70 @@ function formClient(){
    next to the engine, and an older engine there does not read files added
    later. The archive carries both and the import compares before writing. */
 function formBaza(){
+  /* Two acts in one window, so each block carries its own button: the footer
+     "submit" read as belonging to the whole window, and a user looking for
+     the export pressed nothing or the wrong thing. Both used to be labelled
+     "yüklə" too -- download in one block, upload in the other. */
   const slug = document.getElementById('client').value;
+  const box = 'border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin-bottom:14px';
+  const readArchive = async () => {
+    const f = document.getElementById('bazafile').files[0];
+    if (!f) throw new Error('Fayl seçilməyib');
+    const b64 = await new Promise(res => {
+      const fr = new FileReader();
+      fr.onload = () => res(fr.result.split(',')[1]);
+      fr.readAsDataURL(f);
+    });
+    const info = (await post('client.import', {b64, dry_run: true})).result;
+    if (info.blocking.length) throw new Error(info.blocking.join(' '));
+    const m = info.manifest;
+    document.getElementById('bazainfo').innerHTML = `
+      <div class="note q"><strong>${esc(m.client_name)}</strong> ·
+        VÖEN ${esc(m.voen)} · mühərrik ${esc(m.engine_version)} ·
+        format v${m.format_version}<br>
+        ${esc(m.exported_at)} tarixində ${esc(m.exported_by)} tərəfindən
+        ixrac edilib, ${Object.keys(m.files).length} fayl.</div>
+      ${info.notes.map(n => `<div class="note">${esc(n)}</div>`).join('')}
+      ${fld('slug','Qovluğun adı',{value:info.exists ? '' : info.suggested_slug,
+            req:true, placeholder:info.suggested_slug})}
+      <label style="font-size:12.5px;display:flex;gap:8px;align-items:flex-start">
+        <input type="checkbox" name="apply_norms" checked style="width:auto;margin-top:3px">
+        <span>Arxivdəki normaları tətbiq et — <strong>bütün müştərilərə
+          təsir edir</strong>, çünki normalar proqramın yanındadır.</span></label>`;
+    MSUBMIT = async d => {
+      const r = await post('client.import',
+        {b64, slug: d.slug, apply_norms: !!d.apply_norms});
+      NEWCLIENT = r.result.slug;
+    };
+    document.getElementById('bazago').textContent = '⬇ İdxal et';
+    throw new Error('__stay__');
+  };
   openModal('Bazanın köçürülməsi',
-    `<div class="fld"><label>Bu müştərini arxivləşdirin</label>
-      <div class="h" style="margin:0 0 8px">Müştərinin bütün faylları,
-        istifadə olunan normalar və hansı mühərriklə yazıldığı — bir fayl.</div>
+    `<div style="${box}">
+      <div style="font-weight:600;margin-bottom:4px">⬆ İxrac — bu müştərini başqa maşına göndərmək</div>
+      <div class="h" style="margin:0 0 10px">Müştərinin bütün faylları,
+        istifadə olunan normalar və hansı mühərriklə yazıldığı — bir
+        <code>.zip</code> fayl. Faylı kompüterinizə saxlayın və işçiyə göndərin.</div>
       ${slug ? `<a class="btn" style="border:1px solid var(--line)"
-        href="/api/client-archive?client=${slug}">⬇ «${esc(slug)}» arxivini yüklə</a>`
+        href="/api/client-archive?client=${slug}">⬆ «${esc(slug)}» ixrac et (.zip saxla)</a>`
         : '<div class="h">Müştəri seçilməyib.</div>'}</div>
-    <hr style="border:0;border-top:1px solid var(--line);margin:16px 0">
-    <div class="fld"><label>Başqa maşından gələn arxivi yükləyin</label>
-      <input type="file" id="bazafile" accept=".zip"></div>
-    <div id="bazainfo"></div>`,
-    async () => {
-      const f = document.getElementById('bazafile').files[0];
-      if (!f) throw new Error('Fayl seçilməyib');
-      const b64 = await new Promise(res => {
-        const fr = new FileReader();
-        fr.onload = () => res(fr.result.split(',')[1]);
-        fr.readAsDataURL(f);
-      });
-      const info = (await post('client.import', {b64, dry_run: true})).result;
-      if (info.blocking.length) throw new Error(info.blocking.join(' '));
-      const m = info.manifest;
-      document.getElementById('bazainfo').innerHTML = `
-        <div class="note q"><strong>${esc(m.client_name)}</strong> ·
-          VÖEN ${esc(m.voen)} · mühərrik ${esc(m.engine_version)} ·
-          format v${m.format_version}<br>
-          ${esc(m.exported_at)} tarixində ${esc(m.exported_by)} tərəfindən
-          ixrac edilib, ${Object.keys(m.files).length} fayl.</div>
-        ${info.notes.map(n => `<div class="note">${esc(n)}</div>`).join('')}
-        ${fld('slug','Qovluğun adı',{value:info.exists ? '' : info.suggested_slug,
-              req:true, placeholder:info.suggested_slug})}
-        <label style="font-size:12.5px;display:flex;gap:8px;align-items:flex-start">
-          <input type="checkbox" name="apply_norms" checked style="width:auto;margin-top:3px">
-          <span>Arxivdəki normaları tətbiq et — <strong>bütün müştərilərə
-            təsir edir</strong>, çünki normalar proqramın yanındadır.</span></label>`;
-      MSUBMIT = async d => {
-        const r = await post('client.import',
-          {b64, slug: d.slug, apply_norms: !!d.apply_norms});
-        NEWCLIENT = r.result.slug;
-      };
-      document.getElementById('msubmit').textContent = 'İdxal et';
-      throw new Error('__stay__');
-    }, 'Arxivi oxu');
+    <div style="${box};margin-bottom:0">
+      <div style="font-weight:600;margin-bottom:4px">⬇ İdxal — başqa maşından gələn arxiv</div>
+      <div class="h" style="margin:0 0 10px">Göndərilmiş <code>.zip</code> faylını
+        seçin. Əvvəlcə nə yüklənəcəyi göstəriləcək, sonra təsdiq istəniləcək.</div>
+      <input type="file" id="bazafile" accept=".zip">
+      <div id="bazainfo" style="margin-top:10px"></div>
+      <button type="submit" class="primary" id="bazago">Arxivi oxu</button></div>`,
+    readArchive);
+  // the act's buttons live in their blocks; the footer only closes
+  document.getElementById('msubmit').style.display = 'none';
+  document.querySelector('#mform .foot .ghost').textContent = 'Bağla';
+  // another file chosen after reading: start over, never import the old one
+  document.getElementById('bazafile').onchange = () => {
+    MSUBMIT = readArchive;
+    document.getElementById('bazainfo').innerHTML = '';
+    document.getElementById('bazago').textContent = 'Arxivi oxu';
+  };
 }
 
 function needStatus(year){
