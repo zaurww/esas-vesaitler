@@ -28,17 +28,25 @@ def suggest_inv_no(rows: list[dict[str, str]], category: str) -> str:
     not a rule.
     """
     used = {r.get("inv_no", "").strip() for r in rows if r.get("inv_no", "").strip()}
-    prefixes: dict[tuple[str, int], int] = {}
+    # (prefix, width) -> [cards using it, highest counter]
+    prefixes: dict[tuple[str, int], list[int]] = {}
     for r in rows:
         if r.get("category") != category:
             continue
         m = INV_PATTERN.match(r.get("inv_no", "").strip())
         if m:
-            key = (m.group(1), len(m.group(2)))
-            prefixes[key] = max(prefixes.get(key, 0), int(m.group(2)))
+            seen = prefixes.setdefault((m.group(1), len(m.group(2))), [0, 0])
+            seen[0] += 1
+            seen[1] = max(seen[1], int(m.group(2)))
 
     if prefixes:
-        (prefix, width), top = max(prefixes.items(), key=lambda kv: (kv[1], kv[0][1]))
+        # "Prevailing" means used by the most cards, not holding the highest
+        # counter. A card moved here from another category keeps its old
+        # number (NV-0005 among YM-0001..0003), and ranking by counter made
+        # that one stray the scheme: "növbəti" answered NV-0020 for a truck,
+        # i.e. the old category's prefix again -- found on a live client.
+        (prefix, width), (_, top) = max(
+            prefixes.items(), key=lambda kv: (kv[1][0], kv[1][1], kv[0][1]))
     else:
         prefix, width, top = f"{category.upper()}-", 4, 0
 
