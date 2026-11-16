@@ -87,10 +87,35 @@ async function checkUpdate(){
   } catch (e) { /* quiet -- see above */ }
 }
 
+/* Release notes as HTML. They are written as a short Markdown list
+   (YENILIKLER.md, and the same text as the GitHub release body), so this
+   knows exactly two things: a line starting with "- " is a list item, any
+   other line is a paragraph. Everything is escaped -- one of the two sources
+   is text fetched from the network. */
+function notesHtml(text){
+  let html = '', inList = false;
+  for (const raw of String(text || '').split('\n')){
+    const line = raw.trim();
+    const item = /^[-*]\s+/.test(line);
+    if (inList && !item){ html += '</ul>'; inList = false; }
+    if (!line) continue;
+    if (item){
+      if (!inList){ html += '<ul style="margin:4px 0 4px 18px;padding:0">'; inList = true; }
+      html += `<li>${esc(line.replace(/^[-*]\s+/, ''))}</li>`;
+    } else {
+      html += `<div>${esc(line.replace(/^#+\s*/, ''))}</div>`;
+    }
+  }
+  return html + (inList ? '</ul>' : '');
+}
+
 function openUpdateModal(u){
+  const notes = (u.notes || '').trim();
   openModal(`Yeniləmə — ${u.latest}`,
     `<div class="h">Hazırkı versiya <strong>${esc(u.current)}</strong>,
       yeni versiya <strong>${esc(u.latest)}</strong> mövcuddur.</div>
+     ${notes ? `<div style="margin-top:10px"><strong>Nə dəyişib</strong></div>
+       <div style="max-height:240px;overflow:auto;margin-top:4px">${notesHtml(notes)}</div>` : ''}
      <div class="h" style="margin-top:8px">Müştəri qovluqları
       (<code>clients/</code>), normalar (<code>rates.tsv</code> və s.) və
       bəkaplar toxunulmaz qalır — yalnız proqramın öz faylları yenilənir.</div>`,
@@ -133,12 +158,17 @@ function showVerifyOk(u){
   box.style.cssText =
     'display:block;background:#eef3f9;border:1px solid #8fa8c8;' +
     'color:#2c4a70;padding:10px 16px;border-radius:var(--radius);margin-bottom:12px';
+  // What the update brought, listed per version: an update can skip
+  // releases, and each of them added something the accountant has not seen.
+  const notes = (u.notes || []).map(n =>
+    `<div style="margin-top:8px"><strong>Nə dəyişib — ${esc(n.version)}</strong></div>
+     ${notesHtml(n.text)}`).join('');
   box.innerHTML = `Yeniləmə yoxlanıldı (${esc(u.from_version)} →
     ${esc(u.to_version)}): bağlı illərin rəqəmləri öncəki nəticələrlə
     üst-üstə düşür.
     <button class="ghost" style="margin-left:10px"
       onclick="document.getElementById('updateProblem').style.display='none'"
-      >Bağla</button>`;
+      >Bağla</button>${notes}`;
 }
 
 function showVerifyProblem(u){

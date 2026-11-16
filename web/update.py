@@ -104,7 +104,50 @@ def check_latest(fetch: Callable[[str], dict] = _http_get_json) -> dict:
         "available": version_tuple(tag) > version_tuple(ENGINE_VERSION),
         "url": rel.get("html_url", _RELEASES_URL),
         "zip_url": zip_url,
+        # What the release says about itself, shown in the update window
+        # BEFORE the click. Capped: it is text from the network going into a
+        # modal, and a release body has no upper bound of its own.
+        "notes": str(rel.get("body") or "")[:_NOTES_MAX],
     }
+
+
+_NOTES_MAX = 4000
+NOTES_FILE = "YENILIKLER.md"
+
+
+def release_notes(root: Path, after: str, upto: str = ENGINE_VERSION) -> list[dict]:
+    """What changed in the versions after `after`, up to and including `upto`.
+
+    Read from YENILIKLER.md, which ships WITH the code, and not from GitHub:
+    this runs right after an update, at startup, where the network may be
+    absent -- and an update that skipped releases (0.16.2 -> 0.17.1) should
+    list every one of them, while GitHub's "latest" only knows the last.
+
+    It also cannot ride in pending_verify.json: that marker is written by the
+    OLD process, which knows nothing the new version wants to say.
+
+    Newest first, as the file is written. Never raises -- a courtesy, the
+    same reasoning as check_latest: a missing or mangled notes file must not
+    stand between the accountant and the program.
+    """
+    try:
+        lo, hi = version_tuple(after), version_tuple(upto)
+        out: list[dict] = []
+        current = None
+        for line in (root / NOTES_FILE).read_text(encoding="utf-8-sig").splitlines():
+            if line.startswith("## "):
+                version = line[3:].strip().lstrip("vV")
+                current = None
+                if lo < version_tuple(version) <= hi:
+                    current = {"version": version, "text": ""}
+                    out.append(current)
+            elif current is not None:
+                current["text"] += line + "\n"
+        for sec in out:
+            sec["text"] = sec["text"].strip()[:_NOTES_MAX]
+        return [s for s in out if s["text"]]
+    except Exception:
+        return []
 
 
 def download(zip_url: str, fetch: Callable[[str], bytes] = _http_get_bytes) -> bytes:

@@ -23,8 +23,8 @@ from pathlib import Path
 
 from engine.rates import ENGINE_VERSION, version_tuple
 from web.update import (
-    PRESERVE, apply_update, check_latest, clear_pending_verify,
-    read_pending_verify, remove_obsolete, rollback_update,
+    NOTES_FILE, PRESERVE, apply_update, check_latest, clear_pending_verify,
+    read_pending_verify, release_notes, remove_obsolete, rollback_update,
 )
 
 
@@ -76,6 +76,60 @@ class CheckLatest(unittest.TestCase):
     def test_a_malformed_response_also_degrades_quietly(self):
         r = check_latest(lambda url: {"unexpected": "shape"})
         self.assertFalse(r["available"])
+
+
+class ReleaseNotes(unittest.TestCase):
+    """What an update brought: the release body before the click, and
+    YENILIKLER.md after the restart."""
+
+    ROOT = Path(__file__).resolve().parent.parent
+
+    def test_the_release_body_rides_along_with_the_check(self):
+        major, _, _ = version_tuple(ENGINE_VERSION)
+        fetch = lambda url: {"tag_name": f"v{major + 1}.0.0",
+                             "zipball_url": "https://example/zip",
+                             "body": "- yeni vərəq"}
+        self.assertEqual(check_latest(fetch)["notes"], "- yeni vərəq")
+
+    def test_a_release_without_a_body_gives_empty_notes(self):
+        fetch = lambda url: {"tag_name": "v99.0.0",
+                             "zipball_url": "https://example/zip", "body": None}
+        self.assertEqual(check_latest(fetch)["notes"], "")
+
+    def test_only_versions_after_the_old_one_are_listed(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / NOTES_FILE).write_text(
+                "# Yeniliklər\n\nbaşlıq mətni\n\n"
+                "## 0.3.0\n\n- üç\n\n## 0.2.0\n\n- iki\n\n## 0.1.0\n\n- bir\n",
+                encoding="utf-8")
+            # An update that skipped a release lists both; the version the
+            # accountant already had, and one not yet reached, are left out.
+            got = release_notes(root, "0.1.0", "0.3.0")
+            self.assertEqual([n["version"] for n in got], ["0.3.0", "0.2.0"])
+            self.assertEqual(got[1]["text"], "- iki")
+            self.assertEqual(
+                [n["version"] for n in release_notes(root, "0.1.0", "0.2.0")],
+                ["0.2.0"])
+
+    def test_a_missing_notes_file_is_quiet(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.assertEqual(release_notes(Path(d), "0.1.0", "9.0.0"), [])
+
+    def test_the_shipped_file_describes_this_version(self):
+        """A sentry for the release checklist (§9.3): a version shipped
+        without its section would update silently, which is exactly what the
+        file exists to prevent. Fix by writing the section, not by relaxing
+        this."""
+        major, minor, patch = version_tuple(ENGINE_VERSION)
+        got = release_notes(self.ROOT, "0.0.0", ENGINE_VERSION)
+        self.assertTrue(got, f"{NOTES_FILE} oxunmur")
+        self.assertEqual(got[0]["version"], ENGINE_VERSION,
+                         f"{NOTES_FILE}-də {ENGINE_VERSION} bölməsi yoxdur")
+
+    def test_the_notes_file_survives_an_update(self):
+        """It must arrive WITH the new code, so it may not be preserved."""
+        self.assertNotIn(NOTES_FILE, PRESERVE)
 
 
 def _github_zip(top: str, files: dict[str, str]) -> bytes:

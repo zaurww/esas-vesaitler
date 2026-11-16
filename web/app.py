@@ -36,7 +36,7 @@ from engine.storage import DataError, client_folder, list_clients, load_client  
 from web import offsite  # noqa: E402
 from web.update import (  # noqa: E402
     apply_update, check_latest, clear_pending_verify, download,
-    read_pending_verify, remove_obsolete, rollback_update,
+    read_pending_verify, release_notes, remove_obsolete, rollback_update,
 )
 
 INDEX = Path(__file__).resolve().parent / "index.html"
@@ -186,7 +186,10 @@ def _run_startup_verify(root: Path) -> dict | None:
               f"{pending['to_version']}): bağlı illər uyğundur")
         clear_pending_verify(root)
         return {"ok": True, "from_version": pending["from_version"],
-                "to_version": pending["to_version"]}
+                "to_version": pending["to_version"],
+                # Shown once, with the "checked" line: what the update the
+                # accountant just installed actually brought.
+                "notes": release_notes(root, pending["from_version"])}
     total = sum(len(v) for v in bad.values())
     print(f"  ⚠ yeniləmədən sonra {total} uyğunsuzluq tapıldı "
           f"({pending['from_version']} → {pending['to_version']}) -- bax UI-də")
