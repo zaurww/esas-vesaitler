@@ -351,18 +351,7 @@ def _sheet_movement(wb: Workbook, r: YearResult) -> None:
                     "İl əvvəlinə", "İl sonuna"])
 
     def block(label, cards, bold=False):
-        g_s = sum((c.gross_start for c in cards), Decimal(0))
-        g_i = sum((c.gross_in for c in cards), Decimal(0))
-        g_o = sum((c.gross_out for c in cards), Decimal(0))
-        a_s = sum((c.accumulated_start for c in cards), Decimal(0))
-        a_c = sum((c.depreciation for c in cards), Decimal(0))
-        a_w = sum((c.writeoff for c in cards), Decimal(0))
-        a_o = sum((c.accumulated_out for c in cards), Decimal(0))
-        o = sum((c.opening for c in cards), Decimal(0))
-        cl = sum((c.closing for c in cards), Decimal(0))
-        return [label, _f(g_s), _f(g_i), _f(g_o), _f(g_s + g_i - g_o),
-                _f(a_s), _f(a_c), _f(a_w), _f(a_o), _f(a_s + a_c + a_w - a_o),
-                _f(o), _f(cl)], bold
+        return [label] + _movement_figures(cards), bold
 
     row = 6
     rows = [block(cat.name_az, cat.cards) for cat in r.categories]
@@ -378,6 +367,80 @@ def _sheet_movement(wb: Workbook, r: YearResult) -> None:
         row += 1
     ws.freeze_panes = "B6"
     _widths(ws, [30] + [15] * 11)
+
+
+def _movement_figures(cards) -> list:
+    """The eleven figures of a movement row, summed over `cards`.
+
+    Named once because two sheets print them -- by category and by card --
+    and their totals have to be the same number.
+    """
+    def s(attr):
+        return sum((getattr(c, attr) for c in cards), Decimal(0))
+    g_s, g_i, g_o = s("gross_start"), s("gross_in"), s("gross_out")
+    a_s, a_c, a_w, a_o = (s("accumulated_start"), s("depreciation"),
+                          s("writeoff"), s("accumulated_out"))
+    return [_f(g_s), _f(g_i), _f(g_o), _f(g_s + g_i - g_o),
+            _f(a_s), _f(a_c), _f(a_w), _f(a_o), _f(a_s + a_c + a_w - a_o),
+            _f(s("opening")), _f(s("closing"))]
+
+
+def _sheet_movement_detail(wb: Workbook, r: YearResult) -> None:
+    """The movement statement again, one row per card.
+
+    «Kartlar» carries the tax pipeline (residual, rate, charge); this carries
+    the accountant's shape -- cost against accumulated depreciation -- for
+    each asset. A summary by name was tried first and was not what was
+    wanted: the owner asked for the card itself. Flat with the category as a
+    column, so it filters like «Kartlar».
+    """
+    ws = wb.create_sheet("Hərəkət (detallı)")
+    ws["A1"] = f"Əsas vəsaitlərin hərəkəti, ƏV üzrə — {r.year}"
+    ws["A1"].font = Font(bold=True, size=12)
+    ws["A2"] = ("İlkin dəyər − yığılmış amortizasiya = qalıq dəyər. "
+                "İlkin dəyəri məlum olmayan ƏV üçün başlanğıc qalıq dəyər "
+                "ilkin dəyər kimi götürülür.")
+    ws["A2"].font = Font(size=9, color="5A6B80")
+
+    ws.merge_cells("D4:G4"); ws["D4"] = "İLKİN DƏYƏR"
+    ws.merge_cells("H4:L4"); ws["H4"] = "YIĞILMIŞ AMORTİZASİYA"
+    ws.merge_cells("M4:N4"); ws["M4"] = "QALIQ DƏYƏR"
+    for ref in ("D4", "H4", "M4"):
+        ws[ref].font = Font(bold=True, size=10, color="1F3A5F")
+        ws[ref].alignment = Alignment(horizontal="center")
+        ws[ref].fill = SUB_FILL
+
+    _header(ws, 5, ["Kateqoriya", "İnventar №", "Adı",
+                    "İl əvvəlinə", "Daxilolma", "Xaricetmə", "İl sonuna",
+                    "İl əvvəlinə", "Hesablanmış", "Silinmə (500/5%)",
+                    "Xaricetmə", "İl sonuna",
+                    "İl əvvəlinə", "İl sonuna"])
+    row = 6
+    for cat in r.categories:
+        for card in cat.cards:
+            figures = _movement_figures([card])
+            # Nothing moved and nothing is left: the asset left the balance
+            # in an earlier year. «Kartlar» keeps those rows.
+            if not any(figures):
+                continue
+            name = card.name + (" (qrup qalığı)" if card.is_legacy_pool else "")
+            for i, v in enumerate([cat.name_az, card.inv_no, name] + figures,
+                                  start=1):
+                cell = ws.cell(row, i, v)
+                cell.border = BORDER
+                if i > 3:
+                    cell.number_format = MONEY
+            row += 1
+    ws.auto_filter.ref = f"A5:N{max(row - 1, 5)}"
+    # The total sits below the filter range, so sorting leaves it in place.
+    for i, v in enumerate(["C Ə M İ", None, None] + _movement_figures(r.cards),
+                          start=1):
+        cell = ws.cell(row, i, v)
+        cell.border, cell.fill, cell.font = BORDER, TOTAL_FILL, Font(bold=True)
+        if i > 3:
+            cell.number_format = MONEY
+    ws.freeze_panes = "D6"
+    _widths(ws, [26, 13, 34] + [15] * 11)
 
 
 def _sheet_monthly(wb: Workbook, r: YearResult) -> None:
@@ -502,6 +565,7 @@ def build_workbook(r: YearResult, meta: dict | None = None) -> bytes:
     _sheet_summary(wb, r)
     _sheet_cards(wb, r, meta)
     _sheet_movement(wb, r)
+    _sheet_movement_detail(wb, r)
     _sheet_monthly(wb, r)
     _sheet_repair(wb, r)
     _sheet_notes(wb, r)

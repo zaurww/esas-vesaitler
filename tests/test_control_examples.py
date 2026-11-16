@@ -98,6 +98,25 @@ class DemoAvto(EngineTest):
         self.assertGreater(len(blob), 5000)
         self.assertEqual(blob[:2], b"PK")
 
+    def test_movement_by_card_totals_match_movement_by_category(self):
+        """Two cuts of one statement: the rows by card must add up to the
+        total row, and that total must be the one on «Hərəkət»."""
+        import io
+        from openpyxl import load_workbook
+        from engine.excel import build_workbook
+        wb = load_workbook(io.BytesIO(build_workbook(
+            compute_year(self.data, 2025), self.data.card_meta())))
+        by_cat = [r for r in wb["Hərəkət"].iter_rows(min_row=6, values_only=True)
+                  if r[0] == "C Ə M İ"][0]
+        rows = list(wb["Hərəkət (detallı)"].iter_rows(min_row=6, values_only=True))
+        total = [r for r in rows if r[0] == "C Ə M İ"][0]
+        body = [r for r in rows if r[0] and r[0] != "C Ə M İ"]
+        self.assertTrue(body)
+        for i in range(11):
+            self.assertAlmostEqual(total[3 + i], by_cat[1 + i], places=2)
+            self.assertAlmostEqual(sum(r[3 + i] for r in body), total[3 + i],
+                                   places=2)
+
     def test_rates_used_are_reported_alongside_the_figures(self):
         """§5.1: the report must be able to say where a rate came from."""
         r = compute_year(self.data, 2025)
