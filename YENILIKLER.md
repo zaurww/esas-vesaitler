@@ -5,6 +5,13 @@ siyahısını buradan göstərir. Hər buraxılış üçün `## <versiya>` başl
 altında qısa siyahı yazılır — ən yenisi yuxarıda. GitHub Release-in mətni də
 eyni bölmədən götürülür.
 
+## 0.17.2
+
+Rəqəmlər dəyişmir.
+
+- Yeniləmədən sonra çıxan «Nə dəyişib» bildirişinin sağ yuxarı küncündə ✕ var.
+- ✕ basıldıqdan sonra bildiriş bir daha göstərilmir.
+
 ## 0.17.1
 
 Rəqəmlər dəyişmir.

@@ -14,7 +14,7 @@ from typing import Dict, List, NamedTuple
 
 D = Decimal
 
-ENGINE_VERSION = "0.17.1"
+ENGINE_VERSION = "0.17.2"
 FORMAT_VERSION = 1
 
 # Date this table was last checked against the code. Printed on the norms

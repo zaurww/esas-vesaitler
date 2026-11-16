@@ -82,6 +82,27 @@ class ForeignRequests(unittest.TestCase):
                              {"Content-Type": "text/plain"}, "{}")
         self.assertEqual(status, 403)
 
+    def test_closing_the_update_notice_is_remembered(self):
+        """«Bağla» hid the notice in one tab and it came back on every page
+        load until the program was restarted. A clean result is dropped; a
+        mismatch is not a notice and stays until it is rolled back."""
+        from web import app
+        saved = app._startup_verify
+        J = {"Content-Type": "application/json"}
+        try:
+            app._startup_verify = {"ok": True, "from_version": "0.1.0",
+                                   "to_version": "0.2.0", "notes": []}
+            self.assertEqual(self.req("POST", "/api/update-dismiss", J, "{}")[0], 200)
+            self.assertEqual(json.loads(self.req("GET", "/api/update-status")[1]), {})
+
+            app._startup_verify = {"ok": False, "mismatches": {},
+                                   "from_version": "0.1.0", "to_version": "0.2.0"}
+            self.req("POST", "/api/update-dismiss", J, "{}")
+            self.assertFalse(
+                json.loads(self.req("GET", "/api/update-status")[1])["ok"])
+        finally:
+            app._startup_verify = saved
+
     def test_page_itself_still_loads(self):
         status, _ = self.req("GET", "/")
         self.assertEqual(status, 200)

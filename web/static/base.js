@@ -163,12 +163,25 @@ function showVerifyOk(u){
   const notes = (u.notes || []).map(n =>
     `<div style="margin-top:8px"><strong>Nə dəyişib — ${esc(n.version)}</strong></div>
      ${notesHtml(n.text)}`).join('');
-  box.innerHTML = `Yeniləmə yoxlanıldı (${esc(u.from_version)} →
+  // The ✕ sits in the corner, where a notice is expected to be closed: the
+  // «Bağla» button used to follow the first sentence and was not seen as
+  // closing the whole box once the notes made it tall.
+  box.style.position = 'relative';
+  box.innerHTML = `<button class="ghost" title="Bağla" aria-label="Bağla"
+      style="position:absolute;top:8px;right:10px;font-size:16px;line-height:1;padding:4px 9px"
+      onclick="dismissVerifyOk()">✕</button>
+    <div style="padding-right:44px">Yeniləmə yoxlanıldı (${esc(u.from_version)} →
     ${esc(u.to_version)}): bağlı illərin rəqəmləri öncəki nəticələrlə
-    üst-üstə düşür.
-    <button class="ghost" style="margin-left:10px"
-      onclick="document.getElementById('updateProblem').style.display='none'"
-      >Bağla</button>${notes}`;
+    üst-üstə düşür.</div>${notes}`;
+}
+
+/* Closing is remembered by the server, not by the tab: the notice is about
+   the installation, and it used to return on every page load until the
+   program itself was restarted. Hidden first, told second -- a failed
+   request must not leave the box on screen. */
+function dismissVerifyOk(){
+  document.getElementById('updateProblem').style.display = 'none';
+  postJSON('/api/update-dismiss').catch(() => {});
 }
 
 function showVerifyProblem(u){

@@ -986,6 +986,19 @@ class Handler(BaseHTTPRequestHandler):
                 global _startup_verify
                 _startup_verify = None
                 return self._json({"ok": True, "message": message})
+            if url.path == "/api/update-dismiss":
+                # «Bağla» on the "update checked" notice. Without this the
+                # notice came back on every page load until the program was
+                # restarted: closing it only hid it in that one tab. Only a
+                # CLEAN result can be dismissed -- a mismatch stays until it
+                # is rolled back, it is not a notice (§9.2).
+                # The body is read even though nothing in it is used: on
+                # Windows, answering with it still unread resets the
+                # connection instead of delivering the reply.
+                self.rfile.read(int(self.headers.get("Content-Length", "0")))
+                if _startup_verify and _startup_verify.get("ok"):
+                    _startup_verify = None
+                return self._json({"ok": True})
             if url.path == "/api/offsite":
                 length = int(self.headers.get("Content-Length", "0"))
                 body = json.loads(self.rfile.read(length) or b"{}")
